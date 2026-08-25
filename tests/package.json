@@ -1,0 +1,13 @@
+{
+  "name": "@arbiter/tests",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@arbiter/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@libsql/client": "^0.15.15",
+    "vitest": "^3.2.0"
+  }
+}
