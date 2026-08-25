@@ -21,6 +21,22 @@ importers:
         specifier: ^3.2.0
         version: 3.2.7(@types/node@24.13.3)(tsx@4.23.12)
 
+  packages/shared:
+    devDependencies:
+      typescript:
+        specifier: ^5.9.0
+        version: 5.9.3
+
+  tests:
+    dependencies:
+      '@arbiter/shared':
+        specifier: workspace:*
+        version: link:../packages/shared
+    devDependencies:
+      vitest:
+        specifier: ^3.2.0
+        version: 3.2.7(@types/node@24.13.3)(tsx@4.23.12)
+
 packages:
 
   '@esbuild/aix-ppc64@0.28.2':
