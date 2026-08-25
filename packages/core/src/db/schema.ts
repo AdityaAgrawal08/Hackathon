@@ -40,6 +40,10 @@ export const customers = sqliteTable(
     emailFake: text("email_fake").notNull(),
     /** Histogram JSON of successful debit day-of-month (payday inference input) */
     paydayPatternJson: text("payday_pattern_json").notNull().default("{}"),
+    /** Generator ground-truth salary day (eval target for inference, TRAINING seeds) */
+    paydayTrueDay: integer("payday_true_day"),
+    /** Successful debits preceding first failure — diagnosis context depth */
+    priorSuccessCount: integer("prior_success_count").notNull().default(0),
     channelResponsiveness: real("channel_responsiveness").notNull().default(0.5),
     optedOut: integer("opted_out", { mode: "boolean" }).notNull().default(false),
     joinedAtUtc: text("joined_at_utc").notNull(),

@@ -1,0 +1,22 @@
+{
+  "name": "@arbiter/seed",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./taxonomy": "./src/taxonomy.ts",
+    "./generate": "./src/generate.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "generate": "tsx src/main.ts --corpus all"
+  },
+  "dependencies": {
+    "@arbiter/shared": "workspace:*",
+    "@arbiter/core": "workspace:*"
+  },
+  "devDependencies": {
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0"
+  }
+}

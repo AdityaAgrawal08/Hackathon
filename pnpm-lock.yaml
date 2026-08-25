@@ -43,6 +43,22 @@ importers:
         specifier: ^5.9.0
         version: 5.9.3
 
+  packages/seed:
+    dependencies:
+      '@arbiter/core':
+        specifier: workspace:*
+        version: link:../core
+      '@arbiter/shared':
+        specifier: workspace:*
+        version: link:../shared
+    devDependencies:
+      tsx:
+        specifier: ^4.20.0
+        version: 4.23.12
+      typescript:
+        specifier: ^5.9.0
+        version: 5.9.3
+
   packages/shared:
     devDependencies:
       typescript:

@@ -1,0 +1,30 @@
+[
+  {
+    "name": "training",
+    "customerCount": 1200,
+    "eventCount": 5000,
+    "classCounts": {
+      "SOFT_RETRYABLE": 2207,
+      "HARD_METHOD_DEAD": 1293,
+      "NETWORK_TIMEOUT": 715,
+      "RISK_FLAGGED": 518,
+      "UNKNOWN": 267
+    },
+    "sha256": "e38b1059fd9e9e35deff89ac3be4c1a283cf90faed12d1f4d8722a6b85168c78",
+    "seedLabel": "arbiter/corpus/training/v1"
+  },
+  {
+    "name": "demo",
+    "customerCount": 60,
+    "eventCount": 230,
+    "classCounts": {
+      "SOFT_RETRYABLE": 103,
+      "HARD_METHOD_DEAD": 56,
+      "NETWORK_TIMEOUT": 39,
+      "RISK_FLAGGED": 22,
+      "UNKNOWN": 10
+    },
+    "sha256": "5ddeb2dfae754793f30481305f131f5a262263b0868b3b33cc8f7c5bca6d683d",
+    "seedLabel": "arbiter/corpus/demo/v1"
+  }
+]
