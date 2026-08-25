@@ -7,6 +7,7 @@
     "@arbiter/shared": "workspace:*"
   },
   "devDependencies": {
+    "@libsql/client": "^0.15.15",
     "vitest": "^3.2.0"
   }
 }
