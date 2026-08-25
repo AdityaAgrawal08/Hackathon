@@ -14,7 +14,8 @@
     "./registry": "./src/registry.ts",
     "./dataset": "./src/dataset.ts",
     "./train": "./src/train.ts",
-    "./narrative": "./src/narrative.ts"
+    "./narrative": "./src/narrative.ts",
+    "./pipeline": "./src/pipeline.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
