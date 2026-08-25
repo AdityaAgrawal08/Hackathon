@@ -1,0 +1,33 @@
+{
+  "name": "@arbiter/ml",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./features": "./src/features.ts",
+    "./features_store": "./src/features_store.ts",
+    "./labels": "./src/labels.ts",
+    "./logreg": "./src/logreg.ts",
+    "./metrics": "./src/metrics.ts",
+    "./artifact": "./src/artifact.ts",
+    "./predict": "./src/predict.ts",
+    "./registry": "./src/registry.ts",
+    "./dataset": "./src/dataset.ts",
+    "./train": "./src/train.ts",
+    "./narrative": "./src/narrative.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "train": "tsx src/main.ts"
+  },
+  "dependencies": {
+    "@arbiter/shared": "workspace:*",
+    "@libsql/client": "^0.15.15",
+    "@arbiter/core": "workspace:*",
+    "@arbiter/seed": "workspace:*"
+  },
+  "devDependencies": {
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0"
+  }
+}

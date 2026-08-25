@@ -43,6 +43,28 @@ importers:
         specifier: ^5.9.0
         version: 5.9.3
 
+  packages/ml:
+    dependencies:
+      '@arbiter/core':
+        specifier: workspace:*
+        version: link:../core
+      '@arbiter/seed':
+        specifier: workspace:*
+        version: link:../seed
+      '@arbiter/shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@libsql/client':
+        specifier: ^0.15.15
+        version: 0.15.15
+    devDependencies:
+      tsx:
+        specifier: ^4.20.0
+        version: 4.23.12
+      typescript:
+        specifier: ^5.9.0
+        version: 5.9.3
+
   packages/seed:
     dependencies:
       '@arbiter/core':

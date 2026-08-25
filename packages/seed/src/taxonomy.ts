@@ -33,63 +33,14 @@ export const CODES_BY_CLASS: Record<FailureClass, readonly string[]> = {
   UNKNOWN: ["UNKNOWN_CODE"],
 };
 
-/** Interventions the DECIDE engine may choose from (catalog order = tie-break). */
-export const ACTIONS = [
-  "RETRY_NOW",
-  "RETRY_PAYDAY",
-  "ALTERNATE_UPI_LINK",
-  "REMINDER_LINK",
-  "HUMAN_REVIEW",
-  "NO_ACTION",
-] as const;
-
-export type ActionId = (typeof ACTIONS)[number];
-
 /**
- * Action-conditioned recovery multipliers applied to the base model score.
- * Documented assumptions, not measurements — cited in metrics-methodology.md.
- * A multiplier of 0 means the action can NEVER recover that class
- * (blind retry of a dead method) — the fact that powers the whole pitch.
+ * Intervention catalog + action-conditioned multipliers now live in the
+ * decision engine (@arbiter/core/decide) — canonical single source.
+ * Re-exported here for generator-side compatibility.
  */
-export const ACTION_MULTIPLIERS: Record<FailureClass, Record<ActionId, number>> = {
-  SOFT_RETRYABLE: {
-    RETRY_NOW: 0.6,
-    RETRY_PAYDAY: 1.4,
-    ALTERNATE_UPI_LINK: 0.5,
-    REMINDER_LINK: 0.7,
-    HUMAN_REVIEW: 0.3,
-    NO_ACTION: 0.02,
-  },
-  HARD_METHOD_DEAD: {
-    RETRY_NOW: 0.0,
-    RETRY_PAYDAY: 0.0,
-    ALTERNATE_UPI_LINK: 1.0,
-    REMINDER_LINK: 0.6,
-    HUMAN_REVIEW: 0.1,
-    NO_ACTION: 0.0,
-  },
-  NETWORK_TIMEOUT: {
-    RETRY_NOW: 1.5,
-    RETRY_PAYDAY: 0.4,
-    ALTERNATE_UPI_LINK: 0.3,
-    REMINDER_LINK: 0.2,
-    HUMAN_REVIEW: 0.05,
-    NO_ACTION: 0.05,
-  },
-  RISK_FLAGGED: {
-    RETRY_NOW: 0.0,
-    RETRY_PAYDAY: 0.0,
-    ALTERNATE_UPI_LINK: 0.0,
-    REMINDER_LINK: 0.0,
-    HUMAN_REVIEW: 1.0,
-    NO_ACTION: 0.0,
-  },
-  UNKNOWN: {
-    RETRY_NOW: 0.1,
-    RETRY_PAYDAY: 0.1,
-    ALTERNATE_UPI_LINK: 0.1,
-    REMINDER_LINK: 0.1,
-    HUMAN_REVIEW: 1.0,
-    NO_ACTION: 0.0,
-  },
-};
+export {
+  ACTIONS,
+  DEFAULT_ACTION_MULTIPLIERS as ACTION_MULTIPLIERS,
+  type ActionId,
+} from "@arbiter/core/decide";
+
