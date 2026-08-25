@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Secrets — never commit real keys (P0-B4)
+.env
+.env.*
+!.env.example
+
+# Build artifacts
+dist/
+build/
+.next/
+out/
+*.tsbuildinfo
+
+# Databases — demo state, never history
+*.sqlite
+*.sqlite3
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+data/
+
+# Logs & OS noise
+logs/
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+
+# Test/coverage
+coverage/
+.vitest-cache/
+
+# Editor
+.idea/
+.vscode/*
+!.vscode/extensions.json
