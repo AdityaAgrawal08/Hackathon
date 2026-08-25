@@ -1,0 +1,9 @@
+packages:
+  - "app"
+  - "packages/*"
+  - "tests"
+
+# Native/compile steps allowed for these deps (pnpm 11 deny-by-default)
+allowBuilds:
+  esbuild: true
+  better-sqlite3: true
