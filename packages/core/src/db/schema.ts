@@ -60,9 +60,13 @@ export const paymentEvents = sqliteTable(
     tenantId: text("tenant_id")
       .notNull()
       .references(() => tenants.id),
-    customerId: text("customer_id")
-      .notNull()
-      .references(() => customers.id),
+    /**
+     * NULL = not yet enriched (webhook arrived, merchant identity unresolved).
+     * Enrichment (pipeline entry) backfills it. SQLite partial indexes treat
+     * NULLs as distinct, so the one-open-proposal rule applies only to
+     * resolved customers — exactly the intended semantics.
+     */
+    customerId: text("customer_id").references(() => customers.id),
     rzpPaymentId: text("rzp_payment_id"),
     subscriptionId: text("subscription_id"),
     amountPaise: integer("amount_paise").notNull(),
