@@ -2,3 +2,4 @@
 export * from "./catalog.js";
 export * from "./policy.js";
 export * from "./engine.js";
+export * from "./window.js";

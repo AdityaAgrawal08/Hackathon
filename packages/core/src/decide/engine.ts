@@ -1,15 +1,3 @@
-/**
- * Decision engine scaffold (P3) — argmax expected-value under constraints.
- *
- * Contracts enforced here (tested, not assumed):
- *  - TOTALITY: decide() never throws and never returns an empty slate —
- *    a fully-constrained customer yields a mandatory NO_ACTION proposal
- *    carrying the complete refusal rule set (bugs P3-B3/P3-B4).
- *  - MONEY: all EV math is integer paise via basis points; EV of any action
- *    can never exceed amount_paise (invariant I-5, bug P3-B1).
- *  - DETERMINISM: ranking is EV-desc with catalog-index tie-break; identical
- *    inputs ⇒ identical ranking forever (bug P3-B2).
- */
 import {
   ACTIONS,
   CONTACT_COST_PAISE,
@@ -20,10 +8,10 @@ import {
   type Multipliers,
 } from "./catalog.js";
 import { evaluateConstraints, type PolicyPack, type RuleId } from "./policy.js";
+import { nextPaydayWindowMs } from "./window.js";
 import { formatINR, paise, percentBp } from "@arbiter/shared";
 
 export interface DecideInput {
-  /** Calibrated P(recovery) from the incumbent model (ml package). */
   probability: number;
   failureClass: FailureClassId;
   amountPaise: number;
@@ -33,15 +21,15 @@ export interface DecideInput {
   lastContactAtMs?: number | null;
   customerOptedOut?: boolean;
   multipliers?: Multipliers;
+  inferredPaydayDay?: number | null;
 }
 
 export interface RankedAction {
   action: ActionId;
-  /** Expected value in integer paise: round(P×mult × amount) − contact cost. */
   evPaise: number;
-  /** Adjusted probability in basis points (probability × multiplier). */
   adjustedProbabilityBp: number;
   multiplierUsed: number;
+  scheduledForMs: number | null;
 }
 
 export interface RefusalRecord {
@@ -50,26 +38,32 @@ export interface RefusalRecord {
 }
 
 export interface DecideOutput {
-  /** Feasible actions, EV-descending, catalog-order tie-break. Never empty. */
   ranked: RankedAction[];
-  /** ranked[0] — always present; NO_ACTION is universally feasible. */
   chosen: RankedAction;
-  /** Infeasible actions with EVERY matched rule — ledger REFUSAL material. */
   refusals: RefusalRecord[];
+  fallbackReason: string | null;
 }
 
 function clamp01(x: number): number {
   return Math.min(1, Math.max(0, x));
 }
 
-/** Integer-only expected value. Returns null when the action is not feasible. */
+function scheduleFor(action: ActionId, input: DecideInput): number | null {
+  if (action === "RETRY_NOW") return input.nowMs;
+  if (action === "RETRY_PAYDAY") {
+    const day = input.inferredPaydayDay;
+    return day !== null && day !== undefined ? nextPaydayWindowMs(day, input.nowMs) : null;
+  }
+  return null;
+}
+
 function evaluateAction(
   input: DecideInput,
   action: ActionId,
 ): { ev: RankedAction; violations: RuleId[] } {
   const mult = multiplierFor(input.failureClass, action, input.multipliers);
   const pBp = Math.round(clamp01(input.probability * mult) * 10_000);
-  const amount = paise(input.amountPaise); // throws on non-integer — fail closed
+  const amount = paise(input.amountPaise);
 
   const ctx = {
     failureClass: input.failureClass,
@@ -80,24 +74,23 @@ function evaluateAction(
     lastContactAtMs: input.lastContactAtMs ?? null,
     customerOptedOut: input.customerOptedOut ?? false,
     isContactAction: isContactAction(action),
+    paydayKnown:
+      action !== "RETRY_PAYDAY" ||
+      (input.inferredPaydayDay !== null && input.inferredPaydayDay !== undefined),
   };
   const violations = evaluateConstraints(input.policy, ctx);
 
-  // Gross expected recovery via integer bp math, minus explicit cost.
   const gross = percentBp(amount, pBp);
-  const ev = {
+  const ev: RankedAction = {
     action,
     evPaise: gross - CONTACT_COST_PAISE[action],
     adjustedProbabilityBp: pBp,
     multiplierUsed: mult,
+    scheduledForMs: violations.length === 0 ? scheduleFor(action, input) : null,
   };
   return { ev, violations };
 }
 
-/**
- * Rank all catalog actions. Total function: never throws on constrained
- * customers; NO_ACTION (EV baseline 0) is always feasible.
- */
 export function decide(input: DecideInput): DecideOutput {
   if (!Number.isFinite(input.probability)) throw new Error("decide: non-finite probability");
   if (!Number.isInteger(input.amountPaise) || input.amountPaise <= 0) {
@@ -106,33 +99,31 @@ export function decide(input: DecideInput): DecideOutput {
   if (!Number.isFinite(input.nowMs)) throw new Error("decide: non-finite clock");
 
   const evaluated = ACTIONS.map((a) => evaluateAction(input, a));
-  const rankedAll = evaluated.map((e) => e.ev);
 
-  // Stable comparator: EV desc, then catalog index asc (P3-B2).
   const order = new Map<ActionId, number>(ACTIONS.map((a, i) => [a, i]));
   const feasible = evaluated
     .filter((e) => e.violations.length === 0)
     .map((e) => e.ev)
-    .sort(
-      (a, b) =>
-        b.evPaise - a.evPaise || (order.get(a.action)! - order.get(b.action)!),
-    );
+    .sort((a, b) => b.evPaise - a.evPaise || order.get(a.action)! - order.get(b.action)!);
 
   const refusals: RefusalRecord[] = evaluated
     .filter((e) => e.violations.length > 0)
     .map((e) => ({ action: e.ev.action, violatedRules: e.violations }));
 
   let ranked = feasible;
+  let fallbackReason: string | null = null;
   if (ranked.length === 0) {
-    // Mandatory fallback proposal — the engine NEVER returns an empty set.
-    const noAction = rankedAll.find((r) => r.action === "NO_ACTION")!;
-    ranked = [noAction];
+    const noAction = evaluated.find((e) => e.ev.action === "NO_ACTION")!;
+    ranked = [noAction.ev];
+    fallbackReason = `ALL_ACTIONS_CONSTRAINED: ${refusals
+      .flatMap((r) => r.violatedRules)
+      .filter((v, i, arr) => arr.indexOf(v) === i)
+      .join(",")}`;
   }
 
-  return { ranked, chosen: ranked[0]!, refusals };
+  return { ranked, chosen: ranked[0]!, refusals, fallbackReason };
 }
 
-/** Human-readable one-liner used by proposals/narratives (₹ formatting central). */
 export function describeChoice(chosen: RankedAction, amountPaise: number): string {
   const pct = (chosen.adjustedProbabilityBp / 100).toFixed(1);
   return `${chosen.action}: est. ${pct}% recovery on ${formatINR(paise(amountPaise))} (EV ₹${(chosen.evPaise / 100).toFixed(2)})`;

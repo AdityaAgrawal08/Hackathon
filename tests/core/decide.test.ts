@@ -29,6 +29,7 @@ function input(overrides: Partial<DecideInput> = {}): DecideInput {
     amountPaise: 49_900,
     nowMs: NOW,
     policy: defaultPolicy(),
+    inferredPaydayDay: 25,
     ...overrides,
   };
 }
@@ -117,13 +118,19 @@ describe("EV optimizer invariants", () => {
         customerOptedOut: true,
       }),
     );
-    // every contact action refused with OPTED_OUT (+ HUMAN_REVIEW_CLASS where applicable)
     const byAction = new Map(out.refusals.map((r) => [r.action, r.violatedRules]));
     expect(byAction.get("RETRY_PAYDAY")).toContain("OPTED_OUT");
     expect(byAction.get("HUMAN_REVIEW")).toContain("OPTED_OUT");
-    // slate is never empty
     expect(out.ranked.length).toBeGreaterThanOrEqual(1);
     expect(out.ranked.map((r) => r.action)).toContain("NO_ACTION");
+  });
+
+  it("fully-constrained slate ⇒ NO_ACTION fallback carries a reason string (P3-B4)", () => {
+    const out = decide(input({ failureClass: "RISK_FLAGGED", customerOptedOut: true }));
+    expect(out.chosen.action).toBe("NO_ACTION");
+    expect(out.fallbackReason).toMatch(/^ALL_ACTIONS_CONSTRAINED:/);
+    expect(out.fallbackReason).toContain("OPTED_OUT");
+    expect(out.chosen.scheduledForMs).toBeNull();
   });
 
   it("collects ALL matched rules per refusal, not just the first (P3-B3)", () => {
@@ -146,6 +153,15 @@ describe("golden cases (plan gate)", () => {
   it("soft failure near payday ⇒ RETRY_PAYDAY wins", () => {
     const out = decide(input({ probability: 0.45 }));
     expect(out.chosen.action).toBe("RETRY_PAYDAY");
+    expect(out.chosen.scheduledForMs).toBeGreaterThan(NOW);
+    expect(out.fallbackReason).toBeNull();
+  });
+
+  it("RETRY_PAYDAY without an inferred payday is refused, not guessed (I-7)", () => {
+    const out = decide(input({ probability: 0.45, inferredPaydayDay: null }));
+    const refused = out.refusals.find((r) => r.action === "RETRY_PAYDAY")!;
+    expect(refused.violatedRules).toContain("PAYDAY_UNKNOWN");
+    expect(out.chosen.action).not.toBe("RETRY_PAYDAY");
   });
 
   it("dead method ⇒ blind retries score below ALTERNATE_UPI_LINK", () => {
