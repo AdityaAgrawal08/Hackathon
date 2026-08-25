@@ -5,7 +5,8 @@
   "type": "module",
   "exports": {
     "./db": "./src/db/index.ts",
-    "./db/schema": "./src/db/schema.ts"
+    "./db/schema": "./src/db/schema.ts",
+    "./ingest": "./src/ingest/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
