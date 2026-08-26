@@ -1,15 +1,22 @@
 import type { Client } from "@libsql/client";
-import { isoUtc } from "@arbiter/shared";
+import { isoUtc, isWithinQuietHours } from "@arbiter/shared";
 import {
   decide,
   loadPolicyFile,
   resolvePolicyPath,
   type PolicyPack,
 } from "@arbiter/core/decide";
+import {
+  getTenantEnvelope,
+  writeEnvelopeAlarm,
+  evaluateEnvelope,
+  transition,
+} from "@arbiter/core/approval";
+import type { ActionId } from "@arbiter/core/decide";
 import { computeFeatures } from "./features.js";
-import { saveFeatures } from "./features_store.js";
+import { saveFeatures, loadFeatureVectors } from "./features_store.js";
 import { scoreWithArtifact } from "./predict.js";
-import { getIncumbent } from "./registry.js";
+import { getIncumbent, getModelById } from "./registry.js";
 import type { ModelArtifact } from "./artifact.js";
 
 export interface ProcessOptions {
@@ -144,6 +151,25 @@ export async function processEvent(
   });
 
   const chosen = decision.chosen;
+
+  const tenantEnv = await getTenantEnvelope(client, event.tenant_id);
+  if (tenantEnv.corrupted) {
+    await writeEnvelopeAlarm(client, event.tenant_id);
+  }
+  const quietViolated = isWithinQuietHours(
+    nowMs,
+    policy.quiet_hours.start_minute,
+    policy.quiet_hours.end_minute,
+  );
+  const envelopeVerdict = evaluateEnvelope(tenantEnv.envelope, {
+    failureClass: computed.raw.failureClass,
+    actionId: chosen.action,
+    attemptsSoFar: priorFailureCount,
+    amountPaise: event.amount_paise,
+    quietHoursViolated: quietViolated,
+  });
+  const initialState = envelopeVerdict.eligible ? "AUTO_APPROVED" : "AWAITING_APPROVAL";
+
   const dedupeKey = `${eventId}|${model.id}|${policy.policy_version}`;
   const proposalId = `prop_${eventId}_${model.weightsSha256.slice(0, 8)}`;
   const nowIso = isoUtc(nowMs);
@@ -167,7 +193,7 @@ export async function processEvent(
               (id, event_id, customer_id, model_version_id, policy_version, action_json,
                ev_paise, confidence, attributions_json, narrative, state, state_version,
                dedupe_key, created_at_utc, updated_at_utc)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'AWAITING_APPROVAL', 0, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, 0, ?, ?, ?)
             ON CONFLICT(dedupe_key) DO NOTHING`,
       args: [
         proposalId,
@@ -179,6 +205,7 @@ export async function processEvent(
         chosen.evPaise,
         score.probability,
         JSON.stringify(score.attributions),
+        initialState,
         dedupeKey,
         nowIso,
         nowIso,
@@ -211,6 +238,8 @@ export async function processEvent(
         chosenAction: chosen.action,
         evPaise: chosen.evPaise,
         scheduledForMs: chosen.scheduledForMs,
+        autoApproved: envelopeVerdict.eligible,
+        envelopeReasons: envelopeVerdict.reasons,
         refusals: decision.refusals,
         fallbackReason: decision.fallbackReason,
       }),
@@ -259,4 +288,196 @@ export async function proposeForCorpus(
     else if (r.status === "SKIPPED_OPEN_PROPOSAL") summary.skippedOpenProposal++;
   }
   return summary;
+}
+
+export interface EditOutcome {
+  ok: boolean;
+  reason?:
+    | "UNKNOWN_PROPOSAL"
+    | "NOT_AWAITING_APPROVAL"
+    | "MISSING_FEATURES"
+    | "MODEL_VERSION_GONE"
+    | "POLICY_VERSION_MISMATCH"
+    | "ACTION_INFEASIBLE";
+  violatedRules?: string[];
+  newProposalId?: string;
+  newState?: string;
+}
+
+export async function editProposal(
+  client: Client,
+  proposalId: string,
+  actionId: ActionId,
+  opts: { actor: string; note?: string } = { actor: "merchant@demo" },
+): Promise<EditOutcome> {
+  const nowMs = Date.now();
+  const row = await client.execute({
+    sql: `SELECT p.*, e.tenant_id, e.amount_paise, e.failure_code, e.occurred_at_utc, e.source
+          FROM proposals p JOIN payment_events e ON e.id = p.event_id
+          WHERE p.id = ?`,
+    args: [proposalId],
+  });
+  if (row.rows.length === 0) return { ok: false, reason: "UNKNOWN_PROPOSAL" };
+  const prop = row.rows[0] as unknown as {
+    id: string;
+    event_id: string;
+    customer_id: string;
+    model_version_id: string;
+    policy_version: string;
+    state: string;
+  };
+  if (prop.state !== "AWAITING_APPROVAL") {
+    return { ok: false, reason: "NOT_AWAITING_APPROVAL" };
+  }
+
+  const vectors = await loadFeatureVectors(client, [prop.event_id]);
+  const frozenValues = vectors.get(prop.event_id);
+  if (!frozenValues) return { ok: false, reason: "MISSING_FEATURES" };
+
+  const model = await getModelById(client, prop.model_version_id);
+  if (!model) return { ok: false, reason: "MODEL_VERSION_GONE" };
+
+  const policy = loadPolicyFile(resolvePolicyPath());
+  if (policy.policy_version !== prop.policy_version) {
+    return { ok: false, reason: "POLICY_VERSION_MISMATCH" };
+  }
+
+  const amountPaise = Number(row.rows[0]!.amount_paise);
+  const occurredAtUtc = String(row.rows[0]!.occurred_at_utc);
+  const failureCode = String(row.rows[0]!.failure_code);
+  const ctxData = await resolveContext(client, {
+    id: prop.event_id,
+    tenant_id: "",
+    customer_id: prop.customer_id,
+    amount_paise: amountPaise,
+    failure_code: failureCode,
+    source: "",
+    occurred_at_utc: occurredAtUtc,
+  });
+
+  const recomputed = computeFeatures({
+    failureCode,
+    amountPaise,
+    occurredAtUtc,
+    priorFailureAmountsPaise: ctxData.priorAmountsPaise,
+    priorFailureCount: ctxData.priorFailureCount,
+    customer: {
+      paydayPattern: JSON.parse(ctxData.customer.payday_pattern_json) as Record<string, number>,
+      channelResponsiveness: ctxData.customer.channel_responsiveness,
+      priorSuccessCount: ctxData.customer.prior_success_count,
+      joinedAtUtc: ctxData.customer.joined_at_utc,
+    },
+  });
+  if (
+    recomputed.values.length !== frozenValues.length ||
+    recomputed.values.some((v, i) => v !== frozenValues[i])
+  ) {
+    return { ok: false, reason: "MISSING_FEATURES" };
+  }
+
+  const score = scoreWithArtifact(recomputed.values, model);
+
+  const decision = decide({
+    probability: score.probability,
+    failureClass: recomputed.raw.failureClass,
+    amountPaise,
+    nowMs,
+    policy,
+    attemptsSoFar: ctxData.priorFailureCount,
+    lastContactAtMs: null,
+    inferredPaydayDay: recomputed.raw.inferredPaydayDay,
+  });
+
+  const target = decision.ranked.find((r) => r.action === actionId);
+  if (!target) {
+    const refusal = decision.refusals.find((r) => r.action === actionId);
+    return {
+      ok: false,
+      reason: "ACTION_INFEASIBLE",
+      violatedRules: refusal?.violatedRules ?? ["NOT_RANKED"],
+    };
+  }
+
+  const t = await transition(client, {
+    proposalId,
+    toState: "EDITED",
+    actor: opts.actor,
+    note: opts.note ?? `redirect to ${actionId}`,
+  });
+  if (!t.ok) return { ok: false, reason: "NOT_AWAITING_APPROVAL" };
+
+  const tenantEnv = await getTenantEnvelope(client, String(row.rows[0]!.tenant_id));
+  if (tenantEnv.corrupted) await writeEnvelopeAlarm(client, String(row.rows[0]!.tenant_id));
+  const quietViolated = isWithinQuietHours(
+    nowMs,
+    policy.quiet_hours.start_minute,
+    policy.quiet_hours.end_minute,
+  );
+  const envelopeVerdict = evaluateEnvelope(tenantEnv.envelope, {
+    failureClass: recomputed.raw.failureClass,
+    actionId,
+    attemptsSoFar: ctxData.priorFailureCount,
+    amountPaise,
+    quietHoursViolated: quietViolated,
+  });
+  const initialState = envelopeVerdict.eligible ? "AUTO_APPROVED" : "AWAITING_APPROVAL";
+
+  let editIndex = 1;
+  for (;;) {
+    const newId = `${proposalId}_edit${editIndex}`;
+    const dedupeKey = `${prop.event_id}|${model.id}|${policy.policy_version}|edit${editIndex}`;
+    const nowIso = isoUtc(nowMs);
+    try {
+      const ins = await client.execute({
+        sql: `INSERT INTO proposals
+                (id, event_id, customer_id, model_version_id, policy_version, action_json,
+                 ev_paise, confidence, attributions_json, narrative, state, state_version,
+                 dedupe_key, created_at_utc, updated_at_utc)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, 0, ?, ?, ?)`,
+        args: [
+          newId,
+          prop.event_id,
+          prop.customer_id,
+          model.id,
+          policy.policy_version,
+          JSON.stringify(target),
+          target.evPaise,
+          score.probability,
+          JSON.stringify(score.attributions),
+          initialState,
+          dedupeKey,
+          nowIso,
+          nowIso,
+        ],
+      });
+      if ((ins.rowsAffected ?? 0) > 0) {
+        await client.execute({
+          sql: `INSERT INTO audit_log (ts_utc, tenant_id, event_id, actor, entry_type, payload_json)
+                VALUES (?, ?, ?, 'PIPELINE', 'DECISION', ?)`,
+          args: [
+            nowIso,
+            String(row.rows[0]!.tenant_id),
+            prop.event_id,
+            JSON.stringify({
+              proposalId: newId,
+              editedFrom: proposalId,
+              editIndex,
+              chosenAction: actionId,
+              evPaise: target.evPaise,
+              autoApproved: envelopeVerdict.eligible,
+              envelopeReasons: envelopeVerdict.reasons,
+            }),
+          ],
+        });
+        return { ok: true, newProposalId: newId, newState: initialState };
+      }
+    } catch (err) {
+      const msg = (err as Error).message ?? "";
+      if (!(err as { code?: string }).code?.includes("UNIQUE") || !msg.includes("dedupe_key")) {
+        throw err;
+      }
+    }
+    editIndex++;
+    if (editIndex > 50) throw new Error("editProposal: cannot allocate edit version");
+  }
 }

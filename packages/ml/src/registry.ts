@@ -44,13 +44,7 @@ export async function saveModel(
   });
 }
 
-export async function getIncumbent(client: Client): Promise<ModelArtifact | null> {
-  const r = await client.execute(
-    `SELECT * FROM model_versions WHERE status='INCUMBENT'
-     ORDER BY trained_at_utc DESC, id DESC LIMIT 1`,
-  );
-  const row = r.rows[0];
-  if (!row) return null;
+function rowToArtifact(row: Record<string, unknown>): ModelArtifact {
   const inner = JSON.parse(String(row.weights_json)) as {
     featureVersion: string;
     weights: number[];
@@ -72,4 +66,26 @@ export async function getIncumbent(client: Client): Promise<ModelArtifact | null
     weightsSha256: String(row.weights_sha256),
     trainedAtUtc: String(row.trained_at_utc),
   };
+}
+
+export async function getModelById(
+  client: Client,
+  id: string,
+): Promise<ModelArtifact | null> {
+  const r = await client.execute({
+    sql: `SELECT * FROM model_versions WHERE id = ?`,
+    args: [id],
+  });
+  const row = r.rows[0];
+  return row ? rowToArtifact(row as unknown as Record<string, unknown>) : null;
+}
+
+export async function getIncumbent(client: Client): Promise<ModelArtifact | null> {
+  const r = await client.execute(
+    `SELECT * FROM model_versions WHERE status='INCUMBENT'
+     ORDER BY trained_at_utc DESC, id DESC LIMIT 1`,
+  );
+  const row = r.rows[0];
+  if (!row) return null;
+  return rowToArtifact(row as unknown as Record<string, unknown>);
 }
