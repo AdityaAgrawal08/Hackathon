@@ -16,6 +16,7 @@
     "seed:demo": "tsx packages/seed/src/main.ts --corpus demo",
     "train": "tsx packages/ml/src/main.ts",
     "propose": "tsx packages/ml/src/propose.ts",
+    "execute": "tsx packages/ml/src/execute.ts",
     "db:migrate": "tsx packages/core/src/db/migrate.ts"
   },
   "devDependencies": {
