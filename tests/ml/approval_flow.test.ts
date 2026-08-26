@@ -137,7 +137,7 @@ describe("edit recycles through decide + envelope (P4-B6)", () => {
       client,
       originalId,
       "REMINDER_LINK",
-      { actor: "merchant@demo", note: "prefer soft nudge" },
+      { actor: "merchant@demo", note: "prefer soft nudge", nowMs: NOW },
     );
     expect(out.ok).toBe(true);
     expect(await stateOf(originalId)).toBe("EDITED");
@@ -166,7 +166,7 @@ describe("edit recycles through decide + envelope (P4-B6)", () => {
     const r = await processEvent(client, "e_infeasible", { policy: POLICY, nowMs: NOW });
     const originalId = r.proposalId!;
 
-    const out = await editProposal(client, originalId, "RETRY_NOW", { actor: "merchant@demo" });
+    const out = await editProposal(client, originalId, "RETRY_NOW", { actor: "merchant@demo", nowMs: NOW });
     expect(out.ok).toBe(false);
     expect(out.reason).toBe("ACTION_INFEASIBLE");
     expect(out.violatedRules!.length).toBeGreaterThan(0);
@@ -178,7 +178,7 @@ describe("edit recycles through decide + envelope (P4-B6)", () => {
     await seedCustomerEvent("e_edit2", "TEMPORARY_DECLINE", 25_000);
     const r = await processEvent(client, "e_edit2", { policy: POLICY, nowMs: NOW });
     const id1 = r.proposalId!;
-    const out = await editProposal(client, id1, "REMINDER_LINK", { actor: "merchant@demo" });
+    const out = await editProposal(client, id1, "REMINDER_LINK", { actor: "merchant@demo", nowMs: NOW });
     expect(out.ok).toBe(true);
     const again = await editProposal(client, id1, "RETRY_PAYDAY", { actor: "merchant@demo" });
     expect(again.ok).toBe(false);
