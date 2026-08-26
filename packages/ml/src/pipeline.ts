@@ -313,9 +313,10 @@ export async function editProposal(
   client: Client,
   proposalId: string,
   actionId: ActionId,
-  opts: { actor: string; note?: string } = { actor: "merchant@demo" },
+  opts: { actor?: string; note?: string; nowMs?: number } = { actor: "merchant@demo" },
 ): Promise<EditOutcome> {
-  const nowMs = Date.now();
+  const nowMs = opts.nowMs ?? Date.now();
+  const actor = (opts.actor ?? "merchant@demo").trim() || "merchant@demo";
   const row = await client.execute({
     sql: `SELECT p.*, e.tenant_id, e.amount_paise, e.failure_code, e.occurred_at_utc, e.source
           FROM proposals p JOIN payment_events e ON e.id = p.event_id
@@ -406,7 +407,7 @@ export async function editProposal(
   const t = await transition(client, {
     proposalId,
     toState: "EDITED",
-    actor: opts.actor,
+    actor,
     note: opts.note ?? `redirect to ${actionId}`,
   });
   if (!t.ok) return { ok: false, reason: "NOT_AWAITING_APPROVAL" };

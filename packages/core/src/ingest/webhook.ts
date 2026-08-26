@@ -19,6 +19,8 @@ export interface IngestDeps {
   client: Client;
   /** Injected clock — determinism in tests, real time in prod. */
   nowMs?: () => number;
+  /** Tenant scope for this ingestion stream (default: demo merchant). */
+  tenantId?: string;
 }
 
 export interface WebhookResult {
@@ -70,19 +72,19 @@ async function recordTrigger(
 ): Promise<void> {
   await client.execute({
     sql: `INSERT INTO audit_log (ts_utc,tenant_id,event_id,actor,entry_type,payload_json)
-          VALUES (?,'demo',?,'PIPELINE','TRIGGER',?)`,
-    args: [args.nowIso, args.eventId, args.payloadSummary],
+          VALUES (?, ?, ?,'PIPELINE','TRIGGER',?)`,
+    args: [args.nowIso, args.tenantId, args.eventId, args.payloadSummary],
   });
 }
 
 async function logSecurityRejection(
   client: Client,
-  args: { nowIso: string; reason: string },
+  args: { tenantId: string; nowIso: string; reason: string },
 ): Promise<void> {
   await client.execute({
     sql: `INSERT INTO audit_log (ts_utc,tenant_id,event_id,actor,entry_type,payload_json)
-          VALUES (?,'demo',NULL,'SYSTEM','REFUSAL',?)`,
-    args: [args.nowIso, JSON.stringify({ security: true, reason: args.reason })],
+          VALUES (?, ?, NULL,'SYSTEM','REFUSAL',?)`,
+    args: [args.nowIso, args.tenantId, JSON.stringify({ security: true, reason: args.reason })],
   });
 }
 
@@ -98,13 +100,14 @@ export async function processWebhook(
 ): Promise<WebhookResult> {
   const nowMs = deps.nowMs ?? Date.now;
   const nowIso = isoUtc(nowMs());
+  const tenantId = deps.tenantId ?? "demo";
 
   // Fresh-environment safety: tenant must exist before any event row (FK).
-  await ensureTenant(deps.client, "demo", nowIso);
+  await ensureTenant(deps.client, tenantId, nowIso);
 
   // ── trust boundary first: signature over RAW bytes (P1-B7)
   if (!verifySignature(rawBody, signatureHex, webhookSecret)) {
-    await logSecurityRejection(deps.client, { nowIso, reason: "invalid_signature" });
+    await logSecurityRejection(deps.client, { tenantId, nowIso, reason: "invalid_signature" });
     return { status: "REJECTED", reason: "invalid_signature" };
   }
 
@@ -112,13 +115,13 @@ export async function processWebhook(
   try {
     parsed = JSON.parse(rawBody);
   } catch {
-    await logSecurityRejection(deps.client, { nowIso, reason: "malformed_json" });
+    await logSecurityRejection(deps.client, { tenantId, nowIso, reason: "malformed_json" });
     return { status: "REJECTED", reason: "malformed_json" };
   }
 
   const parsedSafe = razorpayWebhookSchema.safeParse(parsed);
   if (!parsedSafe.success) {
-    await logSecurityRejection(deps.client, { nowIso, reason: "schema_mismatch" });
+    await logSecurityRejection(deps.client, { tenantId, nowIso, reason: "schema_mismatch" });
     return { status: "REJECTED", reason: "schema_mismatch" };
   }
   const body = parsedSafe.data;
@@ -145,7 +148,7 @@ export async function processWebhook(
     });
     await recordTrigger(deps.client, {
       eventId,
-      tenantId: "demo",
+      tenantId,
       nowIso,
       payloadSummary: JSON.stringify({ swallowed: true, duplicateDelivery: true }),
     });
@@ -178,7 +181,7 @@ export async function processWebhook(
 
   await recordTrigger(deps.client, {
     eventId,
-    tenantId: "demo",
+    tenantId,
     nowIso,
     payloadSummary: JSON.stringify({ failureCode, amountPaise: pay.amount }),
   });

@@ -51,8 +51,10 @@ function clamp01(x: number): number {
 function scheduleFor(action: ActionId, input: DecideInput): number | null {
   if (action === "RETRY_NOW") return input.nowMs;
   if (action === "RETRY_PAYDAY") {
-    const day = input.inferredPaydayDay;
-    return day !== null && day !== undefined ? nextPaydayWindowMs(day, input.nowMs) : null;
+    const raw = input.inferredPaydayDay;
+    const day =
+      typeof raw === "number" && Number.isInteger(raw) && raw >= 1 && raw <= 31 ? raw : null;
+    return day !== null ? nextPaydayWindowMs(day, input.nowMs) : null;
   }
   return null;
 }
@@ -76,7 +78,10 @@ function evaluateAction(
     isContactAction: isContactAction(action),
     paydayKnown:
       action !== "RETRY_PAYDAY" ||
-      (input.inferredPaydayDay !== null && input.inferredPaydayDay !== undefined),
+      (typeof input.inferredPaydayDay === "number" &&
+        Number.isInteger(input.inferredPaydayDay) &&
+        input.inferredPaydayDay >= 1 &&
+        input.inferredPaydayDay <= 31),
   };
   const violations = evaluateConstraints(input.policy, ctx);
 
