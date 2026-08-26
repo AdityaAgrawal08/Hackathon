@@ -14,10 +14,7 @@ export async function saveModel(
   artifact: ModelArtifact,
   status: "CANDIDATE" | "INCUMBENT",
 ): Promise<void> {
-  if (status === "INCUMBENT") {
-    await client.execute(`UPDATE model_versions SET status='RETIRED' WHERE status='INCUMBENT'`);
-  }
-  await client.execute({
+  const insertStmt = {
     sql: `INSERT INTO model_versions
             (id, kind, weights_json, weights_sha256, dataset_sha256,
              feature_names_json, metrics_json, trained_at_utc, status)
@@ -41,7 +38,19 @@ export async function saveModel(
       artifact.trainedAtUtc || isoUtc(Date.now()),
       status,
     ],
-  });
+  };
+
+  if (status === "INCUMBENT") {
+    await client.batch(
+      [
+        { sql: `UPDATE model_versions SET status='RETIRED' WHERE status='INCUMBENT'`, args: [] },
+        insertStmt,
+      ],
+      "write",
+    );
+  } else {
+    await client.batch([insertStmt], "write");
+  }
 }
 
 function rowToArtifact(row: Record<string, unknown>): ModelArtifact {

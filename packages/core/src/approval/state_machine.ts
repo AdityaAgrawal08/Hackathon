@@ -60,6 +60,12 @@ export async function transition(
 ): Promise<TransitionResult> {
   const nowIso = isoUtc(Date.now());
 
+  const actor = input.actor.trim();
+  if (!actor) throw new Error("transition: actor is required");
+  if (!ALLOWED_TRANSITIONS[input.toState]) {
+    throw new Error(`transition: unknown target state ${input.toState}`);
+  }
+
   const cur = await client.execute({
     sql: `SELECT id, state, state_version FROM proposals WHERE id = ?`,
     args: [input.proposalId],
@@ -98,7 +104,7 @@ export async function transition(
       args: [
         `apr_${input.proposalId}_${stateVersion + 1}`,
         input.proposalId,
-        input.actor,
+        actor,
         decision,
         input.note ?? null,
         nowIso],
@@ -112,7 +118,7 @@ export async function transition(
           WHERE p.id = ?`,
     args: [
       nowIso,
-      input.actor,
+      actor,
       JSON.stringify({ proposalId: input.proposalId, from: fromState, to: input.toState, note: input.note ?? null }),
       input.proposalId,
     ],

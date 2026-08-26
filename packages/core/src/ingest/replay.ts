@@ -98,7 +98,13 @@ export async function recordFailureEvent(
         nowIso,
       ],
     });
-  } catch {
+  } catch (err) {
+    const code = (err as { code?: string }).code ?? "";
+    const msg = (err as Error).message ?? "";
+    const isDuplicate =
+      msg.includes("payment_events.id") &&
+      (code === "SQLITE_CONSTRAINT_PRIMARYKEY" || code === "SQLITE_CONSTRAINT_UNIQUE");
+    if (!isDuplicate) throw err;
     await client.execute({
       sql: `UPDATE webhook_dedupe SET swallow_count = swallow_count + 1 WHERE provider_event_id = ?`,
       args: [evt.id],

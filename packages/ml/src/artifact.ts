@@ -22,9 +22,21 @@ export interface ModelArtifact {
   trainedAtUtc: string;
 }
 
-/** Canonical JSON: sorted keys — hash stability across runs. */
+/** Canonical JSON: recursively sorted object keys — hash stability across runs. */
 export function canonicalJson(value: unknown): string {
-  return JSON.stringify(value, Object.keys(value as object).sort());
+  return JSON.stringify(sortKeys(value));
+}
+
+function sortKeys(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortKeys);
+  if (value !== null && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const k of Object.keys(value as Record<string, unknown>).sort()) {
+      out[k] = sortKeys((value as Record<string, unknown>)[k]);
+    }
+    return out;
+  }
+  return value;
 }
 
 export function artifactWeightsSha(a: Omit<ModelArtifact, "weightsSha256" | "id">): string {

@@ -6,12 +6,23 @@ export interface ActOptions {
   note?: string | null;
 }
 
+function requireActor(actor: string): string {
+  const trimmed = actor.trim();
+  if (!trimmed) throw new Error("actor is required");
+  return trimmed;
+}
+
 export async function approveProposal(
   client: Client,
   proposalId: string,
   opts: ActOptions,
 ): Promise<TransitionResult> {
-  return transition(client, { proposalId, toState: "APPROVED", ...opts });
+  return transition(client, {
+    proposalId,
+    toState: "APPROVED",
+    actor: requireActor(opts.actor),
+    note: opts.note,
+  });
 }
 
 export async function rejectProposal(
@@ -19,7 +30,12 @@ export async function rejectProposal(
   proposalId: string,
   opts: ActOptions,
 ): Promise<TransitionResult> {
-  return transition(client, { proposalId, toState: "REJECTED", ...opts });
+  return transition(client, {
+    proposalId,
+    toState: "REJECTED",
+    actor: requireActor(opts.actor),
+    note: opts.note,
+  });
 }
 
 const CANCELLABLE = [

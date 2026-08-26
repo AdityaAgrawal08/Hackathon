@@ -9,7 +9,7 @@ declare const PaiseBrand: unique symbol;
 export type Paise = number & { readonly [PaiseBrand]: true };
 
 export function isInt(n: number): boolean {
-  return Number.isFinite(n) && Number.isInteger(n);
+  return Number.isSafeInteger(n);
 }
 
 /** Construct a branded Paise from an integer. Truncation is a bug — we throw. */
@@ -51,8 +51,11 @@ export function mulQty(a: Paise, qty: number): Paise {
  * Round-half-up on magnitude so fee math is symmetric and auditable.
  */
 export function percentBp(a: Paise, bp: number): Paise {
-  if (!isInt(bp)) throw new Error("percentBp requires integer bp");
+  if (!isInt(bp)) throw new Error(`percentBp requires integer bp`);
   const raw = a * bp;
+  if (!Number.isSafeInteger(raw)) {
+    throw new Error(`percentBp: ${a}×${bp} overflows safe integer range`);
+  }
   const div = Math.trunc(raw / 10000);
   const rem = raw - div * 10000;
   const bump =

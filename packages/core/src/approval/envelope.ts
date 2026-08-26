@@ -50,9 +50,12 @@ export function evaluateEnvelope(
 ): { eligible: boolean; reasons: string[] } {
   if (!env.enabled) return { eligible: false, reasons: ["ENVELOPE_DISABLED"] };
   const reasons: string[] = [];
+  if (ctx.actionId === "HUMAN_REVIEW") {
+    return { eligible: false, reasons: ["HUMAN_REVIEW_NOT_AUTOAPPROVABLE"] };
+  }
   if (!env.classes.includes(ctx.failureClass)) reasons.push("CLASS_NOT_ALLOWED");
   if (!env.channels.includes(ctx.actionId)) reasons.push("CHANNEL_NOT_ALLOWED");
-  if (ctx.attemptsSoFar > env.max_attempts) reasons.push("ATTEMPT_OVER_CAP");
+  if (ctx.attemptsSoFar >= env.max_attempts) reasons.push("ATTEMPT_OVER_CAP");
   if (ctx.amountPaise > env.max_amount_paise) reasons.push("AMOUNT_OVER_CAP");
   if (env.require_quiet_ok && ctx.quietHoursViolated) reasons.push("QUIET_HOURS");
   return { eligible: reasons.length === 0, reasons };
@@ -98,6 +101,14 @@ export async function writeEnvelopeAlarm(
   client: Client,
   tenantId: string,
 ): Promise<void> {
+  const existing = await client.execute({
+    sql: `SELECT 1 FROM audit_log
+          WHERE tenant_id = ? AND actor = 'SYSTEM' AND entry_type = 'TRIGGER'
+            AND payload_json LIKE '%ENVELOPE_CORRUPT%'
+          LIMIT 1`,
+    args: [tenantId],
+  });
+  if (existing.rows.length > 0) return;
   await client.execute({
     sql: `INSERT INTO audit_log (ts_utc, tenant_id, event_id, actor, entry_type, payload_json)
           VALUES (?, ?, NULL, 'SYSTEM', 'TRIGGER', ?)`,

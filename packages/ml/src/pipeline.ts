@@ -168,7 +168,12 @@ export async function processEvent(
     amountPaise: event.amount_paise,
     quietHoursViolated: quietViolated,
   });
-  const initialState = envelopeVerdict.eligible ? "AUTO_APPROVED" : "AWAITING_APPROVAL";
+  const initialState =
+    chosen.action === "NO_ACTION"
+      ? "PROPOSED"
+      : envelopeVerdict.eligible
+        ? "AUTO_APPROVED"
+        : "AWAITING_APPROVAL";
 
   const dedupeKey = `${eventId}|${model.id}|${policy.policy_version}`;
   const proposalId = `prop_${eventId}_${model.weightsSha256.slice(0, 8)}`;
@@ -308,9 +313,10 @@ export async function editProposal(
   client: Client,
   proposalId: string,
   actionId: ActionId,
-  opts: { actor: string; note?: string } = { actor: "merchant@demo" },
+  opts: { actor?: string; note?: string; nowMs?: number } = { actor: "merchant@demo" },
 ): Promise<EditOutcome> {
-  const nowMs = Date.now();
+  const nowMs = opts.nowMs ?? Date.now();
+  const actor = (opts.actor ?? "merchant@demo").trim() || "merchant@demo";
   const row = await client.execute({
     sql: `SELECT p.*, e.tenant_id, e.amount_paise, e.failure_code, e.occurred_at_utc, e.source
           FROM proposals p JOIN payment_events e ON e.id = p.event_id
@@ -401,7 +407,7 @@ export async function editProposal(
   const t = await transition(client, {
     proposalId,
     toState: "EDITED",
-    actor: opts.actor,
+    actor,
     note: opts.note ?? `redirect to ${actionId}`,
   });
   if (!t.ok) return { ok: false, reason: "NOT_AWAITING_APPROVAL" };
@@ -474,6 +480,24 @@ export async function editProposal(
     } catch (err) {
       const msg = (err as Error).message ?? "";
       if (!(err as { code?: string }).code?.includes("UNIQUE") || !msg.includes("dedupe_key")) {
+        await client
+          .execute({
+            sql: `INSERT INTO audit_log (ts_utc, tenant_id, event_id, actor, entry_type, payload_json)
+                  VALUES (?, ?, ?, 'SYSTEM', 'TRIGGER', ?)`,
+            args: [
+              isoUtc(Date.now()),
+              String(row.rows[0]!.tenant_id),
+              prop.event_id,
+              JSON.stringify({
+                alarm: "EDIT_ORPHAN",
+                detail: "original EDITED but successor insert failed; merchant must re-propose",
+                originalProposalId: proposalId,
+                attemptedAction: actionId,
+                error: msg,
+              }),
+            ],
+          })
+          .catch(() => {});
         throw err;
       }
     }

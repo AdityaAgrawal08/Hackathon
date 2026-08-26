@@ -30,7 +30,7 @@ async function main(): Promise<void> {
   );
 
   // ── DB: migrate → ingest → freeze features
-  const { client } = openDb(process.env.ARBITER_DB_PATH);
+  const { client } = await openDb(process.env.ARBITER_DB_PATH);
   const applied = await runMigrations(client);
   if (applied > 0) console.log(`train: applied ${applied} migration(s)`);
 
