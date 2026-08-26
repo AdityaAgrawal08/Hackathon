@@ -44,13 +44,14 @@ async function mkQueueProposal(client: Client, id: string, code: string, action:
   await client.execute({
     sql: `INSERT INTO proposals (id,event_id,customer_id,model_version_id,policy_version,
             action_json,ev_paise,confidence,state,state_version,dedupe_key,created_at_utc,updated_at_utc)
-          VALUES (?,?,?,?,?,'{"action":"NO_ACTION"}',?,0.5,'AWAITING_APPROVAL',0,?,?,?)`,
+          VALUES (?,?,?,?,?,?,?,0.5,'AWAITING_APPROVAL',0,?,?,?)`,
     args: [
       `q_prop_${id}`,
       `q_evt_${id}`,
       custId,
       "mv_test",
       "policy-v1",
+      JSON.stringify({ action }),
       ev,
       `dk_q_${id}`,
       T0,
