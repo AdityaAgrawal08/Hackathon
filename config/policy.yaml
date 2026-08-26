@@ -1,0 +1,11 @@
+policy_version: policy-v1
+confidence_floor_bp: 2000
+max_attempts_per_cycle: 2
+min_interval_hours: 24
+quiet_hours:
+  start_minute: 1320
+  end_minute: 480
+exposure_cap_paise: 10000000
+human_review_classes:
+  - RISK_FLAGGED
+  - UNKNOWN

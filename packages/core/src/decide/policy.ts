@@ -58,32 +58,30 @@ export type RuleId =
   | "MIN_INTERVAL"
   | "EXPOSURE_CAP"
   | "CONFIDENCE_FLOOR"
-  | "HUMAN_REVIEW_CLASS";
+  | "HUMAN_REVIEW_CLASS"
+  | "PAYDAY_UNKNOWN";
 
 export interface ConstraintContext {
   failureClass: FailureClassId;
   amountPaise: number;
-  probabilityBp: number; // adjusted probability for the candidate action
+  probabilityBp: number;
   nowMs: number;
   attemptsSoFar: number;
   lastContactAtMs: number | null;
   customerOptedOut: boolean;
   isContactAction: boolean;
+  paydayKnown: boolean;
 }
 
-/**
- * Evaluate every rule against one candidate action. Total, non-short-circuit:
- * returns the FULL violation set (P3-B3). Empty array ⇒ action is feasible.
- */
 export function evaluateConstraints(policy: PolicyPack, ctx: ConstraintContext): RuleId[] {
   const violations: RuleId[] = [];
 
   if (ctx.customerOptedOut) violations.push("OPTED_OUT");
-  if (!ctx.isContactAction) return violations; // conduct rules bind contacts only
+  if (!ctx.isContactAction) return violations;
   if (policy.human_review_classes.includes(ctx.failureClass)) {
-    // Restricted class: contact attempts are forbidden — HUMAN_REVIEW itself stays feasible.
     violations.push("HUMAN_REVIEW_CLASS");
   }
+  if (!ctx.paydayKnown) violations.push("PAYDAY_UNKNOWN");
 
   return violations.concat(evaluateContactRules(policy, ctx));
 }

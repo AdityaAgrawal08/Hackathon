@@ -18,6 +18,7 @@
     "@arbiter/shared": "workspace:*",
     "@libsql/client": "^0.15.0",
     "drizzle-orm": "^0.44.0",
+    "yaml": "^2.9.0",
     "zod": "^4.1.0"
   },
   "devDependencies": {
