@@ -52,7 +52,7 @@ export function evaluateEnvelope(
   const reasons: string[] = [];
   if (!env.classes.includes(ctx.failureClass)) reasons.push("CLASS_NOT_ALLOWED");
   if (!env.channels.includes(ctx.actionId)) reasons.push("CHANNEL_NOT_ALLOWED");
-  if (ctx.attemptsSoFar > env.max_attempts) reasons.push("ATTEMPT_OVER_CAP");
+  if (ctx.attemptsSoFar >= env.max_attempts) reasons.push("ATTEMPT_OVER_CAP");
   if (ctx.amountPaise > env.max_amount_paise) reasons.push("AMOUNT_OVER_CAP");
   if (env.require_quiet_ok && ctx.quietHoursViolated) reasons.push("QUIET_HOURS");
   return { eligible: reasons.length === 0, reasons };

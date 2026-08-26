@@ -28,7 +28,7 @@ async function main(): Promise<void> {
 
   const corpus = generateCorpus("demo", { customerCount: 60, targetEvents: 230 });
 
-  const { client } = openDb(process.env.ARBITER_DB_PATH);
+  const { client } = await openDb(process.env.ARBITER_DB_PATH);
   const applied = await runMigrations(client);
   if (applied > 0) console.log(`propose: applied ${applied} migration(s)`);
 

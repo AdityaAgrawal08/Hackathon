@@ -12,7 +12,7 @@ export type Db = ReturnType<typeof drizzle<typeof schema>>;
  * safety: WAL for concurrent readers (P1-B6), busy timeout, FK enforcement ON
  * so orphan rows are impossible rather than "unlikely".
  */
-export function openDb(dbPath?: string): { client: Client; db: Db } {
+export async function openDb(dbPath?: string): Promise<{ client: Client; db: Db }> {
   const path = resolve(dbPath ?? process.env.ARBITER_DB_PATH ?? "./data/arbiter.sqlite");
   if (!path.startsWith(":memory:") && !path.startsWith("file:")) {
     mkdirSync(dirname(path), { recursive: true });
@@ -24,9 +24,8 @@ export function openDb(dbPath?: string): { client: Client; db: Db } {
     : `file:${path}`;
 
   const client = createClient({ url });
-  // WAL + busy timeout: webhook writer and cron tick must not collide (P1-B6).
-  client.executeMultiple("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;");
-  client.executeMultiple("PRAGMA foreign_keys=ON;");
+  await client.executeMultiple("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;");
+  await client.executeMultiple("PRAGMA foreign_keys=ON;");
 
   const db = drizzle(client, { schema });
   return { client, db };

@@ -168,7 +168,12 @@ export async function processEvent(
     amountPaise: event.amount_paise,
     quietHoursViolated: quietViolated,
   });
-  const initialState = envelopeVerdict.eligible ? "AUTO_APPROVED" : "AWAITING_APPROVAL";
+  const initialState =
+    chosen.action === "NO_ACTION"
+      ? "PROPOSED"
+      : envelopeVerdict.eligible
+        ? "AUTO_APPROVED"
+        : "AWAITING_APPROVAL";
 
   const dedupeKey = `${eventId}|${model.id}|${policy.policy_version}`;
   const proposalId = `prop_${eventId}_${model.weightsSha256.slice(0, 8)}`;
@@ -474,6 +479,24 @@ export async function editProposal(
     } catch (err) {
       const msg = (err as Error).message ?? "";
       if (!(err as { code?: string }).code?.includes("UNIQUE") || !msg.includes("dedupe_key")) {
+        await client
+          .execute({
+            sql: `INSERT INTO audit_log (ts_utc, tenant_id, event_id, actor, entry_type, payload_json)
+                  VALUES (?, ?, ?, 'SYSTEM', 'TRIGGER', ?)`,
+            args: [
+              isoUtc(Date.now()),
+              String(row.rows[0]!.tenant_id),
+              prop.event_id,
+              JSON.stringify({
+                alarm: "EDIT_ORPHAN",
+                detail: "original EDITED but successor insert failed; merchant must re-propose",
+                originalProposalId: proposalId,
+                attemptedAction: actionId,
+                error: msg,
+              }),
+            ],
+          })
+          .catch(() => {});
         throw err;
       }
     }

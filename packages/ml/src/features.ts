@@ -124,6 +124,17 @@ function circularDistance(a: number, b: number, modulus: number): number {
 }
 
 export function computeFeatures(input: FeatureInput): ComputedFeatures {
+  if (!Number.isInteger(input.amountPaise) || input.amountPaise <= 0) {
+    throw new Error(`computeFeatures: amount must be positive integer paise, got ${input.amountPaise}`);
+  }
+  if (!Number.isFinite(Date.parse(input.occurredAtUtc))) {
+    throw new Error(`computeFeatures: invalid occurredAtUtc ${input.occurredAtUtc}`);
+  }
+  for (const prior of input.priorFailureAmountsPaise) {
+    if (!Number.isInteger(prior) || prior <= 0) {
+      throw new Error(`computeFeatures: invalid prior amount ${prior}`);
+    }
+  }
   const cust = input.customer ?? null;
 
   // ── class onehot (code-derived, fail-closed)

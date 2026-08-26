@@ -21,6 +21,9 @@ export interface QueueGroup {
 }
 
 export async function listApprovalQueue(client: Client, limit = 500): Promise<QueueRow[]> {
+  if (!Number.isInteger(limit) || limit < 1) {
+    throw new Error(`listApprovalQueue: limit must be positive integer, got ${limit}`);
+  }
   const r = await client.execute({
     sql: `SELECT p.id, p.event_id, p.customer_id, e.failure_code, e.amount_paise,
                  p.action_json, p.ev_paise, p.confidence, p.model_version_id, p.created_at_utc
