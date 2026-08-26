@@ -249,6 +249,25 @@ describe("executeProposal", () => {
       executeProposal(client, { proposalId: id, nowMs: NOW }),
     ).rejects.toThrow("not APPROVED/AUTO_APPROVED");
   });
+
+  it("audit_log uses correct tenant_id from payment_events", async () => {
+    const id = await seedProposal("INSUFFICIENT_FUNDS", 500_000);
+    await executeProposal(client, { proposalId: id, nowMs: NOW });
+
+    const log = await client.execute({
+      sql: `SELECT tenant_id, event_id, payload_json FROM audit_log
+            WHERE entry_type='ACTION' AND event_id IN
+            (SELECT event_id FROM proposals WHERE id=?)`,
+      args: [id],
+    });
+    expect(log.rows.length).toBe(1);
+    const row = log.rows[0]!;
+    // tenant_id must be 'demo' (from payment_events), NOT the customer_id
+    expect(String(row.tenant_id)).toBe("demo");
+    const payload = JSON.parse(String(row.payload_json));
+    expect(payload.outcome).toBe("SUCCEEDED");
+    expect(payload.idempotencyKey).toMatch(/^[a-f0-9]{16}$/);
+  });
 });
 
 /* ── determinism barrier ───────────────────────────────────────── */
@@ -321,6 +340,28 @@ describe("reconcileProposal", () => {
     expect(r).not.toBeNull();
     expect(r!.outcome).toBe("SUCCEEDED");
     expect(await stateOf(id)).toBe("EXECUTED");
+  });
+
+  it("returns null when action row already resolved (concurrent reconcile race)", async () => {
+    const id = await seedProposal("TEMPORARY_DECLINE", 60_000, { action: "RETRY_NOW" });
+    await client.execute({
+      sql: `UPDATE proposals SET state='EXECUTING' WHERE id=?`,
+      args: [id],
+    });
+    // Insert action row with SUCCEEDED (already resolved)
+    await client.execute({
+      sql: `INSERT INTO actions (id,proposal_id,idempotency_key,executor,payload_json,rzp_request_ref,outcome,executed_at_utc)
+            VALUES (?,?,?,?,?,?,?,?)`,
+      args: [`act_already_${id}`, id, `idem_already_${id}`, "RETRY_NOW", "{}", "fake-ref", "SUCCEEDED", T0],
+    });
+
+    const r = await reconcileProposal(client, {
+      proposalId: id,
+      nowMs: NOW,
+      outcome: "FAILED",
+    });
+    // Should return null because action row was already SUCCEEDED
+    expect(r).toBeNull();
   });
 
   it("returns null for non-EXECUTING proposals", async () => {

@@ -14,6 +14,7 @@ import { createHash } from "node:crypto";
 import type { Client } from "@libsql/client";
 import { isoUtc } from "@arbiter/shared";
 import { transition } from "../approval/state_machine.js";
+import { multiplierFor, type ActionId, type FailureClassId } from "../decide/catalog.js";
 
 /* ── types ─────────────────────────────────────────────────────── */
 
@@ -66,7 +67,9 @@ export function rzpRequestRef(proposalId: string, actionId: string): string {
 
 /**
  * Pure function: (actionId, failureClass, evPaise, amountPaise) → outcome.
- * Same inputs → same output.  Mirrors the catalog multiplier matrix:
+ * Same inputs → same output.  Uses the catalog multiplier table directly —
+ * no duplication, single source of truth.
+ *
  *   multiplier 0  →  DEAD action for this class  →  FAILED
  *   multiplier > 0  →  viable  →  SUCCEEDED
  *   HUMAN_REVIEW  →  always AMBIGUOUS (needs a human)
@@ -74,22 +77,14 @@ export function rzpRequestRef(proposalId: string, actionId: string): string {
 function deterministicOutcome(
   actionId: string,
   failureClass: string,
-  evPaise: number,
-  amountPaise: number,
+  _evPaise: number,
+  _amountPaise: number,
 ): ExecutionOutcome {
-  // Multiplier table (from catalog.ts — same values, no import to avoid cycle)
-  const MULT: Record<string, Record<string, number>> = {
-    SOFT_RETRYABLE: { RETRY_NOW: 0.6, RETRY_PAYDAY: 1.4, ALTERNATE_UPI_LINK: 0.5, REMINDER_LINK: 0.7, HUMAN_REVIEW: 0.3, NO_ACTION: 0.02 },
-    HARD_METHOD_DEAD: { RETRY_NOW: 0.0, RETRY_PAYDAY: 0.0, ALTERNATE_UPI_LINK: 1.0, REMINDER_LINK: 0.6, HUMAN_REVIEW: 0.1, NO_ACTION: 0.0 },
-    NETWORK_TIMEOUT: { RETRY_NOW: 1.5, RETRY_PAYDAY: 0.4, ALTERNATE_UPI_LINK: 0.3, REMINDER_LINK: 0.2, HUMAN_REVIEW: 0.05, NO_ACTION: 0.05 },
-    RISK_FLAGGED: { RETRY_NOW: 0.0, RETRY_PAYDAY: 0.0, ALTERNATE_UPI_LINK: 0.0, REMINDER_LINK: 0.0, HUMAN_REVIEW: 1.0, NO_ACTION: 0.0 },
-    UNKNOWN: { RETRY_NOW: 0.1, RETRY_PAYDAY: 0.1, ALTERNATE_UPI_LINK: 0.1, REMINDER_LINK: 0.1, HUMAN_REVIEW: 1.0, NO_ACTION: 0.0 },
-  };
-
-  const mult = MULT[failureClass]?.[actionId] ?? 0;
-
   // HUMAN_REVIEW always needs a human — never auto-resolved
   if (actionId === "HUMAN_REVIEW") return "AMBIGUOUS";
+
+  // Use the catalog multiplier directly (single source of truth)
+  const mult = multiplierFor(failureClass as FailureClassId, actionId as ActionId);
 
   // Dead action for this class → FAILED (the multiplier-is-zero path)
   if (mult === 0) return "FAILED";
@@ -102,6 +97,7 @@ function deterministicOutcome(
 
 interface ProposalRow {
   id: string;
+  event_id: string;
   state: string;
   state_version: number;
   customer_id: string;
@@ -113,7 +109,7 @@ interface ProposalRow {
 
 async function fetchProposal(client: Client, proposalId: string): Promise<ProposalRow | null> {
   const r = await client.execute({
-    sql: `SELECT id, state, state_version, customer_id, model_version_id, policy_version,
+    sql: `SELECT id, event_id, state, state_version, customer_id, model_version_id, policy_version,
                  action_json, ev_paise
           FROM proposals WHERE id = ?`,
     args: [proposalId],
@@ -155,15 +151,20 @@ export async function executeProposal(
   const actionId = chosen.action;
   const evPaise = chosen.evPaise;
 
-  // 3. Need the event row for failure class and amount
+  // 3. Fetch event row for failure class, amount, AND tenant_id (needed for audit_log)
   const evRow = await client.execute({
-    sql: `SELECT failure_class_hint, amount_paise FROM payment_events
-          JOIN proposals ON proposals.event_id = payment_events.id
-          WHERE proposals.id = ?`,
+    sql: `SELECT failure_class_hint, amount_paise, e.tenant_id
+          FROM payment_events e
+          JOIN proposals p ON p.event_id = e.id
+          WHERE p.id = ?`,
     args: [proposalId],
   });
-  const failureClass = String(evRow.rows[0]?.failure_class_hint ?? "UNKNOWN");
-  const amountPaise = Number(evRow.rows[0]?.amount_paise ?? 0);
+  if (evRow.rows.length === 0) {
+    throw new Error("executor: MISSING_EVENT — proposal references non-existent event");
+  }
+  const failureClass = String(evRow.rows[0]!.failure_class_hint ?? "UNKNOWN");
+  const amountPaise = Number(evRow.rows[0]!.amount_paise);
+  const tenantId = String(evRow.rows[0]!.tenant_id);
 
   // 4. Generate deterministic idempotency key
   const idemKey = idempotencyKey(proposalId, p.model_version_id, p.policy_version, p.action_json);
@@ -215,20 +216,23 @@ export async function executeProposal(
     note: `${actionId} ${outcome.toLowerCase()}`,
   });
 
-  // 9. Audit trail — ACTION ledger row
+  // 9. Audit trail — ACTION ledger row (uses correct tenant_id from payment_events)
   await client.execute({
     sql: `INSERT INTO audit_log (ts_utc, tenant_id, event_id, actor, entry_type, payload_json)
-          SELECT ?, p2.customer_id, p2.event_id, 'SYSTEM', 'ACTION',
-                 json_object(
-                   'proposalId', p2.id,
-                   'action', ?,
-                   'outcome', ?,
-                   'idempotencyKey', ?,
-                   'rzpRequestRef', ?,
-                   'evPaise', p2.ev_paise
-                 )
-          FROM proposals p2 WHERE p2.id = ?`,
-    args: [nowIso, actionId, outcome, idemKey, ref, proposalId],
+          VALUES (?, ?, ?, 'SYSTEM', 'ACTION', ?)`,
+    args: [
+      nowIso,
+      tenantId,
+      p.event_id,
+      JSON.stringify({
+        proposalId,
+        action: actionId,
+        outcome,
+        idempotencyKey: idemKey,
+        rzpRequestRef: ref,
+        evPaise,
+      }),
+    ],
   });
 
   return { outcome, actionId, proposalId, rzpRequestRef: ref, idempotencyKey: idemKey };
@@ -237,9 +241,12 @@ export async function executeProposal(
 /* ── reconcile: for stuck EXECUTING proposals ──────────────────── */
 
 /**
- * Reconcile a proposal stuck in EXECUTING.  Scans the actions table
- * for the latest outcome and forces the proposal to the right terminal.
+ * Reconcile a proposal stuck in EXECUTING.  Updates the actions table
+ * for PENDING rows and forces the proposal to the right terminal.
  * Used by the recovery sweep when a network call times out.
+ *
+ * Returns null if the proposal is already terminal or doesn't exist.
+ * Returns null if the action row was already updated (no-op race).
  */
 export async function reconcileProposal(
   client: Client,
@@ -254,12 +261,15 @@ export async function reconcileProposal(
   const nowIso = isoUtc(nowMs);
   const finalState = outcome === "SUCCEEDED" ? "EXECUTED" : "FAILED";
 
-  // Update the action row
-  await client.execute({
+  // Update the action row — only if still PENDING (concurrent reconcile guard)
+  const updateResult = await client.execute({
     sql: `UPDATE actions SET outcome = ?, executed_at_utc = ?
           WHERE proposal_id = ? AND outcome = 'PENDING'`,
     args: [outcome, nowIso, proposalId],
   });
+
+  // If no action row was updated, the action was already resolved — skip
+  if ((updateResult.rowsAffected ?? 0) === 0) return null;
 
   // Transition proposal
   const t = await transition(client, {
@@ -270,14 +280,31 @@ export async function reconcileProposal(
   });
   if (!t.ok) return null;
 
-  // Audit trail
+  // Audit trail — resolve tenant_id through payment_events
   const chosen = JSON.parse(p.action_json) as { action: string };
+  const evRow = await client.execute({
+    sql: `SELECT e.tenant_id, p.event_id
+          FROM payment_events e JOIN proposals p ON p.event_id = e.id
+          WHERE p.id = ?`,
+    args: [proposalId],
+  });
+  const tenantId = String(evRow.rows[0]?.tenant_id ?? "demo");
+  const eventId = String(evRow.rows[0]?.event_id ?? "");
+
   await client.execute({
     sql: `INSERT INTO audit_log (ts_utc, tenant_id, event_id, actor, entry_type, payload_json)
-          SELECT ?, p2.customer_id, p2.event_id, 'SYSTEM', 'ACTION',
-                 json_object('proposalId', p2.id, 'action', ?, 'outcome', ?, 'reconciled', 1)
-          FROM proposals p2 WHERE p2.id = ?`,
-    args: [nowIso, chosen.action, outcome, proposalId],
+          VALUES (?, ?, ?, 'SYSTEM', 'ACTION', ?)`,
+    args: [
+      nowIso,
+      tenantId,
+      eventId,
+      JSON.stringify({
+        proposalId,
+        action: chosen.action,
+        outcome,
+        reconciled: true,
+      }),
+    ],
   });
 
   return {
