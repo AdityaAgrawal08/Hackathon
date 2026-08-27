@@ -131,5 +131,5 @@ export function decide(input: DecideInput): DecideOutput {
 
 export function describeChoice(chosen: RankedAction, amountPaise: number): string {
   const pct = (chosen.adjustedProbabilityBp / 100).toFixed(1);
-  return `${chosen.action}: est. ${pct}% recovery on ${formatINR(paise(amountPaise))} (EV ₹${(chosen.evPaise / 100).toFixed(2)})`;
+  return `${chosen.action}: est. ${pct}% recovery on ${formatINR(paise(amountPaise))} (EV ${formatINR(paise(chosen.evPaise))})`;
 }

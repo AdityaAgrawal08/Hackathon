@@ -108,7 +108,10 @@ export async function recordFailureEvent(
     await client.execute({
       sql: `UPDATE webhook_dedupe SET swallow_count = swallow_count + 1 WHERE provider_event_id = ?`,
       args: [evt.id],
-    }).catch(() => {});
+    }).catch((err: unknown) => {
+      // Best-effort counter: if dedupe row is missing, log but don't block
+      console.error("replay: failed to increment swallow_count:", (err as Error).message);
+    });
     return "DUPLICATE";
   }
   return "INSERTED";
@@ -118,8 +121,9 @@ export async function recordFailureEvent(
 export async function replayCorpus(
   client: Client,
   corpus: ReplayCorpus,
+  nowMs?: number,
 ): Promise<ReplayResult> {
-  const nowIso = isoUtc(Date.now());
+  const nowIso = isoUtc(nowMs ?? Date.now());
   const result: ReplayResult = {
     tenants: 0,
     customers: 0,

@@ -15,7 +15,7 @@ export function loadPolicyFile(path: string): PolicyPack {
   try {
     text = readFileSync(path, "utf8");
   } catch (err) {
-    throw new Error(`policy file unreadable at ${path}: ${(err as Error).message}`);
+    throw new Error(`policy file unreadable: ${(err as Error).message}`);
   }
   return policyFromYaml(text);
 }

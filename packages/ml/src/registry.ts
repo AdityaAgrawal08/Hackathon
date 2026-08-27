@@ -43,7 +43,7 @@ export async function saveModel(
   if (status === "INCUMBENT") {
     await client.batch(
       [
-        { sql: `UPDATE model_versions SET status='RETIRED' WHERE status='INCUMBENT'`, args: [] },
+        { sql: `UPDATE model_versions SET status='RETIRED' WHERE status='INCUMBENT' AND kind = ?`, args: [artifact.kind] },
         insertStmt,
       ],
       "write",

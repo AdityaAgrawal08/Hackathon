@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./constants": "./src/constants.ts",
     "./db": "./src/db/index.ts",
     "./db/schema": "./src/db/schema.ts",
     "./ingest": "./src/ingest/index.ts",

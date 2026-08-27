@@ -7,6 +7,7 @@ import { createClient, type Client } from "@libsql/client";
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { DEFAULT_DB_PATH, SQLITE_BUSY_TIMEOUT_MS } from "../constants.js";
 
 export const MIGRATIONS_DIR = resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -23,7 +24,7 @@ export async function runMigrations(
       applied_at_utc TEXT NOT NULL
     );
     PRAGMA journal_mode=WAL;
-    PRAGMA busy_timeout=5000;
+    PRAGMA busy_timeout=${SQLITE_BUSY_TIMEOUT_MS};
     PRAGMA foreign_keys=ON;
   `);
 
@@ -52,7 +53,7 @@ export async function runMigrations(
 }
 
 async function main() {
-  const dbPath = process.env.ARBITER_DB_PATH ?? "./data/arbiter.sqlite";
+  const dbPath = process.env.ARBITER_DB_PATH ?? DEFAULT_DB_PATH;
   const url = dbPath.startsWith("file:") ? dbPath : `file:${resolve(dbPath)}`;
   if (!url.includes(":memory:")) {
     const { mkdirSync } = await import("node:fs");

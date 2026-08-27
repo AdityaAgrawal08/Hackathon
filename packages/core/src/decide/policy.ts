@@ -40,7 +40,7 @@ export function defaultPolicy(): PolicyPack {
     max_attempts_per_cycle: 2,
     min_interval_hours: 24,
     quiet_hours: { start_minute: QUIET_START_MIN, end_minute: QUIET_END_MIN },
-    exposure_cap_paise: 100_000_00,
+    exposure_cap_paise: 10_000_000,
     human_review_classes: ["RISK_FLAGGED", "UNKNOWN"],
   };
 }

@@ -167,7 +167,7 @@ export async function processWebhook(
           VALUES (?,?,?,?,?,?,?,?, 'WEBHOOK', NULL, ?, ?)`,
     args: [
       eventId,
-      "demo",
+      tenantId,
       null, // unresolved until enrichment (schema: customerId nullable)
       pay.id,
       subscriptionId,

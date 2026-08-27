@@ -12,9 +12,10 @@
 
 import { createHash } from "node:crypto";
 import type { Client } from "@libsql/client";
-import { isoUtc } from "@arbiter/shared";
+import { isoUtc, paise } from "@arbiter/shared";
 import { transition } from "../approval/state_machine.js";
 import { multiplierFor, type ActionId, type FailureClassId } from "../decide/catalog.js";
+import { STALE_EXECUTION_MINUTES } from "../constants.js";
 
 /* ── types ─────────────────────────────────────────────────────── */
 
@@ -163,7 +164,7 @@ export async function executeProposal(
     throw new Error("executor: MISSING_EVENT — proposal references non-existent event");
   }
   const failureClass = String(evRow.rows[0]!.failure_class_hint ?? "UNKNOWN");
-  const amountPaise = Number(evRow.rows[0]!.amount_paise);
+  const amountPaise = paise(Number(evRow.rows[0]!.amount_paise));
   const tenantId = String(evRow.rows[0]!.tenant_id);
 
   // 4. Generate deterministic idempotency key
@@ -191,6 +192,7 @@ export async function executeProposal(
     toState: "EXECUTING",
     actor: "SYSTEM",
     note: `executing ${actionId} (idem: ${idemKey})`,
+    nowMs,
   });
   if (!t.ok) {
     // Concurrent modification — abort, leave PENDING action row for reconcile
@@ -214,6 +216,7 @@ export async function executeProposal(
     toState: finalState,
     actor: "SYSTEM",
     note: `${actionId} ${outcome.toLowerCase()}`,
+    nowMs,
   });
 
   // 9. Audit trail — ACTION ledger row (uses correct tenant_id from payment_events)
@@ -277,6 +280,7 @@ export async function reconcileProposal(
     toState: finalState,
     actor: "SYSTEM",
     note: `reconciled to ${outcome.toLowerCase()}`,
+    nowMs,
   });
   if (!t.ok) return null;
 
@@ -325,7 +329,7 @@ export async function reconcileProposal(
 export async function sweepStuckExecutions(
   client: Client,
   nowMs: number,
-  staleMinutes = 5,
+  staleMinutes = STALE_EXECUTION_MINUTES,
 ): Promise<number> {
   const cutoffIso = isoUtc(nowMs - staleMinutes * 60_000);
   const stuck = await client.execute({

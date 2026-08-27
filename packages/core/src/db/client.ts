@@ -3,6 +3,7 @@ import { drizzle } from "drizzle-orm/libsql";
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import * as schema from "./schema.js";
+import { DEFAULT_DB_PATH, SQLITE_BUSY_TIMEOUT_MS } from "../constants.js";
 
 export type Db = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -13,7 +14,7 @@ export type Db = ReturnType<typeof drizzle<typeof schema>>;
  * so orphan rows are impossible rather than "unlikely".
  */
 export async function openDb(dbPath?: string): Promise<{ client: Client; db: Db }> {
-  const path = resolve(dbPath ?? process.env.ARBITER_DB_PATH ?? "./data/arbiter.sqlite");
+  const path = resolve(dbPath ?? process.env.ARBITER_DB_PATH ?? DEFAULT_DB_PATH);
   if (!path.startsWith(":memory:") && !path.startsWith("file:")) {
     mkdirSync(dirname(path), { recursive: true });
   }
@@ -24,7 +25,7 @@ export async function openDb(dbPath?: string): Promise<{ client: Client; db: Db 
     : `file:${path}`;
 
   const client = createClient({ url });
-  await client.executeMultiple("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;");
+  await client.executeMultiple(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=${SQLITE_BUSY_TIMEOUT_MS};`);
   await client.executeMultiple("PRAGMA foreign_keys=ON;");
 
   const db = drizzle(client, { schema });

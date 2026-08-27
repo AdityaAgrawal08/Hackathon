@@ -100,6 +100,7 @@ export async function setTenantEnvelope(
 export async function writeEnvelopeAlarm(
   client: Client,
   tenantId: string,
+  nowMs?: number,
 ): Promise<void> {
   const existing = await client.execute({
     sql: `SELECT 1 FROM audit_log
@@ -113,7 +114,7 @@ export async function writeEnvelopeAlarm(
     sql: `INSERT INTO audit_log (ts_utc, tenant_id, event_id, actor, entry_type, payload_json)
           VALUES (?, ?, NULL, 'SYSTEM', 'TRIGGER', ?)`,
     args: [
-      isoUtc(Date.now()),
+      isoUtc(nowMs ?? Date.now()),
       tenantId,
       JSON.stringify({ alarm: "ENVELOPE_CORRUPT", action: "AUTO_APPROVAL_DISABLED" }),
     ],
