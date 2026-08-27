@@ -1,4 +1,5 @@
 import type { Client } from "@libsql/client";
+import { paise } from "@arbiter/shared";
 
 export interface QueueRow {
   proposalId: string;
@@ -40,9 +41,9 @@ export async function listApprovalQueue(client: Client, limit = 500): Promise<Qu
       eventId: String(row.event_id),
       customerId: String(row.customer_id),
       failureCode: String(row.failure_code),
-      amountPaise: Number(row.amount_paise),
+      amountPaise: paise(Number(row.amount_paise)),
       action: action.action,
-      evPaise: Number(row.ev_paise),
+      evPaise: paise(Number(row.ev_paise)),
       confidence: Number(row.confidence),
       modelVersionId: String(row.model_version_id),
       createdAtUtc: String(row.created_at_utc),

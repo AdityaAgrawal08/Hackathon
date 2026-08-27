@@ -1,5 +1,5 @@
 import type { Client } from "@libsql/client";
-import { isoUtc, isWithinQuietHours } from "@arbiter/shared";
+import { isoUtc, isWithinQuietHours, paise } from "@arbiter/shared";
 import {
   decide,
   loadPolicyFile,
@@ -12,6 +12,7 @@ import {
   evaluateEnvelope,
   transition,
 } from "@arbiter/core/approval";
+import { MAX_EDIT_VERSIONS } from "@arbiter/core/constants";
 import type { ActionId } from "@arbiter/core/decide";
 import { computeFeatures } from "./features.js";
 import { saveFeatures, loadFeatureVectors } from "./features_store.js";
@@ -154,7 +155,7 @@ export async function processEvent(
 
   const tenantEnv = await getTenantEnvelope(client, event.tenant_id);
   if (tenantEnv.corrupted) {
-    await writeEnvelopeAlarm(client, event.tenant_id);
+    await writeEnvelopeAlarm(client, event.tenant_id, nowMs);
   }
   const quietViolated = isWithinQuietHours(
     nowMs,
@@ -348,7 +349,7 @@ export async function editProposal(
     return { ok: false, reason: "POLICY_VERSION_MISMATCH" };
   }
 
-  const amountPaise = Number(row.rows[0]!.amount_paise);
+  const amountPaise = paise(Number(row.rows[0]!.amount_paise));
   const occurredAtUtc = String(row.rows[0]!.occurred_at_utc);
   const failureCode = String(row.rows[0]!.failure_code);
   const ctxData = await resolveContext(client, {
@@ -409,11 +410,12 @@ export async function editProposal(
     toState: "EDITED",
     actor,
     note: opts.note ?? `redirect to ${actionId}`,
+    nowMs,
   });
   if (!t.ok) return { ok: false, reason: "NOT_AWAITING_APPROVAL" };
 
   const tenantEnv = await getTenantEnvelope(client, String(row.rows[0]!.tenant_id));
-  if (tenantEnv.corrupted) await writeEnvelopeAlarm(client, String(row.rows[0]!.tenant_id));
+  if (tenantEnv.corrupted) await writeEnvelopeAlarm(client, String(row.rows[0]!.tenant_id), nowMs);
   const quietViolated = isWithinQuietHours(
     nowMs,
     policy.quiet_hours.start_minute,
@@ -485,7 +487,7 @@ export async function editProposal(
             sql: `INSERT INTO audit_log (ts_utc, tenant_id, event_id, actor, entry_type, payload_json)
                   VALUES (?, ?, ?, 'SYSTEM', 'TRIGGER', ?)`,
             args: [
-              isoUtc(Date.now()),
+              isoUtc(nowMs),
               String(row.rows[0]!.tenant_id),
               prop.event_id,
               JSON.stringify({
@@ -497,11 +499,13 @@ export async function editProposal(
               }),
             ],
           })
-          .catch(() => {});
+          .catch((err: unknown) => {
+            console.error("editProposal: failed to write EDIT_ORPHAN alarm:", (err as Error).message);
+          });
         throw err;
       }
     }
     editIndex++;
-    if (editIndex > 50) throw new Error("editProposal: cannot allocate edit version");
+    if (editIndex > MAX_EDIT_VERSIONS) throw new Error("editProposal: cannot allocate edit version");
   }
 }

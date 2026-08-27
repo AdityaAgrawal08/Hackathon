@@ -21,7 +21,7 @@ function emit(name: "training" | "demo", customerCount: number, targetEvents: nu
   return { body, meta };
 }
 
-function main() {
+function main(): void {
   const which = process.argv.includes("--corpus")
     ? (process.argv[process.argv.indexOf("--corpus") + 1] ?? "all")
     : "all";
@@ -44,4 +44,9 @@ function main() {
   writeFileSync(join(OUT_DIR, "meta.json"), `${JSON.stringify(metas, null, 2)}\n`);
 }
 
-main();
+try {
+  main();
+} catch (err) {
+  console.error("seed failed:", err);
+  process.exit(1);
+}

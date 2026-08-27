@@ -48,6 +48,7 @@ export interface TransitionInput {
   toState: ProposalState;
   actor: string;
   note?: string | null;
+  nowMs?: number;
 }
 
 function isTerminal(state: string): boolean {
@@ -58,7 +59,7 @@ export async function transition(
   client: Client,
   input: TransitionInput,
 ): Promise<TransitionResult> {
-  const nowIso = isoUtc(Date.now());
+  const nowIso = isoUtc(input.nowMs ?? Date.now());
 
   const actor = input.actor.trim();
   if (!actor) throw new Error("transition: actor is required");
