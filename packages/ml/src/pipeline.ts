@@ -12,6 +12,7 @@ import {
   evaluateEnvelope,
   transition,
 } from "@arbiter/core/approval";
+import { diagnoseFailure } from "@arbiter/core/diagnosis";
 import { MAX_EDIT_VERSIONS } from "@arbiter/core/constants";
 import type { ActionId } from "@arbiter/core/decide";
 import { computeFeatures } from "./features.js";
@@ -153,6 +154,9 @@ export async function processEvent(
 
   const chosen = decision.chosen;
 
+  // ── Root-cause diagnosis (Track 3: "degradation → root cause → recovery action")
+  const diagnosis = diagnoseFailure(event.failure_code, computed.raw.failureClass);
+
   const tenantEnv = await getTenantEnvelope(client, event.tenant_id);
   if (tenantEnv.corrupted) {
     await writeEnvelopeAlarm(client, event.tenant_id, nowMs);
@@ -207,7 +211,7 @@ export async function processEvent(
         event.customer_id,
         model.id,
         policy.policy_version,
-        JSON.stringify(chosen),
+        JSON.stringify({ ...chosen, failureClass: computed.raw.failureClass }),
         chosen.evPaise,
         score.probability,
         JSON.stringify(score.attributions),
@@ -248,6 +252,25 @@ export async function processEvent(
         envelopeReasons: envelopeVerdict.reasons,
         refusals: decision.refusals,
         fallbackReason: decision.fallbackReason,
+      }),
+    ],
+  });
+
+  // ── Root-cause diagnosis audit (explicit, explainable step)
+  await client.execute({
+    sql: `INSERT INTO audit_log (ts_utc, tenant_id, event_id, actor, entry_type, payload_json)
+          VALUES (?, ?, ?, 'PIPELINE', 'DIAGNOSIS', ?)`,
+    args: [
+      nowIso,
+      event.tenant_id,
+      eventId,
+      JSON.stringify({
+        proposalId,
+        failureCode: diagnosis.failureCode,
+        failureClass: diagnosis.failureClass,
+        rootCause: diagnosis.rootCause,
+        recommendedIntervention: diagnosis.recommendedIntervention,
+        explanation: diagnosis.explanation,
       }),
     ],
   });

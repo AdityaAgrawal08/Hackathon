@@ -17,6 +17,7 @@
     "train": "tsx packages/ml/src/main.ts",
     "propose": "tsx packages/ml/src/propose.ts",
     "execute": "tsx packages/ml/src/execute.ts",
+    "recover": "tsx packages/ml/src/recover.ts",
     "db:migrate": "tsx packages/core/src/db/migrate.ts"
   },
   "devDependencies": {

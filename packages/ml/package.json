@@ -15,11 +15,13 @@
     "./dataset": "./src/dataset.ts",
     "./train": "./src/train.ts",
     "./narrative": "./src/narrative.ts",
-    "./pipeline": "./src/pipeline.ts"
+    "./pipeline": "./src/pipeline.ts",
+    "./recovery": "./src/recovery.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "train": "tsx src/main.ts"
+    "train": "tsx src/main.ts",
+    "recover": "tsx src/recover.ts"
   },
   "dependencies": {
     "@arbiter/shared": "workspace:*",
