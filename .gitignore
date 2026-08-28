@@ -33,6 +33,16 @@ Thumbs.db
 coverage/
 .vitest-cache/
 
+# Databases (default sqlite + stray in-memory file artifact)
+data/
+arbiter.sqlite
+arbiter.sqlite-wal
+arbiter.sqlite-shm
+:memory:
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+
 # Editor
 .idea/
 .vscode/*

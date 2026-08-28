@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     "./constants": "./src/constants.ts",
+    "./diagnosis": "./src/diagnosis.ts",
     "./db": "./src/db/index.ts",
     "./db/schema": "./src/db/schema.ts",
     "./ingest": "./src/ingest/index.ts",

@@ -147,8 +147,13 @@ export async function executeProposal(
     throw new Error(`executor: proposal in state ${p.state}, not APPROVED/AUTO_APPROVED`);
   }
 
-  // 2. Parse action from the proposal
-  const chosen = JSON.parse(p.action_json) as { action: string; evPaise: number };
+  // 2. Parse action from the proposal (failureClass is the PIPELINE-COMPUTED
+  //    class, not the untrusted seed hint — see pipeline.ts action_json).
+  const chosen = JSON.parse(p.action_json) as {
+    action: string;
+    evPaise: number;
+    failureClass: string;
+  };
   const actionId = chosen.action;
   const evPaise = chosen.evPaise;
 
@@ -163,7 +168,10 @@ export async function executeProposal(
   if (evRow.rows.length === 0) {
     throw new Error("executor: MISSING_EVENT — proposal references non-existent event");
   }
-  const failureClass = String(evRow.rows[0]!.failure_class_hint ?? "UNKNOWN");
+  // Prefer the computed class from action_json; fall back to the seed hint only
+  // if the proposal predates this fix.
+  const failureClass =
+    chosen.failureClass ?? String(evRow.rows[0]!.failure_class_hint ?? "UNKNOWN");
   const amountPaise = paise(Number(evRow.rows[0]!.amount_paise));
   const tenantId = String(evRow.rows[0]!.tenant_id);
 

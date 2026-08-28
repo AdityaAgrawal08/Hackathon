@@ -14,15 +14,22 @@ export type Db = ReturnType<typeof drizzle<typeof schema>>;
  * so orphan rows are impossible rather than "unlikely".
  */
 export async function openDb(dbPath?: string): Promise<{ client: Client; db: Db }> {
-  const path = resolve(dbPath ?? process.env.ARBITER_DB_PATH ?? DEFAULT_DB_PATH);
-  if (!path.startsWith(":memory:") && !path.startsWith("file:")) {
+  const raw = dbPath ?? process.env.ARBITER_DB_PATH ?? DEFAULT_DB_PATH;
+  // In-memory must be detected BEFORE path resolution: resolve(":memory:")
+  // would turn it into a relative FILE path (e.g. /cwd/:memory:), creating a
+  // persistent on-disk database that silently accumulates data across runs.
+  if (raw === ":memory:" || raw === "file::memory:?cache=shared") {
+    const client = createClient({ url: ":memory:" });
+    await client.executeMultiple(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=${SQLITE_BUSY_TIMEOUT_MS};`);
+    await client.executeMultiple("PRAGMA foreign_keys=ON;");
+    const db = drizzle(client, { schema });
+    return { client, db };
+  }
+  const path = resolve(raw);
+  if (!path.startsWith("file:")) {
     mkdirSync(dirname(path), { recursive: true });
   }
-  const url = path.startsWith("file:") || path.startsWith(":memory:")
-    ? path === ":memory:"
-      ? ":memory:"
-      : `file:${path.replace(/^file:/, "")}`
-    : `file:${path}`;
+  const url = path.startsWith("file:") ? path : `file:${path}`;
 
   const client = createClient({ url });
   await client.executeMultiple(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=${SQLITE_BUSY_TIMEOUT_MS};`);
