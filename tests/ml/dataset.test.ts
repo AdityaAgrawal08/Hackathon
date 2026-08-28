@@ -7,6 +7,7 @@
 import { describe, it, expect } from "vitest";
 import { deriveLabel } from "../../packages/ml/src/labels.js";
 import { buildTrainingDataset, datasetSha } from "../../packages/ml/src/dataset.js";
+import { FEATURE_COUNT } from "../../packages/ml/src/features.js";
 
 function handCorpus() {
   return {
@@ -77,7 +78,7 @@ describe("buildTrainingDataset", () => {
     const ids = ds.rows.map((r) => r.eventId);
     expect(ids).toEqual([...ids].sort());
     for (const r of ds.rows) {
-      expect(r.values.length).toBe(11);
+      expect(r.values.length).toBe(FEATURE_COUNT);
       for (const v of r.values) expect(Number.isFinite(v)).toBe(true);
     }
   });

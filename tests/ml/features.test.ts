@@ -9,6 +9,7 @@ import {
   computeFeatures,
   classifyByCode,
   inferPayday,
+  deriveLtvSignals,
   FEATURE_COUNT,
   FEATURE_NAMES,
 } from "../../packages/ml/src/features.js";
@@ -150,5 +151,49 @@ describe("computeFeatures", () => {
     expect(recent.values[10]).toBeGreaterThan(0);
     expect(recent.values[10]).toBeLessThan(ancient.values[10]!);
     expect(ancient.values[10]).toBeLessThanOrEqual(1);
+  });
+
+  it("LTV features: derived signals scale with priors/responsiveness/opt-out", () => {
+    const whale = computeFeatures({
+      ...baseEvent,
+      priorFailureAmountsPaise: [],
+      priorFailureCount: 0,
+      customer: {
+        paydayPattern: { "27": 3 },
+        channelResponsiveness: 0.9,
+        priorSuccessCount: 40,
+        joinedAtUtc: "2020-01-01T00:00:00.000Z",
+        optedOut: false,
+      },
+    });
+    const churner = computeFeatures({
+      ...baseEvent,
+      priorFailureAmountsPaise: [],
+      priorFailureCount: 0,
+      customer: {
+        paydayPattern: { "27": 3 },
+        channelResponsiveness: 0.1,
+        priorSuccessCount: 1,
+        joinedAtUtc: "2026-01-01T00:00:00.000Z",
+        optedOut: true,
+      },
+    });
+    // ltv_paise_norm (idx 11) grows with prior success count
+    expect(whale.values[11]!).toBeGreaterThan(churner.values[11]!);
+    // churn_risk_norm (idx 12) higher for unresponsive + opted-out + new
+    expect(churner.values[12]!).toBeGreaterThan(whale.values[12]!);
+    for (const v of [whale.values[11]!, whale.values[12]!, churner.values[11]!, churner.values[12]!]) {
+      expect(v).toBeGreaterThanOrEqual(0);
+      expect(v).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it("deriveLtvSignals: LTV proxy = priorSuccessCount × avg ticket; churn rises with opt-out", () => {
+    expect(
+      deriveLtvSignals({ priorSuccessCount: 10, channelResponsiveness: 0.5, joinedAtUtc: "2025-01-01T00:00:00.000Z", optedOut: false }, "2026-01-01T00:00:00.000Z").ltvPaise,
+    ).toBe(10 * 50_000);
+    const a = deriveLtvSignals({ channelResponsiveness: 0.5, optedOut: false }, "2026-01-01T00:00:00.000Z").churnRiskBp;
+    const b = deriveLtvSignals({ channelResponsiveness: 0.5, optedOut: true }, "2026-01-01T00:00:00.000Z").churnRiskBp;
+    expect(b).toBeGreaterThan(a);
   });
 });

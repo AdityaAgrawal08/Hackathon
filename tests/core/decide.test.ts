@@ -18,7 +18,11 @@ import {
   defaultPolicy,
   parsePolicyPack,
 } from "../../packages/core/src/decide/policy.js";
-import { decide, type DecideInput } from "../../packages/core/src/decide/engine.js";
+import {
+  decide,
+  ltvWeight,
+  type DecideInput,
+} from "../../packages/core/src/decide/engine.js";
 
 const NOW = Date.UTC(2026, 1, 15, 10, 0, 0); // 15:30 IST — not quiet hours
 
@@ -198,5 +202,46 @@ describe("golden cases (plan gate)", () => {
     expect(out.ranked.map((r) => r.action)).toEqual(
       expect.arrayContaining(["NO_ACTION"]),
     );
+  });
+
+  it("ltvWeight: 1 without signals; boosts whale/loyal; suppresses churner; bounded [0.2,1.5]", () => {
+    expect(ltvWeight(undefined, undefined)).toBe(1);
+    expect(ltvWeight(5_00_00_000, 0)).toBe(1.5); // max LTV, no churn
+    expect(ltvWeight(0, 10_000)).toBeCloseTo(0.3, 10); // zero LTV, certain churn
+    expect(ltvWeight(1_00_00_00_000, -1_000)).toBe(1.5); // clamped high
+    expect(ltvWeight(0, 99_999)).toBeCloseTo(0.3, 10); // churn > 1 clamps to 1
+    // monotonic: more LTV ⇒ heavier; more churn ⇒ lighter
+    expect(ltvWeight(4_00_00_000, 1_000)).toBeGreaterThan(ltvWeight(1_00_00_000, 1_000));
+    expect(ltvWeight(4_00_00_000, 5_000)).toBeLessThan(ltvWeight(4_00_00_000, 1_000));
+  });
+
+  it("LTV-aware EV: scales magnitude, preserves action ordering (chosen unchanged)", () => {
+    const base = input();
+    const plain = decide(base);
+
+    // Whale: high LTV, low churn ⇒ EV gross scaled UP (×1.5), same winner.
+    const whale = decide({ ...base, ltvPaise: 5_00_00_000, churnRiskBp: 0 });
+    expect(whale.chosen.action).toBe(plain.chosen.action);
+    const plainGross = plain.chosen.evPaise + CONTACT_COST_PAISE[plain.chosen.action];
+    const whaleGross = whale.chosen.evPaise + CONTACT_COST_PAISE[whale.chosen.action];
+    expect(whaleGross).toBe(Math.round(plainGross * 1.5));
+
+    // Churner: zero LTV, certain churn ⇒ gross scaled DOWN (×~0.3), same winner.
+    const churner = decide({ ...base, ltvPaise: 0, churnRiskBp: 10_000 });
+    expect(churner.chosen.action).toBe(plain.chosen.action);
+    const churnerGross = churner.chosen.evPaise + CONTACT_COST_PAISE[churner.chosen.action];
+    expect(churnerGross).toBe(Math.round(plainGross * 0.3));
+
+    // The DECISION is invariant: a per-customer scalar cannot change which
+    // action maximises EV. (Tail-of-ranking near-ties may permute after
+    // integer rounding of gross — inconsequential by definition of a tie.)
+    expect(churner.chosen.action).toBe(plain.chosen.action);
+    expect(whale.chosen.action).toBe(plain.chosen.action);
+
+    // EV stays integer paise and ≤ amount under weighting.
+    for (const r of whale.ranked) {
+      expect(Number.isInteger(r.evPaise)).toBe(true);
+      expect(r.evPaise).toBeLessThanOrEqual(base.amountPaise);
+    }
   });
 });

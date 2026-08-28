@@ -19,7 +19,17 @@ import type { Client } from "@libsql/client";
 import { processEvent } from "./pipeline.js";
 import { executeProposal } from "@arbiter/core/executor";
 import { diagnoseFailure } from "@arbiter/core/diagnosis";
-import { paise, type Paise } from "@arbiter/shared";
+import { paise, type Paise, hashSeed } from "@arbiter/shared";
+
+/**
+ * Deterministic control-arm outcome: given an event's predicted recovery
+ * probability, decide if it would self-recover without intervention.
+ * Uses a hash of the event ID for reproducibility — no RNG.
+ */
+function controlOutcome(eventId: string, probability: number): "SUCCEEDED" | "FAILED" {
+  const draw = hashSeed(eventId + "|control") % 10_000;
+  return draw < Math.round(probability * 10_000) ? "SUCCEEDED" : "FAILED";
+}
 
 export interface PerEventResult {
   eventId: string;
@@ -28,6 +38,8 @@ export interface PerEventResult {
   amountPaise: number;
   rootCause: string | null;
   intervention: string | null;
+  /** Control-arm outcome (what would happen with NO intervention). */
+  controlOutcome: "SUCCEEDED" | "FAILED" | null;
 }
 
 export interface BatchRecoveryReport {
@@ -39,6 +51,10 @@ export interface BatchRecoveryReport {
   totalAtRiskPaise: number;
   /** Actually recovered (SUCCEEDED outcomes). */
   recoveredPaise: number;
+  /** Control-arm recovered (what would happen with NO intervention). */
+  controlRecoveredPaise: number;
+  /** Incremental recovery: pipeline - control (the true measured lift). */
+  incrementalRecoveredPaise: number;
   /** Routed to human review / ambiguous (compliant escalation). */
   escalatedPaise: number;
   /** Stopped by policy / FAILED (stopping rules). */
@@ -71,6 +87,8 @@ export async function recoverBatch(
     skippedCount: 0,
     totalAtRiskPaise: 0,
     recoveredPaise: 0,
+    controlRecoveredPaise: 0,
+    incrementalRecoveredPaise: 0,
     escalatedPaise: 0,
     stoppedPaise: 0,
     contactsMade: 0,
@@ -96,6 +114,7 @@ export async function recoverBatch(
         amountPaise: 0,
         rootCause: null,
         intervention: null,
+        controlOutcome: null,
       });
       continue;
     }
@@ -108,6 +127,7 @@ export async function recoverBatch(
         amountPaise: 0,
         rootCause: null,
         intervention: null,
+        controlOutcome: null,
       });
       continue;
     }
@@ -122,6 +142,14 @@ export async function recoverBatch(
       evRow.rows.length > 0 ? paise(Number(evRow.rows[0]!.amount_paise)) : paise(0);
     const failureCode =
       evRow.rows.length > 0 ? String(evRow.rows[0]!.failure_code) : "UNKNOWN_CODE";
+
+    // 2b. Control-arm: what would happen with NO intervention?
+    // Uses the model's predicted probability for this event.
+    const probability = result.probability ?? 0;
+    const ctlOutcome = controlOutcome(eventId, probability);
+    if (ctlOutcome === "SUCCEEDED") {
+      report.controlRecoveredPaise += amountPaise;
+    }
 
     // 3. Root-cause diagnosis (explicit, explainable)
     const diagnosis = diagnoseFailure(failureCode, "UNKNOWN");
@@ -182,8 +210,12 @@ export async function recoverBatch(
       amountPaise,
       rootCause: diagnosis.rootCause,
       intervention: diagnosis.recommendedIntervention,
+      controlOutcome: ctlOutcome,
     });
   }
+
+  // Incremental lift: true measured recovery above natural baseline.
+  report.incrementalRecoveredPaise = report.recoveredPaise - report.controlRecoveredPaise;
 
   return report;
 }

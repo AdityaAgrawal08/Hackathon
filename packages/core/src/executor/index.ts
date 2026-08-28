@@ -16,6 +16,7 @@ import { isoUtc, paise } from "@arbiter/shared";
 import { transition } from "../approval/state_machine.js";
 import { multiplierFor, type ActionId, type FailureClassId } from "../decide/catalog.js";
 import { STALE_EXECUTION_MINUTES } from "../constants.js";
+import { getProvider } from "./providers/index.js";
 
 /* ── types ─────────────────────────────────────────────────────── */
 
@@ -207,8 +208,21 @@ export async function executeProposal(
     throw new Error(`executor: CONCURRENT_MODIFICATION on ${proposalId}`);
   }
 
-  // 7. Run the deterministic action (the determinism barrier)
-  const outcome = deterministicOutcome(actionId, failureClass, evPaise, amountPaise);
+  // 7. Run the action via the configured provider (simulation or Razorpay dry-run/live)
+  const provider = getProvider();
+  const providerCtx = {
+    proposalId,
+    actionId,
+    failureClass,
+    amountPaise,
+    evPaise,
+    tenantId,
+    rzpRequestRef: ref,
+    idempotencyKey: idemKey,
+    nowMs,
+  };
+  const providerResult = await provider.execute(providerCtx);
+  const outcome = providerResult.outcome;
 
   // 8. Record outcome
   const finalState = outcome === "SUCCEEDED" ? "EXECUTED" : "FAILED";
@@ -242,6 +256,8 @@ export async function executeProposal(
         idempotencyKey: idemKey,
         rzpRequestRef: ref,
         evPaise,
+        provider: provider.name,
+        dryRunPayload: providerResult.dryRunPayload ?? null,
       }),
     ],
   });

@@ -22,6 +22,24 @@ export interface DecideInput {
   customerOptedOut?: boolean;
   multipliers?: Multipliers;
   inferredPaydayDay?: number | null;
+  /** Estimated lifetime value (paise). When supplied, EV is LTV-weighted. */
+  ltvPaise?: number;
+  /** Predicted churn risk in basis points (0..10000). */
+  churnRiskBp?: number;
+}
+
+/**
+ * LTV weight for the EV calculation (§4.4). A per-customer scalar in [0.2, 1.5]:
+ * high-LTV / low-churn customers are worth more aggressive recovery;
+ * low-LTV / high-churn customers are de-prioritized so we don't spend a
+ * ₹50 human touch chasing a ₹49 soon-to-churn customer.
+ * When LTV signals are absent the weight is 1 (backward compatible).
+ */
+export function ltvWeight(ltvPaise?: number, churnRiskBp?: number): number {
+  if (ltvPaise == null || churnRiskBp == null) return 1;
+  const ltvScore = clamp01(ltvPaise / 5_00_00_000);
+  const churn = clamp01(churnRiskBp / 10_000);
+  return clamp(1.0 + 0.5 * ltvScore - 0.7 * churn, 0.2, 1.5);
 }
 
 export interface RankedAction {
@@ -46,6 +64,9 @@ export interface DecideOutput {
 
 function clamp01(x: number): number {
   return Math.min(1, Math.max(0, x));
+}
+function clamp(x: number, lo: number, hi: number): number {
+  return Math.min(hi, Math.max(lo, x));
 }
 
 function scheduleFor(action: ActionId, input: DecideInput): number | null {
@@ -85,7 +106,7 @@ function evaluateAction(
   };
   const violations = evaluateConstraints(input.policy, ctx);
 
-  const gross = percentBp(amount, pBp);
+  const gross = Math.round(percentBp(amount, pBp) * ltvWeight(input.ltvPaise, input.churnRiskBp));
   const ev: RankedAction = {
     action,
     evPaise: gross - CONTACT_COST_PAISE[action],
