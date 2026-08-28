@@ -92,19 +92,27 @@ async function main(): Promise<void> {
   // Run the bounded recovery loop and MEASURE.
   const report = await recoverBatch(client, eventIds, { nowMs, batchId: `demo_${nowMs}` });
 
-  // ── Report (the bar: measured money recovered across a batch) ──
+  // ── Report (the bar: measured money recovered across a batch + control-arm lift) ──
   const pct = report.totalAtRiskPaise > 0
     ? ((report.recoveredPaise / report.totalAtRiskPaise) * 100).toFixed(1)
     : "0.0";
+  const controlPct = report.totalAtRiskPaise > 0
+    ? ((report.controlRecoveredPaise / report.totalAtRiskPaise) * 100).toFixed(1)
+    : "0.0";
+  const incrementalPct = report.totalAtRiskPaise > 0
+    ? ((report.incrementalRecoveredPaise / report.totalAtRiskPaise) * 100).toFixed(1)
+    : "0.0";
   console.log("══════════════════════════════════════════════════════════════");
-  console.log("  BATCH RECOVERY REPORT");
+  console.log("  BATCH RECOVERY REPORT  (with control-arm comparison)");
   console.log("══════════════════════════════════════════════════════════════");
   console.log(`  Batch ID            : ${report.batchId}`);
   console.log(`  Events in batch     : ${report.eventCount}`);
   console.log(`  Processed / skipped : ${report.processedCount} / ${report.skippedCount}`);
   console.log("");
   console.log(`  At-risk revenue     : ${formatINR(paise(report.totalAtRiskPaise))}`);
-  console.log(`  RECOVERED (meas.)   : ${formatINR(paise(report.recoveredPaise))}  (${pct}%)`);
+  console.log(`  RECOVERED (pipeline): ${formatINR(paise(report.recoveredPaise))}  (${pct}%)`);
+  console.log(`  CONTROL (no action) : ${formatINR(paise(report.controlRecoveredPaise))}  (${controlPct}%)`);
+  console.log(`  INCREMENTAL lift    : ${formatINR(paise(report.incrementalRecoveredPaise))}  (${incrementalPct}%)`);
   console.log(`  Escalated (human)   : ${formatINR(paise(report.escalatedPaise))}  [${report.humanEscalations} esc.]`);
   console.log(`  Stopped (policy)    : ${formatINR(paise(report.stoppedPaise))}`);
   console.log("");

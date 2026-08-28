@@ -13,6 +13,11 @@ import { hashSeed } from "@arbiter/shared";
 
 export const FEATURE_VERSION = "feat-v1";
 
+/** Proxy average ticket used to estimate lifetime value from prior successes. */
+export const ESTIMATED_AVG_TICKET_PAISE = 50_000;
+/** LTV at/above which the LTV weight saturates at its maximum. */
+export const LTV_NORM_PAISE = 5_00_00_000;
+
 export const FEATURE_NAMES = [
   "f_class_soft", // SOFT_RETRYABLE onehot (UNKNOWN = reference class)
   "f_class_hard", // HARD_METHOD_DEAD
@@ -25,6 +30,8 @@ export const FEATURE_NAMES = [
   "prior_failure_norm", // priorFailureCount / 5, clamped
   "channel_responsiveness", // merchant-supplied prior; default 0.5
   "tenure_norm", // days since joined / 400, clamped
+  "ltv_paise_norm", // estimated lifetime value, normalized by LTV_NORM_PAISE
+  "churn_risk_norm", // predicted churn risk, 0..1 (higher ⇒ more likely to leave)
 ] as const;
 
 export type FeatureName = (typeof FEATURE_NAMES)[number];
@@ -39,6 +46,38 @@ export interface FeatureCustomerContext {
   channelResponsiveness?: number | null;
   priorSuccessCount?: number | null;
   joinedAtUtc?: string | null;
+  optedOut?: boolean | null;
+}
+
+function clamp01(x: number): number {
+  return Math.min(1, Math.max(0, x));
+}
+function clamp(x: number, lo: number, hi: number): number {
+  return Math.min(hi, Math.max(lo, x));
+}
+
+/**
+ * Derive LTV + churn signals from a customer's *existing* profile (no new PII,
+ * no schema change). LTV is a proxy: prior successes × estimated avg ticket.
+ * Churn risk rises with unresponsiveness + opt-out and falls with tenure.
+ * Pure + deterministic so the money path stays auditable.
+ */
+export function deriveLtvSignals(
+  ctx: FeatureCustomerContext | null,
+  occurredAtUtc?: string,
+): { ltvPaise: number; churnRiskBp: number } {
+  const prior = Math.max(0, ctx?.priorSuccessCount ?? 0);
+  const ltvPaise = Math.round(prior * ESTIMATED_AVG_TICKET_PAISE);
+
+  const resp = clamp01(ctx?.channelResponsiveness ?? 0.5);
+  const optedOut = ctx?.optedOut ? 1 : 0;
+  const tenureNorm = ctx?.joinedAtUtc && occurredAtUtc && Number.isFinite(Date.parse(occurredAtUtc))
+    ? clamp01(
+        Math.max(0, (Date.parse(occurredAtUtc) - Date.parse(ctx.joinedAtUtc)) / 86_400_000) / 400,
+      )
+    : 0;
+  const churn = clamp01((1 - resp) * 0.6 + optedOut * 0.4 - tenureNorm * 0.25);
+  return { ltvPaise, churnRiskBp: Math.round(churn * 10_000) };
 }
 
 export interface FeatureInput {
@@ -59,6 +98,8 @@ export interface ComputedFeatures {
     inferredPaydayDay: number | null;
     paydayObservations: number;
     failureClass: FailureClassV1;
+    ltvPaise: number;
+    churnRiskBp: number;
   };
 }
 
@@ -181,6 +222,8 @@ export function computeFeatures(input: FeatureInput): ComputedFeatures {
       )
     : 0;
 
+  const ltv = deriveLtvSignals(cust, input.occurredAtUtc);
+
   const values = [
     ONEHOT_CLASSES.includes(cls as (typeof ONEHOT_CLASSES)[number]) &&
     cls === "SOFT_RETRYABLE"
@@ -196,6 +239,8 @@ export function computeFeatures(input: FeatureInput): ComputedFeatures {
     Math.min(1, input.priorFailureCount / 5),
     cust?.channelResponsiveness ?? 0.5,
     Math.min(1, tenureDays / 400),
+    clamp01(ltv.ltvPaise / LTV_NORM_PAISE),
+    ltv.churnRiskBp / 10_000,
   ];
 
   if (values.some((v) => !Number.isFinite(v))) {
@@ -209,6 +254,8 @@ export function computeFeatures(input: FeatureInput): ComputedFeatures {
       inferredPaydayDay: pay.day,
       paydayObservations: pay.observations,
       failureClass: cls,
+      ltvPaise: ltv.ltvPaise,
+      churnRiskBp: ltv.churnRiskBp,
     },
   };
 }

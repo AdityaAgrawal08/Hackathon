@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "exports": {
+"exports": {
     "./features": "./src/features.ts",
     "./features_store": "./src/features_store.ts",
     "./labels": "./src/labels.ts",
@@ -16,12 +16,14 @@
     "./train": "./src/train.ts",
     "./narrative": "./src/narrative.ts",
     "./pipeline": "./src/pipeline.ts",
-    "./recovery": "./src/recovery.ts"
+    "./recovery": "./src/recovery.ts",
+    "./federation": "./src/federation.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "train": "tsx src/main.ts",
-    "recover": "tsx src/recover.ts"
+    "recover": "tsx src/recover.ts",
+    "federate": "tsx src/federate.ts"
   },
   "dependencies": {
     "@arbiter/shared": "workspace:*",

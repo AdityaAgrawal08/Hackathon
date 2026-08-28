@@ -134,6 +134,7 @@ export async function processEvent(
       channelResponsiveness: customer.channel_responsiveness,
       priorSuccessCount: customer.prior_success_count,
       joinedAtUtc: customer.joined_at_utc,
+      optedOut: customer.opted_out !== 0,
     },
   });
   await saveFeatures(client, [{ eventId, values: computed.values }], nowMs);
@@ -150,6 +151,8 @@ export async function processEvent(
     lastContactAtMs: null,
     customerOptedOut: customer.opted_out !== 0,
     inferredPaydayDay: computed.raw.inferredPaydayDay,
+    ltvPaise: computed.raw.ltvPaise,
+    churnRiskBp: computed.raw.churnRiskBp,
   });
 
   const chosen = decision.chosen;
@@ -396,6 +399,7 @@ export async function editProposal(
       channelResponsiveness: ctxData.customer.channel_responsiveness,
       priorSuccessCount: ctxData.customer.prior_success_count,
       joinedAtUtc: ctxData.customer.joined_at_utc,
+      optedOut: ctxData.customer.opted_out !== 0,
     },
   });
   if (
@@ -416,6 +420,8 @@ export async function editProposal(
     attemptsSoFar: ctxData.priorFailureCount,
     lastContactAtMs: null,
     inferredPaydayDay: recomputed.raw.inferredPaydayDay,
+    ltvPaise: recomputed.raw.ltvPaise,
+    churnRiskBp: recomputed.raw.churnRiskBp,
   });
 
   const target = decision.ranked.find((r) => r.action === actionId);

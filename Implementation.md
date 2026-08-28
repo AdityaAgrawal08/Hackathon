@@ -184,3 +184,232 @@ Ordered by win-probability impact. Each item lists effort (S/M/L) and target mod
 - Federated FL for payments/fraud: arxiv.org/html/2603.13617 (NVIDIA FLARE), arxiv.org/html/2405.08299 , eureka.patsnap.com , researchgate federated fraud studies
 - India multilingual voice/WhatsApp dunning: callmissed.com , gupshup.ai/whatsapp-api , whatsboost.in , caller.digital , truefan.ai
 - Razorpay Agent Studio / Sprint 2026 coverage: outlookbusiness.com , medianama.com (Sarvam/voice agent, MeitY HITL), analyticsindiamag.com , cognitute.org case study
+
+---
+
+## 8. Brutal Assessment Updated: Competitor Intelligence (August 2026)
+
+### 8.1 What the actual competition looks like (Track 3 peers)
+
+| Project | Architecture | Key Differentiator | Honest Gap vs ARBITER |
+|---|---|---|---|
+| **Reflex** (abhinav-phi) | FastAPI + React + PostgreSQL, live on Vercel/Railway | Pre-registered eval (git-tagged before results), hash-chained ledger, rules-first + LLM tail, **real Razorpay test-mode webhook integration**, degraded mode, kill-switch measured at 25ms | **+10.05pp** vs tuned-naive (missed +15pp gate); LLM tail measured **zero delta** under real provider; audit ledger is tamper-evident not tamper-proof; no cross-PSP, no federated, no LTV-aware EV |
+| **Recoup** (Shikari-ai) | Zero-dep Python, 448 tests, 44/44 mutations caught | **Churn-priced EV** (`P(churn)×LTV`), promise-to-pay loop, voice dispatch protocol, shadow mode (legacy action returned, agent logged), RBI pre-debit notice sequenced as guardrail, **30/30 held-out seeds positive**, AUC 0.777 = 93% of oracle ceiling | Outcomes simulated; issuer-health monitor contributed **zero lift** (detected 0/60 outages); below ~300 receivables rulebook wins; no cross-PSP, no federated, no LTV as feature (only churn cost) |
+| **HappyGarg8o** | Streamlit + Supabase, 56 tests, zero-cred run | 7-rule explainable engine, **TRAI-aligned 9am–9pm voice window**, `DRY_RUN` default true with `simulated: true` stamping, dual stopping-rule check (decide + execute) | No ML at all (pure rules); auto-retry is stub; no Razorpay webhook listener; no cross-PSP, no federated, no audit ledger |
+| **RecoverAI** (AdithyaAbburi) | FastAPI + Streamlit + Ollama (DeepSeek-Coder local) | **ERV optimizer** (math-max net recovery), local LLM diagnosis, deterministic policy guardrails (`MAX_ATTEMPTS=2`, ≥₹25k → manual), SQLite WAL audit | 1,000 txn eval but `--llm-limit 2` (rest fallback); no held-out seeds reported; no cross-PSP, no federated, no rail-health, no promise-to-pay |
+
+### 8.2 Updated verdict: Can ARBITER win *as-is*?
+
+**No — and the bar is higher than §1 assessed.** Three of four public Track-3 entries already demonstrate:
+- Real Razorpay test-mode integration (Reflex: live webhook ingestion, HMAC-verified)
+- Pre-registered / held-out evaluation with honest gate reporting (Reflex, Recoup)
+- Churn-priced EV + promise-to-pay + voice as a *protocol* not a stub (Recoup)
+- TRAI-aligned stopping rules + dual-check execution (HappyGarg8o)
+- Local LLM diagnosis behind a circuit breaker (RecoverAI, Reflex)
+
+**ARBITER's remaining unique assets** (still defensible if we ship them *this week*):
+1. **Cross-PSP post-failure recovery** — *zero* competitor has this (Optimizer routes new txns; orchestrators route new attempts; none autonomously recover a failed Razorpay charge via a different rail as a policy-bounded agent)
+2. **Federated merchant intelligence for recovery** — FL exists for fraud (NVIDIA FLARE, JPMorgan, Stripe), **not for recovery response modeling** (Recoup's model is single-merchant)
+3. **RBI/DPDP-aware constraint engine** — Recoup encodes RBI pre-debit notice as *one* guardrail; ARBITER's `policy.ts`/`envelope.ts` is a *general* fail-closed constraint framework that can encode NPCI retry ceilings, DPDP consent, TRAI DLT, AFA thresholds as *data*
+4. **Governed multimodal orchestration** — competitors have voice/WhatsApp as *channels*; ARBITER has them as *EV-ranked actions inside a guardrailed envelope with hash-chained audit*
+
+**The gap to close *this week*:** Real Razorpay touch (dry-run Payment Link/UPI Autopay payload + `rzpRequestRef` in audit log) + LTV-aware EV + one moat demo (cross-PSP **or** federated). Without these, we are a well-engineered "also-ran" against Reflex/Recoup.
+
+---
+
+## 9. What Wins Razorpay Hackathon 2026: Judging Criteria & Engineer/PM Preferences
+
+### 9.1 Official evaluation criteria (from Razorpay career page & Buildathon page)
+
+| Criterion | Weight | What it means for Track 3 |
+|---|---|---|
+| **Problem Taste** | High | Did you identify a *real* revenue-leak problem with financial significance? (Not "retry failed payments" — that's solved. "Cross-PSP recovery when primary rail fails" = taste.) |
+| **Build Quality** | High | Code structure, repo organization, execution stability, architectural robustness. 264 tests passing + typecheck clean = table stakes. Mutation testing (Recoup: 44/44 caught) = signal. |
+| **AI Judgment** | High | "Whether AI tools, LLMs, or agents were applied *appropriately* instead of forcing unnecessary tech stacks." (Source: coursejoiner.com, cloudsutra.in) **Rules-first + LLM-tail** (Reflex) or **LLM for diagnosis only, never guardrails** (Recoup, RecoverAI) = correct judgment. Pure LLM agent = negative signal. |
+| **Failure Recovery** | High | "How the applicant identified system failures at runtime and engineered graceful fallbacks." Degraded mode (Reflex), circuit breaker (RecoverAI), shadow mode (Recoup), kill-switch with measured drain (Reflex: 25ms) = winning patterns. |
+
+### 9.2 What Razorpay engineers/PMs *actually* reward (synthesized from FTX 2026 launches, Agent Studio blogs, hiring posts)
+
+| Preference | Evidence | ARBITER Action |
+|---|---|---|
+| **Governance > Autonomy** | Agent Studio principles blog: "Compliance boundaries — the action must be within regulatory and policy limits", "Amount validation — payment amounts verified against merchant config", "PII handling — processed per consent framework" (razorpay.com/blog/razorpay-agent-studio-principles-guardrails-and-merchant-control) | Our `envelope.ts` + `policy.ts` fail-closed constraint engine **is** this. Demo it. |
+| **Measured recovery with provenance** | Buildathon brief: "Show measured money recovered across a batch, with compliant escalation, stopping rules, and an audit trail." (razorpay.com/buildathon) | `recover.ts` prints this; make the numbers *held-out* not synthetic. |
+| **India-specific depth** | UPI Autopay interoperability (multi-gateway routing), NPCI 15k/1L limits, pre-debit notice, TRAI quiet hours, DPDP consent, payday-aligned retries (razorpay.com/blog/upi-autopay-with-intelligent-revenue-protect, razorpay.com/blog/master-recurring-payments-upi-autopay-guide) | §4.3 regulatory profile + §4.5 rail-health + payday window = our moat. |
+| **Agent Studio adjacency, not collision** | Agent Studio = no-code marketplace (Subscription Recovery, Cart Abandonment, Dispute Responder, Cashflow Forecaster). Judges know this product. | Position ARBITER as the **governance layer** Agent Studio agents *lack*: provable audit, cross-merchant learning, cross-PSP recovery, regulatory auto-escalation. |
+| **Real Razorpay APIs (even sandbox)** | Reflex uses Razorpay test-mode webhooks + Payment Links. Recoup ingests real webhook payloads. HappyGarg8o stubs Payment Links. | **Non-negotiable:** `executor/razorpay.ts` emitting real Payment Link / UPI Autopay retry request objects. |
+| **Honesty about simulation** | Reflex: "Headline actuals [SIMULATED]", "G1 gate NOT met (+10.05 < +15)". Recoup: "Outcomes are simulated. The comparison is the claim." | Our `recover.ts` must label `SIMULATED` prominently and report held-out CI. |
+
+### 9.3 The "hiring funnel" reality
+
+- **No resume screening, no aptitude test, no GD.** Panel interview = defend your architecture decisions. (linkedin.com/posts/razorpay-careers, cloudsutra.in)
+- **5-minute pitch video + public repo + architecture docs** = submission packet. (fresherjobinfo.in)
+- **Internship = ₹75k/month, Bangalore, 6 or 12 months, students only.** Judges = future hiring managers. They want to see: *can this person ship production-grade fintech code with correct priorities?*
+
+**Winning pitch structure (inferred from Reflex/Recoup READMEs):**
+1. Problem thesis (1 slide): "Failed payments are a decision under constraints, not a cron job."
+2. Architecture diagram (1 slide): Pulse → Brain → Shield → Hands → Ledger → Proof
+3. **Live demo** (2 min): Real Razorpay dry-run payload → audit log → control-arm comparison
+4. **Honest numbers** (1 min): "Held-out: +X pp vs rulebook, CI [a,b], cost/₹100 = Y, violations = 0"
+5. **Moat** (30s): "Cross-PSP recovery + Federated learning + RBI-aware constraints — things a single PSP structurally cannot ship."
+6. **What broke & fixed** (30s): Shows engineering maturity.
+
+---
+
+## 10. Razorpay's Current Product Surface (Deep Dive): What They Actually Ship for Recovery
+
+### 10.1 Failed Payment Recovery (launched Feb 2024, active 2025)
+- **What:** Auto-sends personalized payment links via **WhatsApp, Email, SMS** on failure.
+- **Claim:** "Recover up to 20% of failed payments." 94% businesses find it relevant; 63% already use retargeting.
+- **Gap vs ARBITER:** No EV optimization, no per-failure-class diagnosis, no policy-bounded autonomy, no cross-PSP, no LTV awareness, no measured control-arm.
+
+### 10.2 Intelligent Payment Retry (Feb 2024)
+- **What:** Smart retry timing for failed recurring payments.
+- **Gap:** Single-rail (Razorpay only). No cross-rail recovery. No measured control-arm.
+
+### 10.3 UPI Autopay v2 — Intelligent Revenue-Protect (launched FTX 2026, blog Mar 2026)
+| Layer | Capability | Source |
+|---|---|---|
+| **Intelligent Retry Engine (beta)** | Merchant-configurable retry strategies: cadence, templates, custom logic. Retries timed to salary credits (1st–7th). | razorpay.com/blog/upi-autopay-with-intelligent-revenue-protect |
+| **WhatsApp-led Retention** | Branded recovery links on WhatsApp for: registration drop-off, mandate cancellation win-back, failed debit recovery (payment link). | Same |
+| **Mandate Interoperability (beta)** | Execute mandates registered on *other platforms* via Razorpay APB Switch. Multi-gateway routing, **recover up to 5% more debits**. No re-registration. | razorpay.com/blog/upi-autopay-interoperability |
+| **Banking Switch Monitoring** | Continuous monitoring of banking switches; dynamic reroute on latency/downtime. **99.99% availability** for mandate execution. | Same |
+| **2026 NPCI Guidelines** | ₹15k standard / ₹1L enhanced (SIP, insurance, credit bills) AFA ceiling. **Off-peak execution windows** (mid-day/late night). **1 original + 3 retries** max cap. 24h pre-debit notice mandatory. | razorpay.com/blog/master-recurring-payments-upi-autopay-guide |
+
+**Critical insight:** UPI Autopay v2 **already does cross-gateway routing for mandates** (Interoperability) and **WhatsApp recovery links**. But: it's *mandate-scoped*, not a general post-failure recovery agent; it doesn't do EV optimization across rails; it doesn't have a governance envelope; it doesn't learn across merchants.
+
+### 10.4 Optimizer (AI-Powered Payments Infinity Router)
+- **What:** Gateway-agnostic routing for **new transactions**. Random forest over **1B+ transactions**. DIY dashboard for manual rules + Smart Router (auto). Claims **5% uplift → 10% revenue increase**.
+- **Gap:** Routes **new auths**, not **post-failure recovery**. No autonomous agent, no HITL, no audit trail for recovery decisions.
+
+### 10.5 Agent Studio (FTX 2026, built on Anthropic Claude Agent SDK)
+| Agent | Function | Partners |
+|---|---|---|
+| **Subscription Recovery Agent** | Analyzes failed subscription payments, applies smarter retry logic, triggers targeted nudges. **Voice-led** (ElevenLabs). | ElevenLabs |
+| **Abandoned Cart Conversion Agent** | Voice-led follow-up on checkout drop-off, understands why, sends payment link with discount. | Nugget (Zomato), SuperU |
+| **Dispute Responder Agent** | Gathers evidence from Razorpay/Shopify/Shiprocket, scores win probability, submits response or draft. | — |
+| **Cashflow Forecaster Agent** | Predicts cashflow patterns, identifies liquidity gaps. | — |
+| **No-code Agent Builder** | Describe task in plain English, choose systems, set rules. Instant creation. | — |
+
+**Integrations:** Shopify, Shiprocket, WhatsApp, ElevenLabs, Slack, Tally, QuickBooks.
+**Platform layer:** Agentic Experience Platform = Agentic Onboarding (5 min), Agentic Dashboard (NL query: "reconcile this bank statement"), Agentic Integration (Claude Code, Replit, Emergent).
+
+**ARBITER positioning:** Agent Studio agents are **no-code, merchant-deployed, single-merchant, no deep guardrails/audit, no cross-merchant learning, no cross-PSP recovery, no regulatory auto-escalation**. ARBITER = the **governance + intelligence layer** that makes agents auditable, measurable, and collectively intelligent.
+
+### 10.6 Third Watch (Risk/Fraud)
+- Real-time fraud detection, risk scoring. **Not a recovery product** — but ARBITER's `RISK_FLAGGED` failure class should *consume* Third Watch signals (fraud → `manual_review` guardrail).
+
+### 10.7 Smart Collect 2.0
+- NEFT/RTGS/IMPS/UPI collection identifiers. Instant settlement. UPI IDs for B2B receivables.
+- **ARBITER hook:** `PARTIAL_COLLECT` / `ALTERNATE_UPI_LINK` action for B2B escrow/partial recovery (§4.8).
+
+### 10.8 Summary: What Razorpay *doesn't* ship (our white space)
+
+| Capability | Razorpay Status | ARBITER Opportunity |
+|---|---|---|
+| Cross-PSP post-failure recovery (failed Razorpay → retry via different rail/PSP) | ❌ Optimizer routes new; Interoperability routes mandate *executions* | ✅ **Core moat** (§4.1) |
+| Federated recovery learning across merchants | ❌ Single-merchant models only | ✅ **Core moat** (§4.2) |
+| RBI/DPDP/NPCI constraints as live, data-driven guardrails | ❌ Hardcoded in UPI Autopay stack | ✅ **Core moat** (§4.3) |
+| LTV-aware per-event recovery EV | ❌ Segment by plan only | ✅ **Quick win** (§4.4) |
+| Real-time rail-health for recovery timing | ❌ Optimizer has for *routing new* | ✅ **Quick win** (§4.5) |
+| Governed multimodal (voice/WhatsApp) orchestration | ❌ Voice is a channel in Agent Studio | ✅ **Differentiator** (§4.6) |
+| Promise-to-pay loop in recovery agent | ❌ NBFC-only (Caller Digital) | ✅ **Adjacent** (§4.7) |
+| B2B partial recovery via Smart Collect | ❌ Dunning tools = subscriptions | ✅ **Adjacent** (§4.8) |
+| Recovery-driven cash-flow forecasting | ❌ Agent Studio has generic forecaster | ✅ **Beyond Track 3** (§5.1) |
+
+---
+
+## 11. Novel Angles Stress-Tested (Updated with Competitive Intelligence)
+
+| Angle | Novelty Verdict | Competitor Coverage | ARBITER Implementation Status | Effort to Ship |
+|---|---|---|---|---|
+| **Cross-PSP post-failure recovery** | ✅ **True moat** — no PSP, orchestrator, or Agent Studio agent does this | Reflex: Razorpay test-mode only. Recoup: single-rail. HappyGarg: stub. RecoverAI: simulator only. | `catalog.ts` has `RECOVER_VIA_RAIL` stub; `executor/` needs Optimizer/secondary-PSP client | M (1–3 days) |
+| **Federated merchant intelligence (recovery)** | ✅ **True moat** — FL for fraud exists (NVIDIA FLARE 2026, JPMorgan, Stripe); **zero for recovery** | All competitors: single-merchant models only. Recoup: AUC 0.777 single-merchant. | `packages/ml/src/federation.ts` (new); `registry.ts` promotion path | M (1–3 days) |
+| **RBI/DPDP-aware constraint engine** | ✅ **Hard moat for foreign PSPs** — generic tools are US/EU-centric | Recoup: RBI pre-debit notice as *one* guardrail. Others: none. | `policy.ts`/`envelope.ts` framework exists; needs `regulatory_profile` + NPCI/DPDP/TRAI rules | M (1–3 days) |
+| **LTV-aware EV (per-event)** | ✅ **Differentiator** — Churnkey/Recurly segment by plan; none fold predicted LTV into per-event EV | Recoup: `P(churn)×LTV` as *cost*, not EV weight. Others: no LTV. | `features.ts` + `engine.ts` — 2-file change | S (<1 day) |
+| **Real-time rail-health for recovery timing** | ✅ **India-specific wow** — Optimizer has for routing new; none for recovery timing | None. | `features.ts` + `window.ts` + simulated feed in `ingest/` | M (1–3 days) |
+| **Governed multimodal orchestration** | ⚠️ **Channel = not novel** (Gupshup, Caller Digital, CallMissed, Rezoki). **Brain = novel** | HappyGarg: 3-tier rules + voice. Reflex: LLM Hinglish phrasing. Recoup: voice protocol. | `catalog.ts` actions + executor payloads; frame as *EV-ranked channel inside guardrails* | M (1–3 days) |
+| **Promise-to-pay loop** | ⚠️ Exists in NBFC collections (Caller Digital) | Recoup: **has this** (promise_to_pay table, model feature, hold-off logic) | Not started | M (1–3 days) |
+| **B2B partial recovery / escrow** | ⚠️ Smart Collect 2.0 is the rail; dunning tools don't target B2B partial | None | `catalog.ts` generalization + Smart Collect executor | M–L |
+| **Recovery-driven cash-flow forecasting** | ⚠️ Agent Studio has generic forecaster | RecoverAI: mentions forecasting. Agent Studio: Cashflow Forecaster Agent. | `metrics_runs` projection module | M |
+
+**Stress-test conclusions:**
+1. **Cross-PSP + Federated + RBI-aware** = the three *defensible* moats (structurally impossible for a single PSP to replicate).
+2. **LTV-aware EV + Rail-health** = highest wow/effort (S/M), immediately demo-able.
+3. **Voice/WhatsApp** = do not claim novelty. Claim **governed multimodal orchestration** (EV-ranked, guardrailed, audited).
+4. **Promise-to-pay** = Recoup already has a strong implementation. If we add it, differentiate via **governed loop + audit trail + model feature**.
+
+---
+
+## 12. This Week's Winning Moves: 2-3 Concrete Additions with File Paths + Effort
+
+### Move 1: Real Razorpay Dry-Run Execution Path (MUST — unblocks "real touch" criterion)
+**Effort:** M (1–3 days) | **Files:**
+- `packages/core/src/executor/index.ts` — add `REAL_EXECUTION` mode flag; replace `deterministicOutcome()` with dry-run payload construction
+- `packages/core/src/executor/razorpay.ts` (new) — Razorpay Payment Link + UPI Autopay retry request builders:
+  - `createPaymentLinkRetry(failedPayment, idempotencyKey) → { url, reference, payload }`
+  - `createUPIAutopayRetry(mandateId, amount, idempotencyKey) → { tokenId, orderId, payload }`
+- `packages/core/src/db/schema.ts` — add `rzp_request_ref`, `rzp_payload_json` columns to `audit_log` / `interventions`
+- `packages/core/src/decide/engine.ts` — pass `rzpRequestRef` through envelope → executor → audit
+
+**Acceptance criteria:** `recover.ts --dry-run` prints a valid Razorpay Payment Link create request JSON + `rzpRequestRef` that appears in the audit log. Judge can verify: "This is a real API call structure."
+
+### Move 2: LTV-Aware EV + Honest Held-Out Calibration (MUST — highest wow/effort)
+**Effort:** S (<1 day each) | **Files:**
+- `packages/ml/src/features.ts` — add `ltv_paise: number`, `churn_risk: number` (0–1) to feature vector; derive from `customer.ltv_estimate_paise` + `customer.churn_score` in seed
+- `packages/core/src/decide/engine.ts` — modify EV: `EV = P(recovery|action) × amount_paise × ltv_weight(churn_risk) − contact_cost_paise`; `ltv_weight = 1 / (1 + churn_risk * 4)` (tunable)
+- `packages/ml/src/recover.ts` — add `--held-out-seed` flag: train on seed A, evaluate on seed B; print control-vs-pipeline lift with **bootstrap 95% CI**; label all output `[SIMULATED]`
+
+**Acceptance criteria:** `recover.ts --held-out-seed 1337` prints: `CONTROL: 12.3% recovery | PIPELINE: 24.7% recovery | INCREMENTAL: +12.4pp CI[+9.1, +15.8] | Cost/₹100: ₹3.2 | Violations: 0 [SIMULATED]`
+
+### Move 3: Cross-PSP Recovery Moat Demo (SHOULD — "what no PSP ships" headline)
+**Effort:** M (2–3 days) | **Files:**
+- `packages/core/src/catalog.ts` — add `RECOVER_VIA_RAIL` action with `target_rail: 'card_payment_link' | 'smart_collect_upi' | 'secondary_psp_optimizer'`
+- `packages/core/src/executor/razorpay.ts` — add `executeCrossPSPRecovery(action, envelope)` stub that:
+  - Builds Optimizer Smart Router payload OR secondary PSP Payment Link
+  - Emits `rzpRequestRef` with `cross_psp: true` flag
+  - Records `rail_switched_from`, `rail_switched_to` in audit
+- `packages/core/src/decide/engine.ts` — failureClass→rail mapping: `UPI_MANDATE_DECLINED → card_payment_link`, `CARD_EXPIRED → smart_collect_upi`, `ISSUER_DOWN → secondary_psp_optimizer`
+- `packages/seed/generator.ts` — add `secondary_rails` to merchant config (simulated)
+
+**Acceptance criteria:** Demo script shows: "UPI Autopay mandate failed (insufficient funds) → ARBITER chose `RECOVER_VIA_RAIL` → card Payment Link created → `rzpRequestRef: cross_psp_abc123` logged → audit trail shows rail switch."
+
+### Move 4 (Alternative if cross-PSP blocked): Federated Merchant Intelligence Sim (SHOULD)
+**Effort:** M (2–3 days) | **Files:**
+- `packages/ml/src/federation.ts` (new) — FedAvg over 3–4 simulated merchant silos:
+  - `trainLocal(merchantId, localData) → modelWeights`
+  - `aggregate(weights[], dpNoiseSigma) → globalWeights` (Gaussian DP noise)
+  - `evaluateGlobal(heldOutPerMerchant) → perMerchantAUC, globalAUC`
+- `packages/ml/src/registry.ts` — add `promoteFederated(globalWeights, metrics)` that gates promotion on `globalAUC > localAUC + threshold`
+- `packages/seed/generator.ts` — generate 4 merchant corpora with distinct failure distributions (B2C SaaS, D2C subscription, B2B invoicing, EdTech)
+- `packages/ml/src/recover.ts` — add `--federated-demo` flag printing per-merchant lift vs local-only
+
+**Acceptance criteria:** `recover.ts --federated-demo` prints: `Merchant A (local AUC 0.71 → fed 0.76) | Merchant B (0.68 → 0.73) | Merchant C (0.74 → 0.77) | Merchant D (0.69 → 0.72) | Global: 0.745 [SIMULATED]`
+
+---
+
+### Priority Order for This Week (Sequential)
+
+| Day | Move | Rationale |
+|---|---|---|
+| Mon–Tue | **Move 1** (Real Razorpay dry-run) | Unblocks "real touch" — highest judge signal |
+| Wed | **Move 2** (LTV-aware EV + held-out calibration) | S effort, massive differentiation vs flat-EV incumbents |
+| Thu–Fri | **Move 3** (Cross-PSP) **OR** **Move 4** (Federated) | Pick one moat demo. Cross-PSP if Optimizer access; Federated if zero external deps. Both are "what no PSP ships." |
+
+### Stretch (if time): Regulatory Profile + Rail-Health (Move 5+6 combined)
+- `policy.ts`: add `regulatory_profile` enum + `AUTOPAY_RETRY_CEILING=3`, `PRE_DEBIT_NOTICE_HOURS=24`, `AFA_CEILING_PAISE=150000`
+- `features.ts`: add `rail_health_score` (0–1), `next_rail_healthy_window_ms`
+- `window.ts`: `nextRecoveryWindowMs()` prefers `nextRailHealthyWindowMs` > `nextPaydayWindowMs`
+
+---
+
+### Sources (Updated)
+
+- **Razorpay Buildathon 2026 criteria:** razorpay.com/buildathon, velonx.in/blog/razorpay-ai-buildathon-2026, coursejoiner.com/internship/razorpay-ai-builder-internship-2026, cloudsutra.in/jobs/razorpay-hiring-ai-builder-intern-in-bangalore, linkedin.com/posts/razorpay-careers_razorpaybuildathon-aiinterns-hiring-activity-7497899727838076929
+- **Razorpay Agent Studio (FTX 2026):** razorpay.com/newsroom/razorpay-launches-the-worlds-first-ai-native-agent-studio-for-payments-at-ftx26-powered-by-anthropics-claude, razorpay.com/blog/agent-studio-ai-agents-by-razorpay, razorpay.com/blog/razorpay-agent-studio-principles-guardrails-and-merchant-control, thehindubusinessline.com, techcircle.in, moneycontrol.com, thepaypers.com
+- **UPI Autopay v2 / Intelligent Revenue-Protect:** razorpay.com/blog/upi-autopay-with-intelligent-revenue-protect, razorpay.com/blog/upi-autopay-interoperability, razorpay.com/blog/master-recurring-payments-upi-autopay-guide, razorpay.com/upi-autopay
+- **Optimizer:** razorpay.com/optimizer-intelligent-payments-routing
+- **Failed Payment Recovery:** razorpay.com/blog/razorpay-failed-payment-recovery
+- **Competitor Track-3 repos:** github.com/abhinav-phi/reflex, github.com/Shikari-ai/recoup, github.com/HappyGarg8o/ai-revenue-recovery, github.com/AdithyaAbburi/RecoverAI
+- **Federated Learning for Fraud (2026):** arxiv.org/html/2603.13617 (NVIDIA FLARE), eureka.patsnap.com
+- **India Voice/WA Dunning:** callmissed.com, gupshup.ai/whatsapp-api, caller.digital, whatsboost.in
+- **Payment Orchestration Cross-PSP:** gr4vy.com/posts/payment-retry-logic-explained, paymentbrief.com, primer.io/blog
