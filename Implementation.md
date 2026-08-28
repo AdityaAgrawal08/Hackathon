@@ -413,3 +413,257 @@ Ordered by win-probability impact. Each item lists effort (S/M/L) and target mod
 - **Federated Learning for Fraud (2026):** arxiv.org/html/2603.13617 (NVIDIA FLARE), eureka.patsnap.com
 - **India Voice/WA Dunning:** callmissed.com, gupshup.ai/whatsapp-api, caller.digital, whatsboost.in
 - **Payment Orchestration Cross-PSP:** gr4vy.com/posts/payment-retry-logic-explained, paymentbrief.com, primer.io/blog
+
+---
+
+## 13. Critical Bugs & Architectural Weaknesses (50 Issues)
+
+*Identified via strict critical review of the current `feat/track3-differentiation` branch implementation.*
+
+### 13.1 Correctness & Data Integrity Bugs
+
+| # | Issue | File/Location | Root Cause | Impact | Fix |
+|---|-------|---------------|------------|--------|-----|
+| 1 | **LTV normalization constant 100× too high** | `features.ts:19` (`LTV_NORM_PAISE = 5_00_00_000`) vs realistic max LTV (~₹1L = 10_00_000) | Proxy LTV = `priorSuccessCount × 50_000`; for 100 successes = 50L paise >> 50L norm constant | `ltv_paise_norm` ≈ 0 for nearly all customers → LTV weight ineffective | Set `LTV_NORM_PAISE = 10_00_000` or compute percentile-based |
+| 2 | **Control arm uses untrained heuristic model** | `recovery.ts:148` uses `result.probability` from heuristic (weights=0.08, bias=-1.2) | Model has no predictive validity; control arm reflects random noise | "Incremental lift" meaningless — compares pipeline vs random noise | Use historical recovery rate per failure class, or label as `[SIMULATED]` |
+| 3 | **`deriveLtvSignals` silent NaN on invalid `joinedAtUtc`** | `features.ts:74-78` only validates `occurredAtUtc`, not `joinedAtUtc` | `Date.parse(invalid)` → `NaN` → tenureNorm=`0` → churn inflated | Silent data corruption | Validate both dates; throw or default tenureNorm=0 explicitly |
+| 4 | **Churn formula uses arbitrary uncalibrated coefficients** | `features.ts:79`: `0.6, 0.4, 0.25` magic numbers | No calibration, no reference, no sensitivity analysis | LTV weight meaningless; high-LTV customers may be penalized | Expose as configurable constants with docs, or remove until calibrated |
+| 5 | **Control arm probability source is model prediction — circular** | `recovery.ts:148` uses same model for control and treatment | Model overconfidence → control overestimates natural recovery → lift underestimated | Incremental lift biased by model calibration error | Use historical recovery rate per failure class from production data |
+| 6 | **`controlOutcome` modulo bias** | `recovery.ts:30`: `hashSeed(...) % 10_000` | FNV-1a modulo 10000 not uniform | Minor but measurable distribution bias | Use rejection sampling or floating-point scaling |
+| 7 | **`incrementalRecoveredPaise` negative labeled as "lift"** | `recovery.ts:218`, CLI reports `-₹7,935.00 (-28.7%)` as "INCREMENTAL lift" | `incremental = recovered - control` can be negative | Misleading terminology | Rename to `incrementalRecoveredPaise` (can be negative); label in CLI |
+| 8 | **`recoverBatch` double-counts auditTrailCount** | `recovery.ts:167`: assumes exactly 2 entries (DECISION + DIAGNOSIS) | Pipeline may write TRIGGER/ALARM entries; throws before audit = wrong count | Audit trail count inaccurate | Query actual `audit_log` count per event after processing |
+| 9 | **`recoverBatch` conflates intermediate vs terminal states** | `recovery.ts:173,195,203`: `AWAITING_APPROVAL` → `escalatedPaise`, later may succeed/fail | Report treats intermediate state as final outcome | Overcounts "escalated"; incremental lift ignores future recovery of escalated | Track final outcomes only, or clearly label intermediate vs terminal |
+| 10 | **Federated DP noise uses `Math.random()` — non-deterministic** | `federation.ts:35-36` | Box-Muller with `Math.random()` breaks reproducibility | Cannot reproduce federated model; audit trail meaningless; tests flaky | Use seeded RNG (`mulberry32` with `hashSeed("dp-noise-" + siloId + round)`) |
+| 11 | **Federated `trainedAtUtc` uses `Date.now()` — non-reproducible** | `federation.ts:97,115` | Same code run twice → different timestamps → different model IDs | Demo not reproducible; audit trail broken | Accept injected `nowMs` parameter like other modules |
+| 12 | **Federated DP noise adds same noise to all weights + bias** | `federation.ts:68-69` | Bias typically smaller than weights; same absolute noise destroys bias signal | Model structure corrupted unnecessarily | Scale noise per parameter magnitude; use Gaussian mechanism with sensitivity analysis |
+| 13 | **Razorpay dry-run provider ignores catalog multipliers** | `razorpay.ts:110-114` `mockOutcome` only checks `HUMAN_REVIEW` | Ignores `failureClass` and `multiplierFor`; `HARD_METHOD_DECLINED + RETRY_NOW` (mult=0) returns SUCCEEDED | Dry-run shows success for actions that would fail | Use shared `deterministicOutcome` logic |
+| 14 | **Razorpay provider hardcodes customer contact info** | `razorpay.ts:27,83` | `contact: "+919999999999", email: "customer@example.com"` | Security risk if live mode enabled; dry-run logs misleading | Fetch actual customer contact from DB using `ctx.customerId` |
+| 15 | **Razorpay provider `IS_LIVE` throws — no graceful fallback** | `razorpay.ts:123-127` | Accidental `REAL_EXECUTION_MODE=live` crashes entire batch | Production outage risk | Log warning, fall back to simulation, set `dryRunPayload` with note |
+| 16 | **Simulation vs Razorpay provider inconsistent outcome logic** | `simulation.ts` vs `razorpay.ts:110-114` | Simulation uses multipliers; Razorpay ignores them | Inconsistent behavior between providers | Share `deterministicOutcome` logic |
+| 17 | **Idempotency key excludes `nowMs` — reconciliation fails** | `executor/index.ts:51-59` | Same proposal executed twice with different `nowMs` → same key → UNIQUE constraint fail | Stuck executions cannot be retried | Include execution attempt number in idempotency key |
+| 18 | **`editProposal` breaks after feature count change (11→13)** | `pipeline.ts:402-406` | `frozenValues` length 11 vs `recomputed.values` length 13 → `MISSING_FEATURES` | All existing proposals become uneditable | Migrate frozen features or version feature vectors |
+| 19 | **`promoteFederatedModel` missing audit trail** | `federation.ts:128` comment says "writes audit trail" but only calls `saveModel` | Missing federation provenance in audit log | Audit trail incomplete | Write `audit_log` entry with `entry_type: "FEDERATION"` |
+| 20 | **`recover.ts` generates new model every run — non-deterministic ID** | `recover.ts:61-65` `trainedAtUtc: isoUtc(nowMs)` | Different runs → different model IDs | Non-reproducible demos | Use fixed `trainedAtUtc` for demo or deterministic ID from corpus hash |
+
+### 13.2 Architectural Weaknesses
+
+| # | Weakness | Location | Root Cause | Impact | Improvement |
+|---|----------|----------|------------|--------|-------------|
+| 21 | **Tight coupling: Engine imports feature constants** | `engine.ts` duplicates `LTV_NORM_PAISE`, `CHURN_BP_MAX` | Engine should receive normalized features only | Divergence risk when constants change | Export shared constants from `features.ts`; engine uses normalized features |
+| 22 | **Provider pattern leaks into executor** | `executor/index.ts` calls `getProvider()` internally | Hard to test; provider not injectable | Cannot swap provider for testing | Pass provider as dependency; resolve at batch level |
+| 23 | **Control arm logic embedded in recovery module** | `recovery.ts` lines 25-32 | Should be separate `ControlArm` module with pluggable baselines | Cannot swap baseline strategy (historical vs model vs random) | Extract `ControlArm` interface with `HistoricalBaseline`, `ModelBaseline`, `RandomBaseline` |
+| 24 | **Federation logic in ML package** | `packages/ml/src/federation.ts` | ML package shouldn't know about federated training | Violates separation of concerns | Move to separate `packages/federation/` package |
+| 25 | **Demo CLIs mixed with core logic** | `recover.ts`, `federate.ts` in `src/` | Pollutes package exports; not composable | Poor DX; cannot iterate on recovery without re-running corpus gen | Move to `packages/ml/cli/`; separate into composable functions |
+| 26 | **No configuration system** | Magic numbers everywhere (churn coeffs, LTV norm, DP noise scale) | Hardcoded values scattered | Cannot tune without code changes; poor auditability | Add config file (`config.yaml`) / env-driven; centralize constants |
+| 27 | **Feature engineering coupled to decision engine** | `pipeline.ts` passes raw `ltvPaise`/`churnRiskBp` to engine | Engine re-normalizes with duplicated constants | Two normalization paths for same concept | Engine should consume normalized features directly from feature vector |
+| 28 | **Demo CLIs use `Date.now()` — non-reproducible** | `recover.ts:20`, `federate.ts:8` | No injected clock in CLI entry points | Demos not reproducible; cannot compare runs | Add `--seed`/`--now` CLI flags for injected clock |
+| 29 | **`exactOptionalPropertyTypes` not enforced** | `tsconfig.json` missing | Optional properties accessed without checks | Runtime undefined errors | Enable `exactOptionalPropertyTypes`; audit all optional accesses |
+| 30 | **Missing integration tests for end-to-end flows** | No `tests/integration/` | Unit tests pass but integration unverified | E2E correctness not verified | Add `tests/integration/e2e_recovery.test.ts` |
+| 31 | **No test for `recoverBatch` with `REAL_EXECUTION_MODE=dry-run`** | Tests use default simulation | Dry-run provider behavior untested | Razorpay payload structure unverified | Add test with `REAL_EXECUTION_MODE=dry-run` verifying `dryRunPayload` in audit |
+| 32 | **Federation test uses `Math.random()` — flaky** | `federation.test.ts:33-36` | Probabilistic assertion | Spuriously passes/fails | Mock `Math.random` or use deterministic RNG in test |
+| 33 | **Federation test doesn't verify DP noise actually added** | `federation.test.ts:45-53` | Only checks dimensions | DP noise could be zero and test passes | Assert weights differ from no-noise baseline |
+| 34 | **LTV test doesn't verify decision change** | `decide.test.ts:180-210` | Tests `ltvWeight` function but not `decide()` action flip | Doesn't verify feature actually changes behavior | Add test where LTV weight flips chosen action |
+| 35 | **Features test uses hardcoded indices** | `features.test.ts:157,160` | `values[11]`, `values[12]` assume feature order | Breaks silently if feature order changes | Use `FEATURE_NAMES.indexOf("ltv_paise_norm")` |
+| 36 | **`recover.ts` monolithic — no separation of concerns** | `recover.ts:19-93` | Corpus gen → replay → train → recover in one script | Cannot iterate on recovery without re-running corpus | Separate into composable functions; add CLI subcommands |
+| 37 | **`recover.ts` no cleanup of DB connection** | No `client.close()` | libsql may not cleanup immediately | Resource leak in long-running processes | Add `finally { client.close() }` |
+| 38 | **`federate.ts` no round-trip verification** | `federate.ts:35-45` | Promotes model but doesn't load back | No sanity check federation worked | Load via `getIncumbent` and verify weights |
+| 39 | **Razorpay dry-run logs unstructured** | `razorpay.ts:131-132` `console.log(JSON.stringify(...))` | Pollutes stdout; hard to parse | Hard to parse programmatically | Use structured logging (JSON lines) or separate file/stream |
+| 39 | **Provider names not exported for testing** | `providers/index.ts` | `simulationProvider`, `razorpayProvider` not exported | Cannot unit test providers directly | Export both |
+| 40 | **`razorpayProvider` name includes mode** | `razorpay.ts:117`: `name: razorpay-${MODE}` | Audit queries by provider name break across modes | Inconsistent audit trail | Fixed name `"razorpay"`; mode in metadata |
+| 41 | **`simulateFederatedTraining` same timestamp for all silos** | `federation.ts:97` | All silos get `isoUtc(Date.now())` | Unrealistic simulation | Add small offset per silo |
+| 42 | **`hashSeed`/`mulberry32` duplicated in federation** | `federation.ts:133-151` | Already in `@arbiter/shared` | Code duplication | Import from `@arbiter/shared` |
+| 43 | **`deriveLtvSignals` exported but internal only** | `features.ts:65` | Leaks implementation detail | API surface pollution | Remove `export`; compute in `computeFeatures` |
+| 44 | **`ltvPaise` in `ComputedFeatures.raw` is raw; feature normalized** | `features.ts:257` vs `features.ts:242` | Two scales for same concept | Confusion; engine uses raw with own constant | Engine should use normalized feature directly |
+| 45 | **`recovery.ts` `controlOutcome` no confidence intervals** | `recovery.ts:218` | Point estimate only | Cannot distinguish real lift from noise | Add bootstrap CI or binomial proportion CI |
+| 46 | **`recover.ts` envelope set AFTER replay** | `recover.ts:37-50` after `replayCorpus` | Confusing order; works but unclear | Minor confusion | Set envelope in `ensureTenant` or before replay |
+| 47 | **`recover.ts` corpus hardcoded** | `recover.ts:26`: `customerCount: 60, targetEvents: 230` | No CLI args for batch size | Cannot test targeted recovery | Add CLI args for event IDs, batch size, corpus type |
+| 48 | **`recover.ts` `--dry-run-real` flag missing** | Must set `REAL_EXECUTION_MODE=dry-run` env manually | Key feature invisible to default users | Poor DX | Add CLI flag `--dry-run-real` |
+| 49 | **`federation.ts` `SiloReport` `trainedAtUtc` unused** | `federation.ts:29` | Set but never read | Dead code | Remove or use in audit trail |
+| 50 | **Missing `package.json` exports for providers** | `packages/core/package.json` | Provider types not exported | External consumers cannot compose custom providers | Add `"./executor/providers"` export |
+
+---
+
+## 14. Additional Winning Features: Research-Backed Additions
+
+*Based on competitive intelligence (§8–11), Razorpay product gaps (§10), and judging criteria (§9). Each feature is stress-tested against competitors (Reflex, Recoup, HappyGarg8o, RecoverAI) and Razorpay's own products (Optimizer, Agent Studio, UPI Autopay v2).*
+
+### 14.1 RBI/DPDP/NPCI Regulatory Auto-Escalation Engine (§4.3) — **TRUE MOAT**
+
+| Aspect | Details |
+|--------|---------|
+| **What** | Recovery engine that encodes NPCI/DPDP/TRAI regulations as *live, data-driven guardrails* in the `policy.ts`/`envelope.ts` fail-closed constraint framework. Not hardcoded — configurable per-merchant `regulatory_profile`. |
+| **Why novel** | Generic dunning tools (Churnkey, Recurly, Stripe) are US/EU-centric. Recoup encodes RBI pre-debit notice as *one* guardrail. Razorpay UPI Autopay v2 hardcodes NPCI rules. **No one exposes regulatory constraints as a programmable, merchant-configurable policy layer with audit provenance.** |
+| **Razorpay gap** | UPI Autopay v2 has NPCI rules baked in (₹15k/₹1L AFA ceiling, 1+3 retry cap, 24h pre-debit notice, off-peak windows). But merchants cannot *customize* or *audit* them. Agent Studio agents have no regulatory constraint engine. |
+| **Key rules to encode** | `AUTOPAY_RETRY_CEILING=3` (NPCI 1+3), `PRE_DEBIT_NOTICE_HOURS=24`, `AFA_CEILING_PAISE=150000` (standard) / `10000000` (enhanced), `DPDP_CONSENT_REQUIRED=true`, `TRAI_DLT_TEMPLATE_ID`, `QUIET_HOURS_START=2100`, `QUIET_HOURS_END=0900` (IST). |
+| **Impl sketch** | `policy.ts`: add `regulatory_profile` enum + new `RuleId`s (`AUTOPAY_RETRY_CEILING`, `PRE_DEBIT_NOTICE`, `AFA_CEILING`, `DPDP_CONSENT`, `TRAI_DLT`). `envelope.ts`: evaluate regulatory rules before eligibility. `generator.ts`: per-merchant `regulatory_profile` in seed. `recover.ts`: `--regulatory-demo` flag prints rule violations prevented. |
+| **Demo criteria** | "Merchant with `regulatory_profile=upi_autopay` attempts 4th retry → refused by `AUTOPAY_RETRY_CEILING` → audit log shows `RULE_VIOLATED: AUTOPAY_RETRY_CEILING` with NPCI clause reference." |
+| **Judge points** | **Problem Taste** (real regulatory pain), **India-specific depth**, **Governance > Autonomy** (Agent Studio principle), **Failure Recovery** (degraded mode: if regulation changes, update config not code). |
+| **Effort** | M (2–3 days): `policy.ts`, `envelope.ts`, `generator.ts`, `recover.ts` flag. |
+
+### 14.2 Real-Time Rail-Health for Recovery Timing (§4.5) — **HIGH WOW/EFFORT**
+
+| Aspect | Details |
+|--------|---------|
+| **What** | Time recovery retries to **UPI/IMPS/NEFT outage windows** and bank-health signals. Uses simulated NPCI/UPI status feed + bank health scores to pick `nextRecoveryWindowMs` that avoids degraded rails. |
+| **Why novel** | Razorpay Optimizer has provider health scores for *routing new transactions*. **No one uses live rail-health as a recovery-timing signal for failed payments.** UPI outages are routine in India → strong local relevance. |
+| **Razorpay gap** | Optimizer routes *new* auths around degraded providers. Failed payment recovery still retries on fixed schedules (payday, fixed intervals) ignoring real-time rail health. |
+| **Signals to ingest** | NPCI UPI status API (or simulated), bank-level success rate (last 1h), IMPS/NEFT uptime, Razorpay Optimizer health scores (if API access). |
+| **Impl sketch** | `features.ts`: add `rail_health_score` (0–1), `bank_health_score` (0–1). `window.ts`: `nextRecoveryWindowMs()` prefers `nextRailHealthyWindowMs` > `nextPaydayWindowMs`. `ingest/rail_health.ts`: simulated feed (cron) or NPCI webhook. `catalog.ts`: `RAIL_HEALTH_WAIT` action (wait for healthy window). `engine.ts`: `RAIL_HEALTH_WAIT` EV = `P(recovery\|healthy) × amount × health_score − wait_cost`. |
+| **Demo criteria** | "UPI degraded (health=0.2) → ARBITER chooses `RAIL_HEALTH_WAIT` → schedules retry at next healthy window (health>0.8) → avoids failed retry → audit shows rail-health gate." |
+| **Judge points** | **India-specific depth** (UPI outages are real), **Failure Recovery** (degraded mode: if rail health unavailable, fallback to payday window), **Problem Taste** (timing matters more than retry count). |
+| **Effort** | M (2–3 days): `features.ts`, `window.ts`, `ingest/rail_health.ts`, `catalog.ts`, `engine.ts`. |
+
+### 14.3 Promise-to-Pay Behavioral Loop (§4.7) — **DIFFERENTIATE VS RECOUP**
+
+| Aspect | Details |
+|--------|---------|
+| **What** | Capture customer's "I'll pay on the 5th" commitment; track fulfillment; nudge before promised date; feed promise-keeping rate into recovery model. Recoup has this — **differentiate via governed loop + audit trail + model feature**. |
+| **Why novel** | Recoup has promise-to-pay table + hold-off logic. **No one wraps it in a governed, EV-ranked, audit-logged action with model feedback loop.** |
+| **Razorpay gap** | Agent Studio Subscription Recovery Agent does voice nudges but no promise tracking. NBFC tools (Caller Digital) do EMI nudges but no governance envelope. |
+| **Impl sketch** | `catalog.ts`: add `PROMISE_TO_PAY` action (contact, zero cost). `schema.ts`: `promise_to_pay` table (`customer_id`, `promised_at_utc`, `amount_paise`, `status: PENDING/KEPT/BROKEN`, `created_at_utc`). `pipeline.ts`: on `PROMISE_TO_PAY` chosen → insert promise row. `recovery.ts`: `PROMISE_TO_PAY` → `AWAITING_PROMISE` state. `reconcile_promises.ts`: cron checks `promised_at_utc` passed → if paid → `KEPT` + feed `promise_kept_rate` feature; if not → escalate. `features.ts`: add `promise_kept_rate` feature. |
+| **Demo criteria** | "Customer promises 'I'll pay Friday' → ARBITER logs promise → sends WhatsApp nudge Thursday → Friday paid → `promise_kept_rate` improves → next recovery EV increases for this customer." |
+| **Judge points** | **AI Judgment** (rules-first: promise is a constraint; LLM-tail: parse voice/WhatsApp for promise date), **Failure Recovery** (promise broken → auto-escalate), **Governance** (audit trail of promise lifecycle). |
+| **Effort** | M (2–3 days): `catalog.ts`, `schema.ts`, `pipeline.ts`, `features.ts`, `recovery.ts`, `reconcile_promises.ts` (new). |
+
+### 14.4 B2B Partial Recovery via Smart Collect (§4.8) — **ADJACENT HIGH LEVERAGE**
+
+| Aspect | Details |
+|--------|---------|
+| **What** | For overdue B2B invoices, propose partial-amount recovery via Razorpay Smart Collect / escrow when full recovery unlikely. Generalizes `ALTERNATE_UPI_LINK` to `PARTIAL_COLLECT`. |
+| **Why novel** | Dunning tools target subscriptions, not partial B2B recovery. Razorpay Smart Collect 2.0 (UPI IDs, instant settlement) is the natural rail. No dunning tool integrates partial collection as an EV-ranked action. |
+| **Razorpay gap** | Smart Collect 2.0 exists (UPI IDs, instant settlement). But no recovery agent uses it for partial B2B recovery. |
+| **Impl sketch** | `catalog.ts`: add `PARTIAL_COLLECT` action with `min_partial_pct=25`, `max_partial_pct=75`. `executor/razorpay.ts`: `createSmartCollectPartial(invoice, amount_pct)` builds Smart Collect UPI ID + amount. `engine.ts`: EV = `P(recovery\|partial) × partial_amount − cost`. `policy.ts`: rule `MIN_PARTIAL_RECOVERY_PCT`. `generator.ts`: B2B merchant corpus with invoice amounts. |
+| **Demo criteria** | "₹10L B2B invoice overdue 90 days → ARBITER chooses `PARTIAL_COLLECT` (50%) → Smart Collect UPI ID generated → customer pays ₹5L → audit shows partial recovery with Smart Collect ref." |
+| **Judge points** | **Problem Taste** (B2B receivables are huge in India), **Razorpay adjacency** (Smart Collect integration), **Governance** (partial amount capped by policy). |
+| **Effort** | M (2–3 days): `catalog.ts`, `executor/razorpay.ts`, `schema.ts`, `generator.ts`. |
+
+### 14.5 Recovery-Driven Cash-Flow Forecasting (§5.1) — **BEYOND TRACK 3, COMPETES WITH AGENT STUDIO**
+
+| Aspect | Details |
+|--------|---------|
+| **What** | Project expected recovered cash over next N days from batch recovery signals. Mirrors Agent Studio's "Cashflow Forecaster Agent" but *recovery-driven* and *auditable*. |
+| **Why novel** | Agent Studio has generic Cashflow Forecaster Agent. **ARBITER's version is recovery-driven, uses actual batch signals (recovered/escalated/stopped), and has audit provenance.** |
+| **Razorpay gap** | Agent Studio Cashflow Forecaster Agent is generic. ARBITER can say: "We forecast cash flow *from recovery decisions you can audit*." |
+| **Impl sketch** | `metrics.ts`: `forecastCashflow(recoveryReport[], horizonDays)` → projects `expectedRecoveredPaise/day` using recovery rate per failure class + escalation resolution rate + historical promise-keeping. `recover.ts`: `--forecast` flag prints 30-day projection with confidence intervals. `dashboard/` (optional): tiny web UI with forecast chart. |
+| **Demo criteria** | "Next 30 days: ₹2.3L expected recovery (CI [₹1.8L, ₹2.8L]) → 12 escalations expected to resolve → 3 promises due → cash-flow forecast with provenance." |
+| **Judge points** | **Agent Studio adjacency not collision** (we do recovery-driven forecasting), **Measured recovery with provenance**, **Build Quality** (projection from actual batch signals). |
+| **Effort** | M (2–3 days): `metrics.ts`, `recover.ts` flag, optional `dashboard/`. |
+
+### 14.6 Checkout Conversion / Pre-Auth Optimization (§5.2) — **EXPANDS TAM**
+
+| Aspect | Details |
+|--------|---------|
+| **What** | Reuse decision engine (`features.ts` + `engine.ts`) at *checkout* to pick best rail/method *before* failure. Essentially Optimizer's job but merchant-controlled, explainable, with governance envelope. |
+| **Why novel** | Optimizer routes new auths via random forest (black box). ARBITER would be **merchant-controlled, explainable, with per-merchant policy envelope**. |
+| **Razorpay gap** | Optimizer = gateway-agnostic routing for *new* transactions. No merchant-controlled, explainable checkout optimizer. |
+| **Impl sketch** | `features.ts`: add `checkout_features` (cart value, customer tier, device, location, time). `engine.ts`: `checkoutDecide(input)` → returns recommended rail (UPI Autopay, Card, NetBanking, Wallet). `policy.ts`: `checkout_envelope` (rail preferences, cost caps). `api/checkout_optimizer.ts`: HTTP endpoint for checkout integration. |
+| **Demo criteria** | "Checkout: ₹5,000 cart, premium customer → ARBITER recommends UPI Autopay (high success, low cost) → merchant accepts → payment succeeds → audit shows checkout decision." |
+| **Judge points** | **TAM expansion** (top-of-funnel), **Agent Studio adjacency** (we do checkout optimization with governance), **Build Quality** (reuse existing engine). |
+| **Effort** | L (4–5 days): new features, new engine path, API endpoint, demo integration. |
+
+### 14.7 Rural/Inclusive Payment Success (§5.3) — **HIGH "WOW" FOR INDIA JUDGES**
+
+| Aspect | Details |
+|--------|---------|
+| **What** | Low-connectivity features: extended timeouts, offline-capable initiation, regional-language recovery, extended retry windows for low-bandwidth areas. Re-add "rurality" signal dropped from original 11 features. |
+| **Why novel** | Razorpay publishes rural success-rate guidance but no recovery tool has explicit rural/inclusive features. Generic global tools assume reliable connectivity. |
+| **Razorpay gap** | Razorpay blog publishes rural success-rate guidance. No recovery product has rural-specific logic. |
+| **Impl sketch** | `features.ts`: add `rurality_score` (0–1 from pincode/device/network), `extended_timeout_ok`, `offline_retry_ok`. `window.ts`: `nextRuralRecoveryWindowMs()` extends window for high rurality. `catalog.ts`: `RECOVER_VOICE_REGIONAL` action (Hinglish/Tamil/Telugu/etc. via Gupshup). `policy.ts`: `rural_envelope` (extended caps). `generator.ts`: rural customer corpus. |
+| **Demo criteria** | "Rural customer (rurality=0.8) → ARBITER extends retry window 3× → uses regional voice → succeeds where standard retry fails." |
+| **Judge points** | **India-specific depth** (Razorpay cares), **Inclusivity narrative**, **Problem Taste** (real underserved segment). |
+| **Effort** | M (2–3 days): features, window, catalog, generator. |
+
+### 14.8 Cross-PSP Recovery with Optimizer Integration (§4.1) — **CORE MOAT**
+
+| Aspect | Details |
+|--------|---------|
+| **What** | When Razorpay payment fails (UPI mandate declined, card expired), ARBITER recovers via *different rail the merchant also owns*: Razorpay Payment Link (cards), Smart Collect (bank transfer), or secondary PSP via Optimizer. |
+| **Why novel** | Optimizer routes *new* auths; Stripe Orchestration routes *new* retries. **No one autonomously recovers a *failed Razorpay charge* via a different rail as a policy-bounded agent with audit.** |
+| **Razorpay gap** | Optimizer = new-txn routing. UPI Autopay interoperability = mandate execution routing. **No cross-rail post-failure recovery agent.** |
+| **Impl sketch** | `catalog.ts`: `RECOVER_VIA_RAIL` action with `target_rail: 'razorpay_payment_link' \| 'smart_collect_upi' \| 'optimizer_secondary_psp'`. `executor/razorpay.ts`: `executeCrossPSPRecovery()` builds payload for target rail. `engine.ts`: failureClass→rail mapping (`UPI_MANDATE_DECLINED → payment_link`, `CARD_EXPIRED → smart_collect_upi`, `ISSUER_DOWN → optimizer_secondary_psp`). `generator.ts`: `secondary_rails` per merchant config. `recover.ts`: `--cross-psp-demo` flag. |
+| **Demo criteria** | "UPI Autopay mandate failed (insufficient funds) → ARBITER chooses `RECOVER_VIA_RAIL` → Razorpay Payment Link created → `rzpRequestRef: cross_psp_abc123` logged → audit shows rail switch `upi_autopay → payment_link`." |
+| **Judge points** | **Core moat** (structurally impossible for single PSP), **Problem Taste** (real revenue leak when primary rail fails), **Agent Studio adjacency** (we do cross-PSP; they don't). |
+| **Effort** | M (2–3 days): `catalog.ts`, `executor/razorpay.ts`, `engine.ts`, `generator.ts`. |
+
+### 14.9 Multi-Merchant Federated Demo with Real Eval — **FEDERATED MOAT PROOF**
+
+| Aspect | Details |
+|--------|---------|
+| **What** | Simulate 4 merchant silos (B2C SaaS, D2C subscription, B2B invoicing, EdTech) with distinct failure distributions. FedAvg + DP noise → global model. Evaluate per-merchant AUC lift vs local-only on held-out data. |
+| **Why novel** | FL exists for fraud (NVIDIA FLARE 2026, JPMorgan, Stripe). **Zero for recovery response modeling.** Recoup is single-merchant only. |
+| **Razorpay gap** | Agent Studio = single-merchant. No cross-merchant learning. |
+| **Impl sketch** | `federation.ts`: `trainLocal(merchantId, localData)`, `aggregate(weights[], dpNoiseSigma)`, `evaluateGlobal(heldOutPerMerchant)`. `registry.ts`: `promoteFederated()` gates on `globalAUC > localAUC + threshold`. `generator.ts`: 4 merchant corpora with distinct failure distributions. `recover.ts`: `--federated-demo` flag. |
+| **Demo criteria** | `Merchant A (local AUC 0.71 → fed 0.76) \| Merchant B (0.68 → 0.73) \| Merchant C (0.74 → 0.77) \| Merchant D (0.69 → 0.72) \| Global: 0.745 [SIMULATED]`. |
+| **Judge points** | **Core moat** (FL for fraud exists, not recovery), **Data network effect**, **Privacy-preserving** (DP noise). |
+| **Effort** | M (2–3 days): `federation.ts`, `registry.ts`, `generator.ts`, `recover.ts` flag. |
+
+### 14.10 Voice/WhatsApp as Governed Channel (§4.6) — **ORCHESTRATION MOAT**
+
+| Aspect | Details |
+|--------|---------|
+| **What** | Voice/WhatsApp as *EV-ranked actions inside a guardrailed envelope with hash-chained audit*. Not channel novelty (Gupshup, Caller Digital, CallMissed exist) — claim **governed multimodal orchestration brain**. |
+| **Why novel** | Competitors have voice/WhatsApp as *channels*. ARBITER has them as *EV-ranked actions inside a guardrailed envelope with hash-chained audit*. |
+| **Razorpay gap** | Agent Studio: voice is a channel (ElevenLabs). No governance envelope for multimodal. |
+| **Impl sketch** | `catalog.ts`: `RECOVER_VOICE_HI`, `RECOVER_VOICE_REGIONAL`, `RECOVER_WHATSAPP` actions. `executor/razorpay.ts`: `buildVoicePayload()`, `buildWhatsAppPayload()` with Gupshup/WhatsApp Business API templates (Hinglish/Tamil/Telugu `{{1}}` personalization). `engine.ts`: voice cost higher → only chosen if EV justifies. `policy.ts`: `voice_envelope` (max attempts, quiet hours, consent). |
+| **Demo criteria** | "High-LTV customer, soft decline → ARBITER chooses `RECOVER_WHATSAPP` (EV > SMS) → Gupshup template with `{{1}}` personalization sent → audit shows channel choice rationale + payload." |
+| **Judge points** | **Governed multimodal orchestration** (Agent Studio principle), **AI Judgment** (rules-first: voice only if EV justifies; LLM-tail: generate template), **India-specific** (Hinglish/regional). |
+| **Effort** | M (2–3 days): `catalog.ts`, `executor/razorpay.ts`, `engine.ts`, `policy.ts`. |
+
+---
+
+## 15. Updated This Week's Winning Moves: Bug Fixes + New Features Priority Matrix
+
+| Priority | Move | Type | Files | Effort | Rationale |
+|----------|------|------|-------|--------|-----------|
+| **P0** | Fix LTV normalization constant (Bug #1) | Bug | `features.ts:19` | <1 hr | Unblocks LTV-aware EV — currently ineffective |
+| **P0** | Fix control arm baseline (Bug #2) | Bug | `recovery.ts:148` | <1 hr | Invalidates "honest measurement" claim |
+| **P0** | Fix federated DP noise determinism (Bug #10,11) | Bug | `federation.ts:35,97` | <1 hr | Breaks reproducibility; audit trail broken |
+| **P0** | Fix Razorpay dry-run ignores multipliers (Bug #13) | Bug | `razorpay.ts:110` | <1 hr | Dry-run shows success for failing actions |
+| **P0** | Fix `editProposal` breaks after feature change (Bug #18) | Bug | `pipeline.ts:402` | 2–4 hrs | All existing proposals uneditable |
+| **P0** | Enable `exactOptionalPropertyTypes` (Bug #29) | Bug | `tsconfig.json` | 1–2 hrs | Catches undefined accesses |
+| **P1** | Real Razorpay dry-run executor (Move 1) | Feature | `executor/razorpay.ts`, `engine.ts`, `schema.ts` | 2–3 days | **Unblocks "real touch" — highest judge signal** |
+| **P1** | LTV-aware EV + held-out calibration (Move 2) | Feature | `features.ts`, `engine.ts`, `recover.ts` | 1 day | **Highest wow/effort** — differentiates from flat-EV incumbents |
+| **P1** | Cross-PSP recovery demo (Move 3) OR Federated demo (Move 4) | Feature | `catalog.ts`, `executor/razorpay.ts`, `federation.ts` | 2–3 days | **Core moat** — "what no PSP ships" headline |
+| **P2** | RBI/DPDP auto-escalation (14.1) | Feature | `policy.ts`, `envelope.ts`, `generator.ts` | 2–3 days | True moat — structurally impossible for foreign PSPs |
+| **P2** | Rail-health timing (14.2) | Feature | `features.ts`, `window.ts`, `ingest/rail_health.ts` | 2–3 days | High wow/effort — India-specific |
+| **P2** | Promise-to-pay loop (14.3) | Feature | `catalog.ts`, `schema.ts`, `pipeline.ts` | 2–3 days | Differentiate vs Recoup |
+| **P3** | B2B partial recovery (14.4) | Feature | `catalog.ts`, `executor/razorpay.ts` | 2–3 days | Smart Collect integration |
+| **P3** | Recovery-driven cash-flow forecasting (14.5) | Feature | `metrics.ts`, `recover.ts` | 2–3 days | Competes with Agent Studio |
+| **P3** | Rural/inclusive features (14.7) | Feature | `features.ts`, `window.ts`, `catalog.ts` | 2–3 days | High "wow" for India judges |
+| **P3** | Voice/WhatsApp governed orchestration (14.10) | Feature | `catalog.ts`, `executor/razorpay.ts` | 2–3 days | Governed multimodal brain |
+
+### Execution Order (Sequential)
+
+| Day | Focus | Deliverable |
+|-----|-------|-------------|
+| **Mon AM** | P0 Bugs 1–6 | LTV norm fixed, control arm uses historical baseline, fed deterministic, razorpay uses multipliers |
+| **Mon PM** | P0 Bugs 7–10, 29 | `editProposal` migration, `exactOptionalPropertyTypes`, type fixes |
+| **Tue** | **Move 1: Real Razorpay Dry-Run** | `executor/razorpay.ts` + `schema.ts` + `engine.ts` wiring → `pnpm recover --dry-run-real` prints valid Payment Link payload + `rzpRequestRef` in audit |
+| **Wed** | **Move 2: LTV-EV + Held-Out Calibration** | LTV features + `recover.ts --held-out-seed` → honest lift with CI |
+| **Thu** | **Move 3: Cross-PSP Recovery** OR **Move 4: Federated Demo** | Pick one moat demo; `pnpm recover --cross-psp-demo` OR `--federated-demo` |
+| **Fri** | **P1/P2 Polish + Demo Prep** | RBI auto-escalation (14.1) or Rail-health (14.2) if time; demo rehearsal; pitch deck |
+
+### Stretch (If Time Permits)
+
+- Promise-to-pay loop (14.3) — differentiates vs Recoup
+- Rail-health timing (14.2) — high wow, India-specific
+- Recovery-driven cash-flow forecasting (14.5) — competes with Agent Studio
+- Rural/inclusive features (14.7) — high "wow" for India judges
+
+---
+
+## 16. Sources (Extended)
+
+- **Razorpay Buildathon 2026 criteria:** razorpay.com/buildathon, velonx.in/blog/razorpay-ai-buildathon-2026, coursejoiner.com/internship/razorpay-ai-builder-internship-2026, cloudsutra.in/jobs/razorpay-hiring-ai-builder-intern-in-bangalore, linkedin.com/posts/razorpay-careers_razorpaybuildathon-aiinterns-hiring-activity-7497899727838076929
+- **Razorpay Agent Studio (FTX 2026):** razorpay.com/newsroom/razorpay-launches-the-worlds-first-ai-native-agent-studio-for-payments-at-ftx26-powered-by-anthropics-claude, razorpay.com/blog/agent-studio-ai-agents-by-razorpay, razorpay.com/blog/razorpay-agent-studio-principles-guardrails-and-merchant-control, thehindubusinessline.com, techcircle.in, moneycontrol.com, thepaypers.com
+- **UPI Autopay v2 / Intelligent Revenue-Protect:** razorpay.com/blog/upi-autopay-with-intelligent-revenue-protect, razorpay.com/blog/upi-autopay-interoperability, razorpay.com/blog/master-recurring-payments-upi-autopay-guide, razorpay.com/upi-autopay
+- **Optimizer:** razorpay.com/optimizer-intelligent-payments-routing
+- **Failed Payment Recovery:** razorpay.com/blog/razorpay-failed-payment-recovery
+- **Competitor Track-3 repos:** github.com/abhinav-phi/reflex, github.com/Shikari-ai/recoup, github.com/HappyGarg8o/ai-revenue-recovery, github.com/AdithyaAbburi/RecoverAI
+- **Federated Learning for Fraud (2026):** arxiv.org/html/2603.13617 (NVIDIA FLARE), eureka.patsnap.com
+- **India Voice/WA Dunning:** callmissed.com, gupshup.ai/whatsapp-api, caller.digital, whatsboost.in
+- **Payment Orchestration Cross-PSP:** gr4vy.com/posts/payment-retry-logic-explained, paymentbrief.com, primer.io/blog
+- **NPCI Guidelines 2026:** razorpay.com/blog/master-recurring-payments-upi-autopay-guide
+- **Smart Collect 2.0:** razorpay.com/docs/payments/smart-collect/
+- **DPDP Act 2023:** meity.gov.in/dpdp-act-2023
+- **TRAI DLT Regulations:** trai.gov.in/dlt-regulations
