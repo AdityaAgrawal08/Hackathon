@@ -218,13 +218,14 @@ export async function simulateFailureTriage(
   const diagClass: FailureClassId =
     preset.failureCode.includes("INSUFFICIENT") || preset.failureCode.includes("BALANCE")
       ? "SOFT_RETRYABLE"
-      : preset.failureCode.includes("EXPIRED") || preset.failureCode.includes("REVOKED") || preset.failureCode.includes("INVALID")
+      : preset.failureCode.includes("EXPIRED") || preset.failureCode.includes("REVOKED") || preset.failureCode.includes("INVALID") || preset.failureCode.includes("OTP") || preset.failureCode.includes("INCORRECT") || preset.failureCode.includes("DECLINED")
         ? "HARD_METHOD_DEAD"
         : preset.failureCode.includes("BANK") || preset.failureCode.includes("TIMEOUT") || preset.failureCode.includes("NETWORK") || preset.failureCode.includes("GATEWAY")
           ? "NETWORK_TIMEOUT"
           : preset.failureCode.includes("FRAUD") || preset.failureCode.includes("RISK") || preset.failureCode.includes("STOLEN")
             ? "RISK_FLAGGED"
             : "UNKNOWN";
+
 
   const rawDiag = diagnoseFailure(preset.failureCode, diagClass);
   const diagnosis = { ...rawDiag, class: diagClass };
