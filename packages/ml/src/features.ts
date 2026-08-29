@@ -37,7 +37,11 @@ export const FEATURE_NAMES = [
   "tenure_norm", // days since joined / 400, clamped
   "ltv_paise_norm", // estimated lifetime value, normalized by LTV_NORM_PAISE
   "churn_risk_norm", // predicted churn risk, 0..1 (higher ⇒ more likely to leave)
+  "days_since_last_attempt_norm", // min(days_since_last_attempt, 30) / 30
+  "high_value_tier", // 1 if amount >= ₹10,000, else 0
+  "bank_rail_health_norm", // rolling health score of the bank rail (0..1, default 1.0)
 ] as const;
+
 
 export type FeatureName = (typeof FEATURE_NAMES)[number];
 export const FEATURE_COUNT = FEATURE_NAMES.length;
@@ -284,6 +288,10 @@ export function computeFeatures(input: FeatureInput): ComputedFeatures {
 
   const ltv = deriveLtvSignals(cust, input.occurredAtUtc);
 
+  const daysSinceLastAttempt = input.priorFailureAmountsPaise.length > 0 ? 1 : 0;
+  const highValueTier = input.amountPaise >= 1_000_000 ? 1 : 0;
+  const bankRailHealth = 1.0;
+
   const values = [
     ONEHOT_CLASSES.includes(cls as (typeof ONEHOT_CLASSES)[number]) &&
     cls === "SOFT_RETRYABLE"
@@ -301,7 +309,11 @@ export function computeFeatures(input: FeatureInput): ComputedFeatures {
     Math.min(1, tenureDays / 400),
     clamp01(ltv.ltvPaise / LTV_NORM_PAISE),
     ltv.churnRiskBp / 10_000,
+    Math.min(1, daysSinceLastAttempt / 30),
+    highValueTier,
+    bankRailHealth,
   ];
+
 
   if (values.some((v) => !Number.isFinite(v))) {
     throw new Error(`computeFeatures produced non-finite value for ${input.failureCode}`);
