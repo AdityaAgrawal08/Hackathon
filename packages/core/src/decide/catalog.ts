@@ -18,6 +18,7 @@ export const ACTIONS = [
   "RETRY_NOW",
   "RETRY_PAYDAY",
   "ALTERNATE_UPI_LINK",
+  "PARTIAL_COLLECT",
   "RECOVER_VIA_RAIL",
   "RECOVER_VOICE_HI",
   "RECOVER_WHATSAPP",
@@ -65,6 +66,14 @@ export type FailureClassId =
   | "UNKNOWN";
 
 /**
+ * §4.8 — B2B partial-collect: when a full invoice can't be recovered in one hit,
+ * ARBITER proposes collecting a fraction of the billed amount via Razorpay Smart
+ * Collect. 30% is the default first-installment ask (merchant-tunable). Stored as
+ * a constant so the executor and the EV math agree on the partial amount.
+ */
+export const PARTIAL_COLLECT_FRACTION = 0.3;
+
+/**
  * Per-action contact cost in integer paise (cited assumption, metrics-methodology).
  * HUMAN_REVIEW prices merchant labor; every contact action costs > 0 so spamming
  * cannot win the argmax (P3-B6/P7-B7).
@@ -73,6 +82,7 @@ export const CONTACT_COST_PAISE: Record<ActionId, Paise> = {
   RETRY_NOW: paise(300),
   RETRY_PAYDAY: paise(300),
   ALTERNATE_UPI_LINK: paise(150),
+  PARTIAL_COLLECT: paise(250),
   RECOVER_VIA_RAIL: paise(200),
   RECOVER_VOICE_HI: paise(800),
   RECOVER_WHATSAPP: paise(120),
@@ -87,6 +97,7 @@ const CONTACT_ACTIONS: ReadonlySet<ActionId> = new Set([
   "RETRY_NOW",
   "RETRY_PAYDAY",
   "ALTERNATE_UPI_LINK",
+  "PARTIAL_COLLECT",
   "RECOVER_VIA_RAIL",
   "RECOVER_VOICE_HI",
   "RECOVER_WHATSAPP",
@@ -108,6 +119,7 @@ export const DEFAULT_ACTION_MULTIPLIERS: Record<FailureClassId, Record<ActionId,
     RETRY_NOW: 0.6,
     RETRY_PAYDAY: 1.4,
     ALTERNATE_UPI_LINK: 0.5,
+    PARTIAL_COLLECT: 0.5,
     RECOVER_VIA_RAIL: 0.3,
     RECOVER_VOICE_HI: 0.8,
     RECOVER_WHATSAPP: 0.7,
@@ -120,6 +132,7 @@ export const DEFAULT_ACTION_MULTIPLIERS: Record<FailureClassId, Record<ActionId,
     RETRY_NOW: 0.0,
     RETRY_PAYDAY: 0.0,
     ALTERNATE_UPI_LINK: 1.0,
+    PARTIAL_COLLECT: 0.9,
     RECOVER_VIA_RAIL: 1.1,
     RECOVER_VOICE_HI: 0.5,
     RECOVER_WHATSAPP: 0.4,
@@ -132,6 +145,7 @@ export const DEFAULT_ACTION_MULTIPLIERS: Record<FailureClassId, Record<ActionId,
     RETRY_NOW: 1.5,
     RETRY_PAYDAY: 0.4,
     ALTERNATE_UPI_LINK: 0.3,
+    PARTIAL_COLLECT: 1.2,
     RECOVER_VIA_RAIL: 1.6,
     RECOVER_VOICE_HI: 0.6,
     RECOVER_WHATSAPP: 0.5,
@@ -144,6 +158,7 @@ export const DEFAULT_ACTION_MULTIPLIERS: Record<FailureClassId, Record<ActionId,
     RETRY_NOW: 0.0,
     RETRY_PAYDAY: 0.0,
     ALTERNATE_UPI_LINK: 0.0,
+    PARTIAL_COLLECT: 0.1,
     RECOVER_VIA_RAIL: 0.0,
     RECOVER_VOICE_HI: 0.0,
     RECOVER_WHATSAPP: 0.0,
@@ -156,6 +171,7 @@ export const DEFAULT_ACTION_MULTIPLIERS: Record<FailureClassId, Record<ActionId,
     RETRY_NOW: 0.1,
     RETRY_PAYDAY: 0.1,
     ALTERNATE_UPI_LINK: 0.1,
+    PARTIAL_COLLECT: 0.3,
     RECOVER_VIA_RAIL: 0.1,
     RECOVER_VOICE_HI: 0.2,
     RECOVER_WHATSAPP: 0.2,

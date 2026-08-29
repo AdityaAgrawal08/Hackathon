@@ -9,6 +9,7 @@
  *   RETRY_NOW       → Payment Link (card/UPI) for immediate retry
  *   RETRY_PAYDAY    → UPI Autopay retry scheduled at payday window
  *   ALTERNATE_UPI_LINK → UPI Intent/Collect link for alternative method
+ *   PARTIAL_COLLECT → Razorpay Smart Collect UPI (B2B partial first-installment, §4.8)
  *   REMINDER_LINK   → Payment Link with custom message
  *   HUMAN_REVIEW    → No API call; returns AMBIGUOUS
  */
@@ -17,6 +18,7 @@ import { formatINR, paise } from "@arbiter/shared";
 import {
   multiplierFor,
   railForFailureClass,
+  PARTIAL_COLLECT_FRACTION,
   type ActionId,
   type FailureClassId,
 } from "../../decide/catalog.js";
@@ -164,6 +166,40 @@ function buildVoicePayload(ctx: ProviderContext) {
   };
 }
 
+/**
+ * §4.8 B2B partial-collect via Razorpay Smart Collect.
+ * Collects PARTIAL_COLLECT_FRACTION of the billed amount as a first installment
+ * on a large B2B invoice, with a deterministic Smart Collect identifier derived
+ * from the proposal (stable across retries → idempotent collector). The partial
+ * amount is reproducible (round(full * fraction)), so the merchant's ledger and
+ * the audit trail always agree.
+ */
+function buildSmartCollectPayload(ctx: ProviderContext) {
+  const partialPaise = Math.max(100, Math.round(ctx.amountPaise * PARTIAL_COLLECT_FRACTION));
+  const vpa = `rzpsc.${ctx.tenantId}.${ctx.proposalId}`;
+  return {
+    rail: "smart_collect_upi",
+    amount: partialPaise,
+    full_amount: ctx.amountPaise,
+    currency: "INR",
+    description: `Partial collection (${Math.round(PARTIAL_COLLECT_FRACTION * 100)}%) via Razorpay Smart Collect`,
+    smart_collect: {
+      vpa,
+      collector_id: `sc_${ctx.rzpRequestRef}`,
+      partial_allowed: true,
+      min_amount: partialPaise,
+    },
+    idempotency_key: ctx.idempotencyKey,
+    rzp_request_ref: ctx.rzpRequestRef,
+    failure_class: ctx.failureClass,
+    notes: {
+      proposal_id: ctx.proposalId,
+      action: ctx.actionId,
+      partial_fraction: PARTIAL_COLLECT_FRACTION,
+    },
+  };
+}
+
 function buildPayload(ctx: ProviderContext) {
   switch (ctx.actionId) {
     case "RETRY_NOW":
@@ -172,6 +208,8 @@ function buildPayload(ctx: ProviderContext) {
       return buildUpiAutopayRetryPayload(ctx);
     case "ALTERNATE_UPI_LINK":
       return buildAlternateUpiLinkPayload(ctx);
+    case "PARTIAL_COLLECT":
+      return buildSmartCollectPayload(ctx);
     case "RECOVER_VIA_RAIL":
       return buildCrossPspPayload(ctx);
     case "RECOVER_VOICE_HI":
