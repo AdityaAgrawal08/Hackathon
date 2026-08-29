@@ -28,8 +28,10 @@
  * All timestamps are ISO-UTC derived from an explicit nowMs (no Date.now()).
  */
 
+import { createHash } from "node:crypto";
 import type { Client } from "@libsql/client";
 import { isoUtc, paise } from "@arbiter/shared";
+
 import { transition } from "../approval/state_machine.js";
 import { idempotencyKey, rzpRequestRef } from "./index.js";
 
@@ -157,31 +159,50 @@ export async function debitLedger(
   if (existing.rows.length > 0) {
     return getBalance(client, customerId);
   }
+  const nowIso = isoUtc(nowMs);
   const before = await getBalance(client, customerId);
   const after = Math.max(0, before - amountPaise);
-  await client.execute({
-    sql: `INSERT INTO ledger_entries (id, customer_id, idem_key, kind, amount_paise, balance_after_paise, at_utc)
-          VALUES (?, ?, ?, 'DEBIT', ?, ?, ?)`,
-    args: [`led_${idemKey}`, customerId, idemKey, amountPaise, after, isoUtc(nowMs)],
-  });
-  await client.execute({
-    sql: `INSERT INTO account_balances (customer_id, balance_paise, updated_at_utc)
-          VALUES (?, ?, ?)
-          ON CONFLICT(customer_id) DO UPDATE SET balance_paise = excluded.balance_paise, updated_at_utc = excluded.updated_at_utc`,
-    args: [customerId, after, isoUtc(nowMs)],
-  });
+
+  await client.batch(
+    [
+      {
+        sql: `INSERT INTO ledger_entries (id, customer_id, idem_key, kind, amount_paise, balance_after_paise, at_utc)
+              VALUES (?, ?, ?, 'DEBIT', ?, ?, ?)
+              ON CONFLICT(idem_key, kind) DO NOTHING`,
+        args: [`led_${idemKey}`, customerId, idemKey, amountPaise, after, nowIso],
+      },
+      {
+        sql: `INSERT INTO account_balances (customer_id, balance_paise, updated_at_utc)
+              VALUES (?, ?, ?)
+              ON CONFLICT(customer_id) DO UPDATE SET balance_paise = excluded.balance_paise, updated_at_utc = excluded.updated_at_utc`,
+        args: [customerId, after, nowIso],
+      },
+    ],
+    "write",
+  );
   return after;
 }
 
 /* ── intent lookup ──────────────────────────────────────────────── */
 
-async function findIntent(client: Client, clientIdemKey: string) {
-  const r = await client.execute({
-    sql: `SELECT * FROM payment_intents WHERE client_idem_key = ?`,
-    args: [clientIdemKey],
-  });
+export async function findIntent(client: Client, clientIdemKey: string, tenantId?: string) {
+  const sql = tenantId
+    ? `SELECT * FROM payment_intents WHERE client_idem_key = ? AND tenant_id = ?`
+    : `SELECT * FROM payment_intents WHERE client_idem_key = ?`;
+  const args = tenantId ? [clientIdemKey, tenantId] : [clientIdemKey];
+  const r = await client.execute({ sql, args });
   return r.rows.length > 0 ? mapIntent(r.rows[0] as unknown as Record<string, unknown>) : null;
 }
+
+export function computeCanonicalPayloadHash(payload: Record<string, unknown>): string {
+  const sortedKeys = Object.keys(payload).sort();
+  const canonicalObj: Record<string, unknown> = {};
+  for (const k of sortedKeys) {
+    canonicalObj[k] = payload[k];
+  }
+  return createHash("sha256").update(JSON.stringify(canonicalObj)).digest("hex");
+}
+
 
 function mapIntent(row: Record<string, unknown>): IntentRow {
   return {

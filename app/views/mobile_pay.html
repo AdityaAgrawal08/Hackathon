@@ -127,7 +127,6 @@
     </div>
   </main>
 
-  <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
   <script>
     const sessionToken = "{{SESSION_TOKEN}}";
     const paymentMode = "{{PAYMENT_MODE}}";
@@ -137,50 +136,56 @@
 
     if (paymentMode === 'REAL_SANDBOX') {
       document.getElementById('section-real').classList.remove('hidden');
+      // Dynamically load Razorpay SDK only when in REAL_SANDBOX mode
+      const rzpScript = document.createElement('script');
+      rzpScript.src = "https://checkout.razorpay.com/v1/checkout.js";
+      rzpScript.onload = setupRazorpay;
+      document.head.appendChild(rzpScript);
     } else {
       document.getElementById('section-local').classList.remove('hidden');
     }
 
-    // REAL SANDBOX: Razorpay Checkout JS
-    document.getElementById('btn-rzp-pay')?.addEventListener('click', () => {
-      const options = {
-        key: rzpKeyId,
-        amount: amountPaise,
-        currency: "INR",
-        name: "ARBITER Demo Store",
-        description: "Payment for Order " + orderId,
-        order_id: orderId,
-        handler: function (response) {
-          showResult({
-            success: true,
-            title: "Payment Successful",
-            msgEn: `Payment ID: ${response.razorpay_payment_id}. Verified and settled!`,
-            msgHi: "आपका भुगतान सफल रहा।"
-          });
-        },
-        modal: {
-          ondismiss: function () {
+    function setupRazorpay() {
+      document.getElementById('btn-rzp-pay')?.addEventListener('click', () => {
+        const options = {
+          key: rzpKeyId,
+          amount: amountPaise,
+          currency: "INR",
+          name: "ARBITER Demo Store",
+          description: "Payment for Order " + orderId,
+          order_id: orderId,
+          handler: function (response) {
             showResult({
-              success: false,
-              title: "Payment Cancelled",
-              msgEn: "Payment checkout modal was closed without completing payment.",
-              msgHi: "भुगतान विंडो बंद कर दी गई।"
+              success: true,
+              title: "Payment Successful",
+              msgEn: `Payment ID: ${response.razorpay_payment_id}. Verified and settled!`,
+              msgHi: "आपका भुगतान सफल रहा।"
             });
-          }
-        },
-        theme: { color: "#0284c7" }
-      };
-      const rzp = new Razorpay(options);
-      rzp.on('payment.failed', function (resp) {
-        showResult({
-          success: false,
-          title: "Payment Failed",
-          msgEn: resp.error.description || "The payment attempt was declined.",
-          msgHi: "भुगतान पूरा नहीं हो सका।"
+          },
+          modal: {
+            ondismiss: function () {
+              showResult({
+                success: false,
+                title: "Payment Cancelled",
+                msgEn: "Payment checkout modal was closed without completing payment.",
+                msgHi: "भुगतान विंडो बंद कर दी गई।"
+              });
+            }
+          },
+          theme: { color: "#0284c7" }
+        };
+        const rzp = new window.Razorpay(options);
+        rzp.on('payment.failed', function (resp) {
+          showResult({
+            success: false,
+            title: "Payment Failed",
+            msgEn: resp.error?.description || "The payment attempt was declined.",
+            msgHi: "भुगतान पूरा नहीं हो सका।"
+          });
         });
+        rzp.open();
       });
-      rzp.open();
-    });
+    }
 
     // LOCAL SANDBOX: Charge submission
     document.getElementById('form-local-pay')?.addEventListener('submit', async (e) => {

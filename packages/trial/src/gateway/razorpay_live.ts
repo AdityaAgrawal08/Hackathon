@@ -93,8 +93,11 @@ export class RazorpayLiveGateway implements PaymentGateway {
   }
 
   async fetchPayment(providerPaymentId: string): Promise<GatewayStatusResult | null> {
-    if (!providerPaymentId) return null;
-    const url = `${this.baseUrl}/payments/${encodeURIComponent(providerPaymentId)}`;
+    if (!providerPaymentId || typeof providerPaymentId !== "string") return null;
+    const cleanId = providerPaymentId.trim();
+    if (!cleanId.startsWith("pay_")) return null;
+
+    const url = `${this.baseUrl}/payments/${encodeURIComponent(cleanId)}`;
     const res = await fetch(url, {
       method: "GET",
       headers: {
@@ -142,8 +145,6 @@ export class RazorpayLiveGateway implements PaymentGateway {
   }
 
   async charge(input: GatewayChargeInput): Promise<GatewayChargeResult> {
-    // In Razorpay Test Mode, hosted checkout executes on client/mobile.
-    // When called directly with a provider payment ID, it verifies current gateway state.
     const paymentId = input.instrument?.token ?? `pay_${input.clientIdemKey.slice(0, 14)}`;
     const status = await this.fetchPayment(paymentId);
     if (!status) {
@@ -166,8 +167,9 @@ export class RazorpayLiveGateway implements PaymentGateway {
 
   verifyWebhookSignature(rawBody: Buffer, signature: string): boolean {
     if (!signature || !this.webhookSecret || rawBody.length === 0) return false;
-    const expected = createHmac("sha256", this.webhookSecret).update(rawBody).digest("hex");
-    if (expected.length !== signature.length) return false;
-    return timingSafeEqual(Buffer.from(expected, "utf-8"), Buffer.from(signature, "utf-8"));
+    const cleanSig = signature.trim().toLowerCase();
+    const expected = createHmac("sha256", this.webhookSecret).update(rawBody).digest("hex").toLowerCase();
+    if (expected.length !== cleanSig.length) return false;
+    return timingSafeEqual(Buffer.from(expected, "utf-8"), Buffer.from(cleanSig, "utf-8"));
   }
 }

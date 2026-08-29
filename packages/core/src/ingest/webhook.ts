@@ -9,8 +9,9 @@
  * Framework-agnostic: takes raw strings, returns plain results. The Next.js
  * route handler (P6) is a thin wrapper over processWebhook().
  */
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import type { Client } from "@libsql/client";
+
 import { z } from "zod";
 import { isoUtc } from "@arbiter/shared";
 import { ensureTenant } from "./replay.js";
@@ -58,10 +59,11 @@ export function verifySignature(
   signatureHex: string | null,
   secret: string,
 ): boolean {
-  if (!signatureHex) return false;
-  const expected = createHmac("sha256", secret).update(rawBody, "utf8").digest("hex");
+  if (!signatureHex || !secret || rawBody.length === 0) return false;
+  const cleanSig = signatureHex.trim().toLowerCase();
+  const expected = createHmac("sha256", secret).update(rawBody, "utf8").digest("hex").toLowerCase();
   const a = Buffer.from(expected, "utf8");
-  const b = Buffer.from(signatureHex, "utf8");
+  const b = Buffer.from(cleanSig, "utf8");
   if (a.length !== b.length) return false;
   return timingSafeEqual(a, b);
 }
@@ -87,6 +89,7 @@ async function logSecurityRejection(
     args: [args.nowIso, args.tenantId, JSON.stringify({ security: true, reason: args.reason })],
   });
 }
+
 
 /**
  * Process a Razorpay-shaped webhook. Returns a discriminated result; NEVER
@@ -246,7 +249,8 @@ export async function ingestDomainWebhook(
   const payloadObj = (parsed.payload as Record<string, unknown>) || {};
   const paymentObj = (payloadObj.payment as { entity?: { id?: string; order_id?: string; amount?: number; status?: string } })?.entity;
   const eventId = String(parsed.id || (paymentObj?.id ? `evt_${paymentObj.id}` : `evt_wh_${Date.now()}`));
-  const payloadHash = createHmac("sha256", "payload_hash_key").update(rawBuf).digest("hex");
+  const payloadHash = createHash("sha256").update(rawBuf).digest("hex");
+
 
   // 3. Check inbox_events for duplicate or anomaly
   const existing = await input.client.execute({
