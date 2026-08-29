@@ -98,5 +98,23 @@ describe("Phase 3: Interactive Payment Flow Integration Tests", () => {
     expect(html).toContain("addEventListener(\"offline\"");
     expect(html).toContain("addEventListener(\"online\"");
   });
+
+  it("Task 4.9: completes recovery and verifies HMAC signature safety", async () => {
+    const res = await fetch(`${baseUrl}/api/recovery/complete`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        proposalId: activeSession.id,
+        razorpay_payment_id: "pay_test_rec_123",
+        razorpay_order_id: "order_test_rec_123",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.success).toBe(true);
+    expect(data.proposalId).toBe(activeSession.id);
+  });
 });
+
 

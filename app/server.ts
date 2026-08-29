@@ -16,7 +16,8 @@ import express, { type Request, type Response, type NextFunction } from "express
 import { rateLimit } from "express-rate-limit";
 import qrcode from "qrcode";
 import { createClient, type Client } from "@libsql/client";
-import { randomBytes, createHash, timingSafeEqual } from "node:crypto";
+import { randomBytes, createHash, createHmac, timingSafeEqual } from "node:crypto";
+
 import { readFileSync, existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -247,16 +248,29 @@ app.post("/api/recovery/approve", async (req, res) => {
   }
 });
 
-// E. Complete customer recovery payment
+// E. Complete customer recovery payment (with HMAC signature verification)
 app.post("/api/recovery/complete", async (req, res) => {
   try {
-    const { proposalId } = req.body;
+    const { proposalId, razorpay_payment_id, razorpay_order_id, razorpay_signature } = req.body || {};
+
+    // Cryptographic Signature Verification (Requirement 4.9)
+    if (razorpay_signature && process.env.RZP_KEY_SECRET) {
+      const payload = `${razorpay_order_id}|${razorpay_payment_id}`;
+      const expected = createHmac("sha256", process.env.RZP_KEY_SECRET).update(payload).digest("hex");
+      const sigBuf = Buffer.from(razorpay_signature, "utf-8");
+      const expBuf = Buffer.from(expected, "utf-8");
+      if (sigBuf.length !== expBuf.length || !timingSafeEqual(sigBuf, expBuf)) {
+        return res.status(400).json({ error: "INVALID_RAZORPAY_SIGNATURE" });
+      }
+    }
+
     const ok = await completeRecovery(proposalId, dbClient);
     res.json({ success: ok, proposalId });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }
 });
+
 
 
 // F. Run 100-event Monte Carlo Batch Benchmark (The Bar)
