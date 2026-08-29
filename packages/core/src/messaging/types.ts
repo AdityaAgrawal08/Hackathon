@@ -6,7 +6,7 @@
  */
 import type { FailureClassId } from "../decide/catalog.js";
 
-export type OutreachChannel = "EMAIL" | "SMS" | "VOICE" | "WHATSAPP";
+export type OutreachChannel = "EMAIL" | "SMS" | "VOICE" | "VOICE_IVR" | "WHATSAPP";
 
 export interface RecipientProfile {
   customerId: string;

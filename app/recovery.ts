@@ -143,10 +143,12 @@ export async function simulateFailureTriage(
   presetKey: string,
   baseUrl: string,
   dbClient?: Client,
+  simulatedTimeMs?: number,
 ): Promise<RecoveryProposalSession> {
   const preset = PRESETS[presetKey] || PRESETS.SALARY_DELAY!;
-  const nowMs = Date.now();
+  const nowMs = simulatedTimeMs ?? Date.now();
   const nowUtc = isoUtc(nowMs);
+
   const eventId = `evt_${nowMs}_${Math.random().toString(36).slice(2, 7)}`;
   const proposalId = `prop_${nowMs}_${Math.random().toString(36).slice(2, 7)}`;
   const recoveryToken = `tok_${Math.random().toString(36).slice(2, 10)}`;
