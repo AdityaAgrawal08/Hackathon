@@ -145,6 +145,17 @@ export class RazorpayLiveGateway implements PaymentGateway {
   }
 
   async charge(input: GatewayChargeInput): Promise<GatewayChargeResult> {
+    if (input.instrument?.errorCode) {
+      return {
+        providerPaymentId: input.instrument.token || `pay_${input.clientIdemKey.slice(0, 14)}`,
+        providerOrderId: input.orderId,
+        status: "failed",
+        errorCode: input.instrument.errorCode,
+        errorDescription: input.instrument.errorDescription || "Payment declined by provider",
+        latencyMs: 80,
+      };
+    }
+
     const paymentId = input.instrument?.token ?? `pay_${input.clientIdemKey.slice(0, 14)}`;
     const status = await this.fetchPayment(paymentId);
     if (!status) {
@@ -164,6 +175,7 @@ export class RazorpayLiveGateway implements PaymentGateway {
       latencyMs: 120,
     };
   }
+
 
   verifyWebhookSignature(rawBody: Buffer, signature: string): boolean {
     if (!signature || !this.webhookSecret || rawBody.length === 0) return false;

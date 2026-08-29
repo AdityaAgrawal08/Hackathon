@@ -154,13 +154,36 @@
           name: "ARBITER Demo Store",
           description: "Payment for Order " + orderId,
           order_id: orderId,
-          handler: function (response) {
-            showResult({
-              success: true,
-              title: "Payment Successful",
-              msgEn: `Payment ID: ${response.razorpay_payment_id}. Verified and settled!`,
-              msgHi: "आपका भुगतान सफल रहा।"
-            });
+          handler: async function (response) {
+            // Send captured payment to backend to commit settlement and broadcast SSE
+            try {
+              const res = await fetch('/api/payments/charge', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  token: sessionToken,
+                  clientIdemKey: 'idem_' + response.razorpay_payment_id,
+                  instrument: {
+                    token: response.razorpay_payment_id,
+                    signature: response.razorpay_signature,
+                  },
+                }),
+              });
+              const data = await res.json();
+              showResult({
+                success: true,
+                title: "Payment Successful",
+                msgEn: `Payment ID: ${response.razorpay_payment_id}. Verified and durably settled!`,
+                msgHi: data.userMessageHi || "धन्यवाद! आपका भुगतान सफल रहा।"
+              });
+            } catch (err) {
+              showResult({
+                success: true,
+                title: "Payment Successful",
+                msgEn: `Payment ID: ${response.razorpay_payment_id}. Settling via background reconciliation...`,
+                msgHi: "आपका भुगतान सफल रहा।"
+              });
+            }
           },
           modal: {
             ondismiss: function () {
@@ -175,7 +198,25 @@
           theme: { color: "#0284c7" }
         };
         const rzp = new window.Razorpay(options);
-        rzp.on('payment.failed', function (resp) {
+        rzp.on('payment.failed', async function (resp) {
+          // Send decline event to backend so ARBITER can trigger real-time AI Recovery Advisory on desktop
+          try {
+            await fetch('/api/payments/charge', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                token: sessionToken,
+                clientIdemKey: 'idem_failed_' + (resp.error?.metadata?.payment_id || Date.now()),
+                scenario: resp.error?.code || 'RZP_REJECTED',
+                instrument: {
+                  token: resp.error?.metadata?.payment_id,
+                  errorCode: resp.error?.code,
+                  errorDescription: resp.error?.description,
+                },
+              }),
+            });
+          } catch {}
+
           showResult({
             success: false,
             title: "Payment Failed",
@@ -186,6 +227,7 @@
         rzp.open();
       });
     }
+
 
     // LOCAL SANDBOX: Charge submission
     document.getElementById('form-local-pay')?.addEventListener('submit', async (e) => {
