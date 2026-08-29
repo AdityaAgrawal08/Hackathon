@@ -174,8 +174,9 @@ export async function simulateFailureTriage(
       name: presetKeyOrCustom.name || "Custom Injected Failure",
       customerName: presetKeyOrCustom.customerName || "Customer",
       customerPhone: presetKeyOrCustom.customerPhone || "+91 98765 43210",
-      amountPaise: presetKeyOrCustom.amountPaise || 199900,
+      amountPaise: Math.max(100, Math.round(Math.abs(presetKeyOrCustom.amountPaise || 199900))),
       failureCode: presetKeyOrCustom.failureCode || "BAD_REQUEST_PAYMENT_ACCOUNT_INSUFFICIENT_BALANCE",
+
       instrumentDesc: presetKeyOrCustom.instrumentDesc || "UPI / Card",
       paydayDay: presetKeyOrCustom.paydayDay ?? 28,
       tenureMonths: presetKeyOrCustom.tenureMonths ?? 12,
