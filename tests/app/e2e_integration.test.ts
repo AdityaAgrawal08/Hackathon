@@ -91,9 +91,11 @@ describe("End-to-End Payment Infrastructure & Recovery Integration", () => {
       event: "payment.captured",
       payload: { payment: { entity: { id: `pay_e2e_${Date.now()}`, order_id: "order_123", amount: 49900 } } },
     });
-    const sig = createHmac("sha256", "whsec_local_test_secret_12345").update(rawBody).digest("hex");
+    const secret = process.env.RZP_WEBHOOK_SECRET || "whsec_local_test_secret_12345";
+    const sig = createHmac("sha256", secret).update(rawBody).digest("hex");
 
     const t0 = Date.now();
+
     const res = await fetch(`${baseUrl}/api/webhooks/razorpay`, {
       method: "POST",
       headers: {

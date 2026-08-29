@@ -89,9 +89,15 @@ export class TwilioVoiceProvider implements OutreachProvider {
   readonly channel = "VOICE" as const;
 
   constructor(private config: TwilioConfig = {}) {
-    this.config.fromNumber = config.fromNumber || "+918000000000";
-    this.config.webhookBaseUrl = config.webhookBaseUrl || "https://pay.arbiter.in";
+    const rawSid = config.accountSid || process.env.TWILIO_ACCOUNT_SID;
+    const rawToken = config.authToken || process.env.TWILIO_AUTH_TOKEN;
+    this.config.accountSid = (rawSid && !rawSid.includes("xxxxxx")) ? rawSid : undefined;
+    this.config.authToken = (rawToken && !rawToken.includes("xxxxxx")) ? rawToken : undefined;
+    this.config.fromNumber = config.fromNumber || process.env.TWILIO_FROM_NUMBER || "+918000000000";
+    this.config.webhookBaseUrl = config.webhookBaseUrl || process.env.TWILIO_WEBHOOK_BASE_URL || "https://pay.arbiter.in";
   }
+
+
 
   async send(payload: OutreachPayload): Promise<ProviderDispatchResult> {
     const nowUtc = isoUtc(Date.now());
