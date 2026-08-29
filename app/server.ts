@@ -63,11 +63,13 @@ import {
   completeRecovery,
   initiateRecoveryOrder,
   recordPromiseToPay,
+  getRecoveryResult,
   runBatchBenchmark,
   recoverySessions,
   liveMetrics,
   PRESETS,
 } from "./recovery.js";
+
 
 
 
@@ -174,6 +176,7 @@ const checkoutHtml = readFileSync(resolve(__dirname, "views/checkout.html"), "ut
 const mobilePayHtml = readFileSync(resolve(__dirname, "views/mobile_pay.html"), "utf8");
 const dashboardHtml = readFileSync(resolve(__dirname, "views/dashboard.html"), "utf8");
 const recoverHtml = readFileSync(resolve(__dirname, "views/recover.html"), "utf8");
+const resultHtml = readFileSync(resolve(__dirname, "views/result.html"), "utf8");
 
 // ── Routes ──────────────────────────────────────────────────────────
 
@@ -189,12 +192,18 @@ app.get("/recover", (_req, res) => {
   res.send(recoverHtml);
 });
 
+// 3. Post-Payment Outcome & Receipt Center (Task 4.1 - 4.4)
+app.get("/result", (_req, res) => {
+  res.setHeader("Content-Type", "text/html");
+  res.send(resultHtml);
+});
 
 // Standalone Checkout UI (for test/manual checkout)
 app.get("/checkout", (_req, res) => {
   res.setHeader("Content-Type", "text/html");
   res.send(checkoutHtml);
 });
+
 
 // ── Recovery Engine API Endpoints ────────────────────────────────────
 
@@ -270,6 +279,22 @@ app.post("/api/recovery/complete", async (req, res) => {
     res.status(500).json({ error: (err as Error).message });
   }
 });
+
+// F. Get Recovery Result & Outcome Details (Task 4.2 & 4.8)
+app.get(["/api/recovery/result", "/api/recovery/result/:id"], async (req, res) => {
+  try {
+    const id = (req.params.id as string) || (req.query.tok as string) || (req.query.prop as string) || "";
+
+    const result = await getRecoveryResult(id, dbClient);
+    if (!result) {
+      return res.status(404).json({ error: "NO_ACTIVE_RECOVERY_SESSION" });
+    }
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
 
 
 

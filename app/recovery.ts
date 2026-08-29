@@ -601,4 +601,81 @@ export async function recordPromiseToPay(
   };
 }
 
+export interface RecoveryResultPayload {
+  proposalId: string;
+  recoveryToken: string;
+  status: string;
+  isSettled: boolean;
+  customerName: string;
+  customerPhone: string;
+  amountPaise: number;
+  formattedAmount: string;
+  currency: string;
+  merchantName: string;
+  instrumentDesc: string;
+  diagnosis: Diagnosis;
+  paymentId: string;
+  settledAtUtc: string | null;
+  recoveryUrl: string;
+  messages: {
+    smsEn: RenderedMessage | null;
+    emailEn: RenderedMessage | null;
+    voiceHi: RenderedMessage | null;
+  };
+}
+
+export async function getRecoveryResult(
+  proposalIdOrToken?: string,
+  _dbClient?: Client,
+): Promise<RecoveryResultPayload | null> {
+  let session: RecoveryProposalSession | undefined;
+
+  if (proposalIdOrToken) {
+    for (const s of recoverySessions.values()) {
+      if (s.id === proposalIdOrToken || s.recoveryToken === proposalIdOrToken) {
+        session = s;
+        break;
+      }
+    }
+  }
+
+  // Fallback to latest session in demo/sandbox if none specified
+  if (!session && recoverySessions.size > 0) {
+    session = Array.from(recoverySessions.values())[recoverySessions.size - 1];
+  }
+
+  if (!session) return null;
+
+  const isSettled = session.autonomyStatus === "EXECUTED";
+  const status = isSettled
+    ? "SETTLED_RECOVERED"
+    : session.autonomyStatus === "APPROVED" || session.autonomyStatus === "AUTO_APPROVED"
+      ? "PENDING_RECOVERY"
+      : "AWAITING_APPROVAL";
+
+  return {
+    proposalId: session.id,
+    recoveryToken: session.recoveryToken,
+    status,
+    isSettled,
+    customerName: session.customerName,
+    customerPhone: session.customerPhone,
+    amountPaise: session.amountPaise,
+    formattedAmount: session.formattedAmount,
+    currency: "INR",
+    merchantName: "ARBITER Store",
+    instrumentDesc: session.instrumentDesc,
+    diagnosis: session.diagnosis,
+    paymentId: isSettled ? `pay_rec_${session.id.slice(-8)}` : `pending_${session.id.slice(-6)}`,
+    settledAtUtc: session.settledAtUtc || null,
+    recoveryUrl: session.recoveryUrl,
+    messages: {
+      smsEn: session.messages.smsEn,
+      emailEn: session.messages.emailEn,
+      voiceHi: session.messages.voiceHi,
+    },
+  };
+}
+
+
 
