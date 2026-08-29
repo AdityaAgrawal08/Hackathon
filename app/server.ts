@@ -207,19 +207,22 @@ app.get("/checkout", (_req, res) => {
 
 // ── Recovery Engine API Endpoints ────────────────────────────────────
 
-// A. Simulate failure ingestion and execute real-time triage
+// A. Simulate failure ingestion and execute real-time triage (Task 5.1 & 5.4)
 app.post("/api/recovery/triage", async (req, res) => {
   try {
-    const { preset = "SALARY_DELAY" } = req.body;
+    const { preset = "SALARY_DELAY", customPreset, autonomyThresholdPaise = 200000, simulatedTimeMs } = req.body || {};
     const hostHeader = getSanitizedHost(req);
     const proto = req.protocol === "https" || req.get("x-forwarded-proto") === "https" ? "https" : "http";
     const baseUrl = `${proto}://${hostHeader}`;
-    const session = await simulateFailureTriage(preset, baseUrl, dbClient);
+    const target = customPreset || preset;
+    const session = await simulateFailureTriage(target, baseUrl, dbClient, simulatedTimeMs, autonomyThresholdPaise);
+
     res.json(session);
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }
 });
+
 
 // B. Initiate dedicated recovery order & dynamic QR (Task 3.2)
 app.post("/api/recovery/initiate", async (req, res) => {

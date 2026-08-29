@@ -102,7 +102,21 @@ export const PRESETS: Record<string, SimulationPreset> = {
     pastSuccesses: 0,
     pastFailures: 8,
   },
+  UPI_TIMEOUT: {
+    id: "UPI_TIMEOUT",
+    name: "UPI Collect Request Timeout",
+    customerName: "Kavita Rao",
+    customerPhone: "+91 98444 55667",
+    amountPaise: 29900, // ₹299
+    failureCode: "BAD_REQUEST_PAYMENT_UPI_COLLECT_EXPIRED",
+    instrumentDesc: "Google Pay UPI (VPA: kavita@okaxis)",
+    paydayDay: 5,
+    tenureMonths: 8,
+    pastSuccesses: 7,
+    pastFailures: 0,
+  },
 };
+
 
 export interface RecoveryProposalSession {
   id: string;
@@ -144,12 +158,33 @@ export const liveMetrics = {
 };
 
 export async function simulateFailureTriage(
-  presetKey: string,
+  presetKeyOrCustom: string | Partial<SimulationPreset>,
   baseUrl: string,
   dbClient?: Client,
   simulatedTimeMs?: number,
+  autonomyThresholdPaise: number = 200000,
 ): Promise<RecoveryProposalSession> {
-  const preset = PRESETS[presetKey] || PRESETS.SALARY_DELAY!;
+  let preset: SimulationPreset;
+
+  if (typeof presetKeyOrCustom === "string") {
+    preset = PRESETS[presetKeyOrCustom] || PRESETS.SALARY_DELAY!;
+  } else {
+    preset = {
+      id: presetKeyOrCustom.id || `CUSTOM_${Date.now()}`,
+      name: presetKeyOrCustom.name || "Custom Injected Failure",
+      customerName: presetKeyOrCustom.customerName || "Customer",
+      customerPhone: presetKeyOrCustom.customerPhone || "+91 98765 43210",
+      amountPaise: Math.max(100, Math.round(Math.abs(presetKeyOrCustom.amountPaise || 199900))),
+      failureCode: presetKeyOrCustom.failureCode || "BAD_REQUEST_PAYMENT_ACCOUNT_INSUFFICIENT_BALANCE",
+
+      instrumentDesc: presetKeyOrCustom.instrumentDesc || "UPI / Card",
+      paydayDay: presetKeyOrCustom.paydayDay ?? 28,
+      tenureMonths: presetKeyOrCustom.tenureMonths ?? 12,
+      pastSuccesses: presetKeyOrCustom.pastSuccesses ?? 5,
+      pastFailures: presetKeyOrCustom.pastFailures ?? 0,
+    };
+  }
+
   const nowMs = simulatedTimeMs ?? Date.now();
   const nowUtc = isoUtc(nowMs);
 
@@ -205,14 +240,15 @@ export async function simulateFailureTriage(
     churnRiskBp: preset.pastFailures > 2 ? 4000 : 1000,
   });
 
-  // 5. Task 6.2: Autonomy Governance (Autonomy Dial)
-  // Low-risk Soft Retryable under ₹2,000 is auto-approved; high-value/other enters Merchant Queue
+  // 5. Task 5.4: Autonomy Governance (Dynamic Autonomy Envelope Dial)
   const isAutoApproved =
     diagClass === "SOFT_RETRYABLE" &&
-    preset.amountPaise < 200000 &&
+    preset.amountPaise <= autonomyThresholdPaise &&
     decideOutput.chosen.action !== "HUMAN_REVIEW";
 
   const autonomyStatus = isAutoApproved ? "AUTO_APPROVED" : "AWAITING_APPROVAL";
+
+
 
   // 6. Task 1.4: Pre-Audited Compliance Messaging (Zero PII to LLMs)
   const tokenContext = {
@@ -451,8 +487,26 @@ export function runBatchBenchmark() {
     wastedRetriesSaved,
     contactsAvoidedInQuietHours,
     spamComplaints: 0,
+    naive: {
+      recoveredRevenuePaise: controlRecovered,
+      recoveredRevenueFormatted: formatINR(paise(controlRecovered)),
+      recoveryRate: ((controlRecovered / totalAtRisk) * 100).toFixed(1) + "%",
+      totalCostPaise: wastedRetriesSaved * 25,
+    },
+    arbiter: {
+      recoveredRevenuePaise: arbiterRecovered,
+      recoveredRevenueFormatted: formatINR(paise(arbiterRecovered)),
+      recoveryRate: ((arbiterRecovered / totalAtRisk) * 100).toFixed(1) + "%",
+      totalCostPaise: Math.round(BATCH_SIZE * 0.7 * 25),
+    },
+    delta: {
+      additionalRevenuePaise: Math.max(0, arbiterRecovered - controlRecovered),
+      additionalRevenueFormatted: formatINR(paise(Math.max(0, arbiterRecovered - controlRecovered))),
+      wastedRetriesSaved,
+    },
   };
 }
+
 
 export interface InitiatedRecoveryOrder {
   orderId: string;
