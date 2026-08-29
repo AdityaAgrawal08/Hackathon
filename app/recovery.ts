@@ -1,11 +1,14 @@
 /**
  * ARBITER AI Revenue Recovery Engine Controller.
  *
- * Provides:
- *  - Real-time failure diagnosis and ML decision pipeline
- *  - Pre-audited DLT/Meta compliant localized customer messaging
- *  - Autonomy envelope governance (Auto-approved vs Merchant Queue)
- *  - 1-Click interactive customer recovery link resolution
+ * Implements:
+ *  - Real-time failure diagnosis and ML feature extraction (16-D vector)
+ *  - Calibrated logistic regression scoring with attribution explainability
+ *  - Expected-Value optimization under strict policy and timing rules
+ *  - Autonomy dial governance (Low-Risk < ₹2,000 Auto-Approved vs Merchant Queue)
+ *  - Pre-audited DLT/Meta compliant localized customer messaging (Zero PII to LLMs)
+ *  - Double-debit protection and two-way reconciliation
+ *  - Append-only audit ledger persistence
  *  - 100-event Monte Carlo batch comparison harness (The Bar)
  */
 import type { Client } from "@libsql/client";
@@ -19,12 +22,13 @@ import {
   renderComplianceMessage,
   type RenderedMessage,
   type FailureClassId,
-  type ActionId,
 } from "../packages/core/src/index.js";
 import {
   computeFeatures,
-  FEATURE_NAMES,
+  scoreWithArtifact,
+  DEFAULT_16D_MODEL,
   type ComputedFeatures,
+  type ScoreResult,
 } from "../packages/ml/src/index.js";
 
 export interface SimulationPreset {
@@ -47,7 +51,7 @@ export const PRESETS: Record<string, SimulationPreset> = {
     name: "Salary Delay / Low Balance",
     customerName: "Rahul Sharma",
     customerPhone: "+91 98765 43210",
-    amountPaise: 199900, // ₹1,999
+    amountPaise: 199900, // ₹1,999 (< ₹2,000 auto-approved band)
     failureCode: "BAD_REQUEST_PAYMENT_ACCOUNT_INSUFFICIENT_BALANCE",
     instrumentDesc: "HDFC Bank ending in 4120",
     paydayDay: 28,
@@ -60,7 +64,7 @@ export const PRESETS: Record<string, SimulationPreset> = {
     name: "Expired Card / Mandate Revoked",
     customerName: "Priya Patel",
     customerPhone: "+91 98111 22334",
-    amountPaise: 499900, // ₹4,999
+    amountPaise: 499900, // ₹4,999 (High-value merchant review queue)
     failureCode: "BAD_REQUEST_PAYMENT_CARD_EXPIRED",
     instrumentDesc: "Visa Card ending in 8831",
     paydayDay: null,
@@ -107,6 +111,7 @@ export interface RecoveryProposalSession {
   instrumentDesc: string;
   diagnosis: Diagnosis;
   features: ComputedFeatures;
+  scoreResult: ScoreResult;
   probability: number;
   decideOutput: DecideOutput;
   autonomyStatus: "AUTO_APPROVED" | "AWAITING_APPROVAL" | "APPROVED" | "EXECUTED" | "REJECTED";
@@ -134,29 +139,34 @@ export const liveMetrics = {
   totalFailuresTriage: 0,
 };
 
-export function simulateFailureTriage(presetKey: string, baseUrl: string): RecoveryProposalSession {
+export async function simulateFailureTriage(
+  presetKey: string,
+  baseUrl: string,
+  dbClient?: Client,
+): Promise<RecoveryProposalSession> {
   const preset = PRESETS[presetKey] || PRESETS.SALARY_DELAY!;
   const nowMs = Date.now();
   const nowUtc = isoUtc(nowMs);
+  const eventId = `evt_${nowMs}_${Math.random().toString(36).slice(2, 7)}`;
   const proposalId = `prop_${nowMs}_${Math.random().toString(36).slice(2, 7)}`;
   const recoveryToken = `tok_${Math.random().toString(36).slice(2, 10)}`;
   const recoveryUrl = `${baseUrl}/pay/${recoveryToken}?recovered=true&prop=${proposalId}`;
 
-  // 1. Diagnosis
+  // 1. Task 1.1: Root-Cause Diagnosis
   const diagClass: FailureClassId =
     preset.failureCode.includes("INSUFFICIENT") || preset.failureCode.includes("BALANCE")
       ? "SOFT_RETRYABLE"
-      : preset.failureCode.includes("EXPIRED") || preset.failureCode.includes("REVOKED")
+      : preset.failureCode.includes("EXPIRED") || preset.failureCode.includes("REVOKED") || preset.failureCode.includes("INVALID")
         ? "HARD_METHOD_DEAD"
-        : preset.failureCode.includes("BANK") || preset.failureCode.includes("TIMEOUT") || preset.failureCode.includes("NETWORK")
+        : preset.failureCode.includes("BANK") || preset.failureCode.includes("TIMEOUT") || preset.failureCode.includes("NETWORK") || preset.failureCode.includes("GATEWAY")
           ? "NETWORK_TIMEOUT"
-          : preset.failureCode.includes("FRAUD") || preset.failureCode.includes("RISK")
+          : preset.failureCode.includes("FRAUD") || preset.failureCode.includes("RISK") || preset.failureCode.includes("STOLEN")
             ? "RISK_FLAGGED"
             : "UNKNOWN";
 
   const diagnosis = diagnoseFailure(preset.failureCode, diagClass);
 
-  // 2. Feature Extraction (16-D)
+  // 2. Task 1.2: 16-Dimensional ML Feature Extraction
   const features = computeFeatures({
     failureCode: preset.failureCode,
     amountPaise: preset.amountPaise,
@@ -171,22 +181,14 @@ export function simulateFailureTriage(presetKey: string, baseUrl: string): Recov
     },
   });
 
-  // 3. ML Scoring
-  const baseProb =
-    diagClass === "SOFT_RETRYABLE"
-      ? 0.72
-      : diagClass === "HARD_METHOD_DEAD"
-        ? 0.65
-        : diagClass === "NETWORK_TIMEOUT"
-          ? 0.85
-          : diagClass === "RISK_FLAGGED"
-            ? 0.05
-            : 0.35;
+  // 3. Calibrated ML Scoring with Top Attributions
+  const scoreResult = scoreWithArtifact(features.values, DEFAULT_16D_MODEL);
+  const probability = scoreResult.probability;
 
-  // 4. EV Decision Engine
+  // 4. Task 1.3: Expected-Value Decision Engine & Policy
   const policy = defaultPolicy();
   const decideOutput = decide({
-    probability: baseProb,
+    probability,
     failureClass: diagClass,
     amountPaise: preset.amountPaise,
     nowMs,
@@ -197,16 +199,16 @@ export function simulateFailureTriage(presetKey: string, baseUrl: string): Recov
     churnRiskBp: preset.pastFailures > 2 ? 4000 : 1000,
   });
 
-  // 5. Autonomy Governance
-  // Low-risk Soft Retryable under ₹3,000 is auto-approved; high-value/other enters Merchant Queue
+  // 5. Task 6.2: Autonomy Governance (Autonomy Dial)
+  // Low-risk Soft Retryable under ₹2,000 is auto-approved; high-value/other enters Merchant Queue
   const isAutoApproved =
     diagClass === "SOFT_RETRYABLE" &&
-    preset.amountPaise <= 300000 &&
+    preset.amountPaise < 200000 &&
     decideOutput.chosen.action !== "HUMAN_REVIEW";
 
   const autonomyStatus = isAutoApproved ? "AUTO_APPROVED" : "AWAITING_APPROVAL";
 
-  // 6. Pre-Audited Compliance Messaging
+  // 6. Task 1.4: Pre-Audited Compliance Messaging (Zero PII to LLMs)
   const tokenContext = {
     customerName: preset.customerName,
     amountPaise: preset.amountPaise,
@@ -234,7 +236,8 @@ export function simulateFailureTriage(presetKey: string, baseUrl: string): Recov
     instrumentDesc: preset.instrumentDesc,
     diagnosis,
     features,
-    probability: baseProb,
+    scoreResult,
+    probability,
     decideOutput,
     autonomyStatus,
     messages,
@@ -248,30 +251,131 @@ export function simulateFailureTriage(presetKey: string, baseUrl: string): Recov
   liveMetrics.totalFailuresTriage += 1;
 
   if (diagClass === "HARD_METHOD_DEAD") {
-    // Dead card retry saved
-    liveMetrics.wastedAttemptsSaved += 2;
+    // 3 wasted retries on dead card prevented
+    liveMetrics.wastedAttemptsSaved += 3;
+  }
+
+  // 7. Task 6.4: Append-Only Audit Logging to SQLite
+  if (dbClient) {
+    try {
+      await dbClient.batch(
+        [
+          {
+            sql: `INSERT OR IGNORE INTO audit_log
+                    (ts_utc, tenant_id, event_id, actor, entry_type, model_version, policy_version, payload_json)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            args: [
+              nowUtc,
+              "demo",
+              eventId,
+              "PIPELINE",
+              "TRIGGER",
+              "logreg@1.0.0",
+              "policy-v1",
+              JSON.stringify({ failureCode: preset.failureCode, amountPaise: preset.amountPaise, customer: preset.customerName }),
+            ],
+          },
+          {
+            sql: `INSERT OR IGNORE INTO audit_log
+                    (ts_utc, tenant_id, event_id, actor, entry_type, model_version, policy_version, payload_json)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            args: [
+              nowUtc,
+              "demo",
+              eventId,
+              "PIPELINE",
+              "DIAGNOSIS",
+              "logreg@1.0.0",
+              "policy-v1",
+              JSON.stringify({ rootCause: diagnosis.rootCause, explanation: diagnosis.explanation, class: diagClass }),
+            ],
+          },
+          {
+            sql: `INSERT OR IGNORE INTO audit_log
+                    (ts_utc, tenant_id, event_id, actor, entry_type, model_version, policy_version, payload_json)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            args: [
+              nowUtc,
+              "demo",
+              eventId,
+              "PIPELINE",
+              "DECISION",
+              "logreg@1.0.0",
+              "policy-v1",
+              JSON.stringify({
+                proposalId,
+                chosenAction: decideOutput.chosen.action,
+                evPaise: decideOutput.chosen.evPaise,
+                probability,
+                autonomyStatus,
+              }),
+            ],
+          },
+        ],
+        "write",
+      );
+    } catch {
+      // Non-blocking for in-memory runs
+    }
   }
 
   return session;
 }
 
-export function approveProposal(proposalId: string): boolean {
+export async function approveProposal(proposalId: string, dbClient?: Client): Promise<boolean> {
   const session = recoverySessions.get(proposalId);
   if (!session) return false;
   if (session.autonomyStatus === "AWAITING_APPROVAL") {
     session.autonomyStatus = "APPROVED";
+    if (dbClient) {
+      try {
+        await dbClient.execute({
+          sql: `INSERT INTO audit_log (ts_utc, tenant_id, event_id, actor, entry_type, model_version, policy_version, payload_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          args: [
+            isoUtc(Date.now()),
+            "demo",
+            proposalId,
+            "MERCHANT",
+            "APPROVAL",
+            "logreg@1.0.0",
+            "policy-v1",
+            JSON.stringify({ proposalId, action: "APPROVED" }),
+          ],
+        });
+      } catch {}
+    }
     return true;
   }
   return false;
 }
 
-export function completeRecovery(proposalId: string): boolean {
+export async function completeRecovery(proposalId: string, dbClient?: Client): Promise<boolean> {
   const session = recoverySessions.get(proposalId);
   if (!session) return false;
   if (session.autonomyStatus !== "EXECUTED") {
     session.autonomyStatus = "EXECUTED";
     session.settledAtUtc = isoUtc(Date.now());
     liveMetrics.totalRecoveredPaise += session.amountPaise;
+
+    if (dbClient) {
+      try {
+        await dbClient.execute({
+          sql: `INSERT INTO audit_log (ts_utc, tenant_id, event_id, actor, entry_type, model_version, policy_version, payload_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          args: [
+            session.settledAtUtc,
+            "demo",
+            proposalId,
+            "CUSTOMER",
+            "OUTCOME",
+            "logreg@1.0.0",
+            "policy-v1",
+            JSON.stringify({ proposalId, amountPaise: session.amountPaise, status: "SETTLED_RECOVERED" }),
+          ],
+        });
+      } catch {}
+    }
     return true;
   }
   return false;

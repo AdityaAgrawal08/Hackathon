@@ -184,13 +184,13 @@ app.get("/checkout", (_req, res) => {
 // ── Recovery Engine API Endpoints ────────────────────────────────────
 
 // A. Simulate failure ingestion and execute real-time triage
-app.post("/api/recovery/triage", (req, res) => {
+app.post("/api/recovery/triage", async (req, res) => {
   try {
     const { preset = "SALARY_DELAY" } = req.body;
     const hostHeader = getSanitizedHost(req);
     const proto = req.protocol === "https" || req.get("x-forwarded-proto") === "https" ? "https" : "http";
     const baseUrl = `${proto}://${hostHeader}`;
-    const session = simulateFailureTriage(preset, baseUrl);
+    const session = await simulateFailureTriage(preset, baseUrl, dbClient);
     res.json(session);
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
@@ -198,10 +198,10 @@ app.post("/api/recovery/triage", (req, res) => {
 });
 
 // B. Approve proposal in merchant queue
-app.post("/api/recovery/approve", (req, res) => {
+app.post("/api/recovery/approve", async (req, res) => {
   try {
     const { proposalId } = req.body;
-    const ok = approveProposal(proposalId);
+    const ok = await approveProposal(proposalId, dbClient);
     res.json({ success: ok, proposalId });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
@@ -209,15 +209,16 @@ app.post("/api/recovery/approve", (req, res) => {
 });
 
 // C. Complete customer recovery payment
-app.post("/api/recovery/complete", (req, res) => {
+app.post("/api/recovery/complete", async (req, res) => {
   try {
     const { proposalId } = req.body;
-    const ok = completeRecovery(proposalId);
+    const ok = await completeRecovery(proposalId, dbClient);
     res.json({ success: ok, proposalId });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }
 });
+
 
 // D. Run 100-event Monte Carlo Batch Benchmark (The Bar)
 app.get("/api/recovery/batch-proof", (_req, res) => {

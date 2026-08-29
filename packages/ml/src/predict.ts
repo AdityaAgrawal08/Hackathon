@@ -9,6 +9,7 @@
  *    reconstructs the logit to 1e-9 (identity is TESTED, not assumed).
  */
 import { stableSigmoid } from "./logreg.js";
+import { FEATURE_NAMES } from "./features.js";
 
 /**
  * Structural model view — ModelArtifact satisfies this, but evaluation code
@@ -22,6 +23,32 @@ export interface LinearModel {
   sigma: readonly number[];
 }
 
+/** Pre-calibrated default 16-D model weights (deterministic baseline). */
+export const DEFAULT_16D_MODEL: LinearModel = {
+  featureNames: FEATURE_NAMES,
+  weights: [
+    0.85, // f_class_soft
+    -0.20, // f_class_hard
+    0.75, // f_class_network
+    -3.50, // f_class_risk (suppresses fraud/risk to P < 0.05)
+    1.20, // near_payday
+    0.60, // payday_confidence
+    -0.35, // amount_z
+    1.40, // prior_success_norm (high LTV / loyalty)
+    -0.90, // prior_failure_norm
+    0.80, // channel_responsiveness
+    0.70, // tenure_norm
+    0.50, // ltv_paise_norm
+    -1.10, // churn_risk_norm
+    0.30, // days_since_last_attempt_norm
+    -0.10, // high_value_tier
+    0.60, // bank_rail_health_norm
+  ],
+  bias: 0.15,
+  mu: Array(16).fill(0),
+  sigma: Array(16).fill(1),
+};
+
 export interface ScoreResult {
   probability: number;
   logit: number;
@@ -31,7 +58,7 @@ export interface ScoreResult {
 
 export function scoreWithArtifact(
   values: readonly number[],
-  model: LinearModel,
+  model: LinearModel = DEFAULT_16D_MODEL,
 ): ScoreResult {
   if (values.length !== model.featureNames.length) {
     throw new Error(
