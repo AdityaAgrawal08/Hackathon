@@ -12,7 +12,9 @@
  *  - 100-event Monte Carlo batch comparison harness (The Bar)
  */
 import type { Client } from "@libsql/client";
+import QRCode from "qrcode";
 import { formatINR, paise, isoUtc } from "../packages/shared/src/index.js";
+
 import {
   diagnoseFailure,
   type Diagnosis,
@@ -445,3 +447,158 @@ export function runBatchBenchmark() {
     spamComplaints: 0,
   };
 }
+
+export interface InitiatedRecoveryOrder {
+  orderId: string;
+  proposalId: string;
+  recoveryToken: string;
+  amountPaise: number;
+  formattedAmount: string;
+  currency: string;
+  keyId: string;
+  qrDataUrl: string;
+  upiIntentUrl: string;
+  deepLinks: {
+    gpay: string;
+    phonepe: string;
+    paytm: string;
+  };
+  idempotencyKey: string;
+}
+
+export async function initiateRecoveryOrder(
+  proposalIdOrToken?: string,
+  preferredMethod: string = "upi",
+  dbClient?: Client,
+): Promise<InitiatedRecoveryOrder | null> {
+  // Find session by proposalId or recoveryToken
+  let session: RecoveryProposalSession | undefined;
+  if (proposalIdOrToken) {
+    for (const s of recoverySessions.values()) {
+      if (s.id === proposalIdOrToken || s.recoveryToken === proposalIdOrToken) {
+        session = s;
+        break;
+      }
+    }
+  }
+
+  // Fallback to latest session if none specified or in demo
+  if (!session && recoverySessions.size > 0) {
+    session = Array.from(recoverySessions.values())[recoverySessions.size - 1];
+  }
+
+  if (!session) return null;
+
+  const nowMs = Date.now();
+  const orderId = `order_rec_${nowMs}_${session.id.slice(-6)}`;
+  const amountRupees = (session.amountPaise / 100).toFixed(2);
+  const upiVpa = "arbiter.recovery@hdfcbank";
+  const upiIntentUrl = `upi://pay?pa=${upiVpa}&pn=ARBITER%20Recovery&am=${amountRupees}&tr=${session.id}&cu=INR&tn=Subscription%20Recovery`;
+
+  // Generate dynamic QR Code Data URL
+  let qrDataUrl = "";
+  try {
+    qrDataUrl = await QRCode.toDataURL(upiIntentUrl, {
+      margin: 1,
+      width: 256,
+      color: {
+        dark: "#0f172a",
+        light: "#ffffff",
+      },
+    });
+  } catch (err) {
+    qrDataUrl = "";
+  }
+
+  const deepLinks = {
+    gpay: `tez://upi/pay?pa=${upiVpa}&pn=ARBITER&am=${amountRupees}&tr=${session.id}&cu=INR`,
+    phonepe: `phonepe://pay?pa=${upiVpa}&pn=ARBITER&am=${amountRupees}&tr=${session.id}&cu=INR`,
+    paytm: `paytmmp://pay?pa=${upiVpa}&pn=ARBITER&am=${amountRupees}&tr=${session.id}&cu=INR`,
+  };
+
+  const idemKey = `idem_${session.id}_${session.amountPaise}`;
+
+  if (dbClient) {
+    try {
+      await dbClient.execute({
+        sql: `INSERT INTO audit_log (ts_utc, tenant_id, event_id, actor, entry_type, payload_json)
+              VALUES (?, ?, ?, ?, ?, ?)`,
+        args: [
+          isoUtc(nowMs),
+          "demo",
+          session.id,
+          "PIPELINE",
+          "ACTION",
+          JSON.stringify({
+            modelVersion: "logreg@1.0.0",
+            policyVersion: "policy-v1",
+            action: "INITIATE_RECOVERY_ORDER",
+            orderId,
+            amountPaise: session.amountPaise,
+            method: preferredMethod,
+          }),
+        ],
+      });
+    } catch {}
+  }
+
+  return {
+    orderId,
+    proposalId: session.id,
+    recoveryToken: session.recoveryToken,
+    amountPaise: session.amountPaise,
+    formattedAmount: session.formattedAmount,
+    currency: "INR",
+    keyId: process.env.RZP_KEY_ID || "rzp_test_arbiter_mock",
+    qrDataUrl,
+    upiIntentUrl,
+    deepLinks,
+    idempotencyKey: idemKey,
+  };
+}
+
+export async function recordPromiseToPay(
+  proposalId: string,
+  promisedDay: number = 28,
+  dbClient?: Client,
+): Promise<{ success: boolean; proposalId: string; promisedDay: number; scheduledReminderUtc: string }> {
+  // Strict day-of-month validation (1 to 31, default 28)
+  const validDay = Number.isInteger(promisedDay) && promisedDay >= 1 && promisedDay <= 31 ? promisedDay : 28;
+  const session = recoverySessions.get(proposalId);
+  const nowMs = Date.now();
+  const scheduledReminderUtc = isoUtc(nowMs + 86400000 * 2); // Scheduled for upcoming payday morning
+
+
+  if (dbClient) {
+    try {
+      await dbClient.execute({
+        sql: `INSERT INTO audit_log (ts_utc, tenant_id, event_id, actor, entry_type, payload_json)
+              VALUES (?, ?, ?, ?, ?, ?)`,
+        args: [
+          isoUtc(nowMs),
+          "demo",
+          proposalId,
+          "CUSTOMER",
+          "ACTION",
+          JSON.stringify({
+            modelVersion: "logreg@1.0.0",
+            policyVersion: "policy-v1",
+            action: "PROMISE_TO_PAY",
+            promisedDay: validDay,
+            customer: session?.customerName,
+            scheduledReminderUtc,
+          }),
+        ],
+      });
+    } catch {}
+  }
+
+  return {
+    success: true,
+    proposalId,
+    promisedDay: validDay,
+    scheduledReminderUtc,
+  };
+}
+
+

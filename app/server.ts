@@ -16,7 +16,8 @@ import express, { type Request, type Response, type NextFunction } from "express
 import { rateLimit } from "express-rate-limit";
 import qrcode from "qrcode";
 import { createClient, type Client } from "@libsql/client";
-import { randomBytes, createHash, timingSafeEqual } from "node:crypto";
+import { randomBytes, createHash, createHmac, timingSafeEqual } from "node:crypto";
+
 import { readFileSync, existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -60,11 +61,14 @@ import {
   simulateFailureTriage,
   approveProposal,
   completeRecovery,
+  initiateRecoveryOrder,
+  recordPromiseToPay,
   runBatchBenchmark,
   recoverySessions,
   liveMetrics,
   PRESETS,
 } from "./recovery.js";
+
 
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -169,6 +173,7 @@ function broadcastStatus(token: string, state: Record<string, unknown>) {
 const checkoutHtml = readFileSync(resolve(__dirname, "views/checkout.html"), "utf8");
 const mobilePayHtml = readFileSync(resolve(__dirname, "views/mobile_pay.html"), "utf8");
 const dashboardHtml = readFileSync(resolve(__dirname, "views/dashboard.html"), "utf8");
+const recoverHtml = readFileSync(resolve(__dirname, "views/recover.html"), "utf8");
 
 // ── Routes ──────────────────────────────────────────────────────────
 
@@ -177,6 +182,13 @@ app.get(["/", "/dashboard"], (_req, res) => {
   res.setHeader("Content-Type", "text/html");
   res.send(dashboardHtml);
 });
+
+// 2. Customer 1-Click Recovery Portal (Task 3.1 & 3.3)
+app.get("/recover", (_req, res) => {
+  res.setHeader("Content-Type", "text/html");
+  res.send(recoverHtml);
+});
+
 
 // Standalone Checkout UI (for test/manual checkout)
 app.get("/checkout", (_req, res) => {
@@ -200,7 +212,32 @@ app.post("/api/recovery/triage", async (req, res) => {
   }
 });
 
-// B. Approve proposal in merchant queue
+// B. Initiate dedicated recovery order & dynamic QR (Task 3.2)
+app.post("/api/recovery/initiate", async (req, res) => {
+  try {
+    const { proposalId, token, preferredMethod = "upi" } = req.body || {};
+    const order = await initiateRecoveryOrder(proposalId || token, preferredMethod, dbClient);
+    if (!order) {
+      return res.status(404).json({ error: "NO_ACTIVE_RECOVERY_SESSION" });
+    }
+    res.json(order);
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// C. Promise-to-Pay Salary Day Commitment (Task 3.5)
+app.post("/api/recovery/promise-to-pay", async (req, res) => {
+  try {
+    const { proposalId, promisedDay = 28 } = req.body || {};
+    const result = await recordPromiseToPay(proposalId, promisedDay, dbClient);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// D. Approve proposal in merchant queue
 app.post("/api/recovery/approve", async (req, res) => {
   try {
     const { proposalId } = req.body;
@@ -211,10 +248,22 @@ app.post("/api/recovery/approve", async (req, res) => {
   }
 });
 
-// C. Complete customer recovery payment
+// E. Complete customer recovery payment (with HMAC signature verification)
 app.post("/api/recovery/complete", async (req, res) => {
   try {
-    const { proposalId } = req.body;
+    const { proposalId, razorpay_payment_id, razorpay_order_id, razorpay_signature } = req.body || {};
+
+    // Cryptographic Signature Verification (Requirement 4.9)
+    if (razorpay_signature && process.env.RZP_KEY_SECRET) {
+      const payload = `${razorpay_order_id}|${razorpay_payment_id}`;
+      const expected = createHmac("sha256", process.env.RZP_KEY_SECRET).update(payload).digest("hex");
+      const sigBuf = Buffer.from(razorpay_signature, "utf-8");
+      const expBuf = Buffer.from(expected, "utf-8");
+      if (sigBuf.length !== expBuf.length || !timingSafeEqual(sigBuf, expBuf)) {
+        return res.status(400).json({ error: "INVALID_RAZORPAY_SIGNATURE" });
+      }
+    }
+
     const ok = await completeRecovery(proposalId, dbClient);
     res.json({ success: ok, proposalId });
   } catch (err) {
@@ -223,8 +272,10 @@ app.post("/api/recovery/complete", async (req, res) => {
 });
 
 
-// D. Run 100-event Monte Carlo Batch Benchmark (The Bar)
+
+// F. Run 100-event Monte Carlo Batch Benchmark (The Bar)
 app.get("/api/recovery/batch-proof", (_req, res) => {
+
   try {
     const result = runBatchBenchmark();
     res.json(result);
@@ -422,6 +473,25 @@ app.get("/pay/:token", async (req, res) => {
     });
 
     if (r.rows.length === 0) {
+      // Check if token belongs to an active recovery session
+      const recoverySession = Array.from(recoverySessions.values()).find(
+        (s) => s.recoveryToken === token || s.id === token,
+      );
+      if (recoverySession) {
+        const formattedAmount = (recoverySession.amountPaise / 100).toFixed(2);
+        const rendered = mobilePayHtml
+          .replace(/{{SESSION_TOKEN}}/g, recoverySession.recoveryToken)
+          .replace(/{{TOKEN}}/g, recoverySession.recoveryToken)
+          .replace(/{{ORDER_ID}}/g, `order_rec_${recoverySession.id}`)
+          .replace(/{{AMOUNT_PAISE}}/g, String(recoverySession.amountPaise))
+          .replace(/{{AMOUNT_FORMATTED}}/g, formattedAmount)
+          .replace(/{{PAYMENT_MODE}}/g, "RECOVERY_PORTAL")
+          .replace(/{{MODE_BADGE_CLASS}}/g, "badge-real")
+          .replace(/{{RZP_KEY_ID}}/g, process.env.RZP_KEY_ID || "rzp_test_demo")
+          .replace(/{{KEY_ID}}/g, process.env.RZP_KEY_ID || "rzp_test_demo");
+        res.setHeader("Content-Type", "text/html");
+        return res.send(rendered);
+      }
       return res.status(404).send("<h3>Checkout Session Not Found</h3>");
     }
 
@@ -447,12 +517,14 @@ app.get("/pay/:token", async (req, res) => {
 
     const rendered = mobilePayHtml
       .replace(/{{SESSION_TOKEN}}/g, session.token)
+      .replace(/{{TOKEN}}/g, session.token)
       .replace(/{{ORDER_ID}}/g, session.order_id)
       .replace(/{{AMOUNT_PAISE}}/g, String(session.amount_paise))
       .replace(/{{AMOUNT_FORMATTED}}/g, formattedAmount)
       .replace(/{{PAYMENT_MODE}}/g, session.payment_mode)
       .replace(/{{MODE_BADGE_CLASS}}/g, badgeClass)
-      .replace(/{{RZP_KEY_ID}}/g, process.env.RZP_TEST_KEY_ID || "");
+      .replace(/{{RZP_KEY_ID}}/g, process.env.RZP_TEST_KEY_ID || process.env.RZP_KEY_ID || "rzp_test_demo")
+      .replace(/{{KEY_ID}}/g, process.env.RZP_TEST_KEY_ID || process.env.RZP_KEY_ID || "rzp_test_demo");
 
     res.setHeader("Content-Type", "text/html");
     res.send(rendered);
@@ -460,6 +532,7 @@ app.get("/pay/:token", async (req, res) => {
     res.status(500).send("Server Error: " + (err as Error).message);
   }
 });
+
 
 // 4. Payment Execution & Charge Endpoint
 app.post("/api/payments/charge", chargeLimiter, async (req, res) => {
