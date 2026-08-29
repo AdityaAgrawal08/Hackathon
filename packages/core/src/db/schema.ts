@@ -386,3 +386,95 @@ export const notifications = sqliteTable(
   },
   (t) => [index("idx_notif_customer").on(t.customerId)],
 );
+
+/* ── checkout sessions (opaque expiring access tokens) ────────────── */
+export const checkoutSessions = sqliteTable(
+  "checkout_sessions",
+  {
+    token: text("token").primaryKey(),
+    tenantId: text("tenant_id").notNull(),
+    orderId: text("order_id").notNull(),
+    amountPaise: integer("amount_paise").notNull(),
+    currency: text("currency").notNull().default("INR"),
+    paymentMode: text("payment_mode").notNull().default("LOCAL_SANDBOX"),
+    expiresAtUtc: text("expires_at_utc").notNull(),
+    revokedAtUtc: text("revoked_at_utc"),
+    createdAtUtc: text("created_at_utc").notNull(),
+  },
+  (t) => [index("idx_checkout_order").on(t.orderId)],
+);
+
+/* ── payment attempts (concrete execution attempts) ───────────────── */
+export const paymentAttempts = sqliteTable(
+  "payment_attempts",
+  {
+    id: text("id").primaryKey(),
+    paymentIntentId: text("payment_intent_id").notNull(),
+    tenantId: text("tenant_id").notNull(),
+    clientIdemKey: text("client_idem_key").notNull(),
+    payloadHash: text("payload_hash").notNull(),
+    attemptNumber: integer("attempt_number").notNull().default(1),
+    status: text("status").notNull().default("PENDING"),
+    scenario: text("scenario"),
+    providerPaymentId: text("provider_payment_id"),
+    startedAtUtc: text("started_at_utc").notNull(),
+    completedAtUtc: text("completed_at_utc"),
+  },
+  (t) => [
+    uniqueIndex("uq_attempt_tenant_idem").on(t.tenantId, t.clientIdemKey),
+    index("idx_attempt_intent").on(t.paymentIntentId),
+  ],
+);
+
+/* ── provider payments (durable gateway payment projection) ───────── */
+export const providerPayments = sqliteTable(
+  "provider_payments",
+  {
+    id: text("id").primaryKey(),
+    providerOrderId: text("provider_order_id").notNull(),
+    provider: text("provider").notNull(),
+    status: text("status").notNull(),
+    amountPaise: integer("amount_paise").notNull(),
+    currency: text("currency").notNull().default("INR"),
+    errorCode: text("error_code"),
+    errorDescription: text("error_description"),
+    capturedAtUtc: text("captured_at_utc"),
+    createdAtUtc: text("created_at_utc").notNull(),
+  },
+  (t) => [index("idx_provider_order").on(t.providerOrderId)],
+);
+
+/* ── local settlements (single settlement projection) ─────────────── */
+export const localSettlements = sqliteTable(
+  "local_settlements",
+  {
+    id: text("id").primaryKey(),
+    paymentIntentId: text("payment_intent_id").notNull(),
+    idemKey: text("idem_key").notNull(),
+    providerPaymentId: text("provider_payment_id").notNull(),
+    amountPaise: integer("amount_paise").notNull(),
+    currency: text("currency").notNull().default("INR"),
+    settledAtUtc: text("settled_at_utc").notNull(),
+  },
+  (t) => [
+    uniqueIndex("uq_settlement_intent").on(t.paymentIntentId),
+    uniqueIndex("uq_settlement_idem").on(t.idemKey),
+  ],
+);
+
+/* ── webhook inbox events (async webhook buffer) ─────────────────── */
+export const inboxEvents = sqliteTable(
+  "inbox_events",
+  {
+    id: text("id").primaryKey(),
+    provider: text("provider").notNull(),
+    eventType: text("event_type").notNull(),
+    payloadJson: text("payload_json").notNull(),
+    payloadHash: text("payload_hash").notNull(),
+    status: text("status").notNull().default("PENDING"),
+    receivedAtUtc: text("received_at_utc").notNull(),
+    processedAtUtc: text("processed_at_utc"),
+  },
+  (t) => [index("idx_inbox_status").on(t.status)],
+);
+

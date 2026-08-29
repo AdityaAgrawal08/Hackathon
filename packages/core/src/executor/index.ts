@@ -18,6 +18,8 @@ import { multiplierFor, type ActionId, type FailureClassId } from "../decide/cat
 import { STALE_EXECUTION_MINUTES } from "../constants.js";
 import { getProvider } from "./providers/index.js";
 export * from "./payment_intent.js";
+export * from "./payment_state_machine.js";
+export * from "./reconciliation.js";
 
 /* ── types ─────────────────────────────────────────────────────── */
 

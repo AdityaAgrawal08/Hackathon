@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Complete Your Payment — ARBITER Sandbox</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+  <style>
+    :root {
+      --pico-font-size: 100%;
+    }
+    .badge {
+      display: inline-block;
+      padding: 0.2rem 0.5rem;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .badge-real { background-color: #0284c7; color: white; }
+    .badge-local { background-color: #7c3aed; color: white; }
+    .scenario-card {
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 0.75rem;
+      margin-bottom: 0.5rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+    .scenario-card:hover {
+      background-color: #f8fafc;
+      border-color: #cbd5e1;
+    }
+    .scenario-card input[type="radio"] {
+      margin: 0;
+    }
+    .hidden { display: none; }
+  </style>
+</head>
+<body style="padding: 1rem;">
+  <main class="container" style="max-width: 500px;">
+    <header style="text-align: center; margin-bottom: 1.5rem;">
+      <h3 style="margin-bottom: 0.25rem;">Payment Checkout</h3>
+      <p style="margin: 0; color: #64748b;">Order: <span id="lbl-order-id">{{ORDER_ID}}</span></p>
+      <div style="margin-top: 0.5rem;">
+        <span id="lbl-amount" style="font-size: 1.5rem; font-weight: 700;">₹{{AMOUNT_FORMATTED}}</span>
+        <span id="lbl-mode" class="badge {{MODE_BADGE_CLASS}}">{{PAYMENT_MODE}}</span>
+      </div>
+    </header>
+
+    <!-- REAL SANDBOX FORM -->
+    <div id="section-real" class="hidden">
+      <article>
+        <p>Proceed to official Razorpay Test Mode checkout.</p>
+        <button id="btn-rzp-pay" class="contrast">Pay with Razorpay Test Mode</button>
+      </article>
+    </div>
+
+    <!-- LOCAL SANDBOX FORM -->
+    <div id="section-local" class="hidden">
+      <form id="form-local-pay">
+        <fieldset>
+          <legend><strong>Select Test Execution Profile:</strong></legend>
+
+          <label class="scenario-card">
+            <input type="radio" name="scenario" value="LOCAL_SUCCESS" checked>
+            <div>
+              <strong>Normal Success (Capture)</strong>
+              <small style="display:block; color:#64748b;">Simulates a clean, successful transaction authorization.</small>
+            </div>
+          </label>
+
+          <label class="scenario-card">
+            <input type="radio" name="scenario" value="LOCAL_INSUFFICIENT_FUNDS">
+            <div>
+              <strong>Insufficient Balance</strong>
+              <small style="display:block; color:#64748b;">Triggers customer decline & recovery advisory.</small>
+            </div>
+          </label>
+
+          <label class="scenario-card">
+            <input type="radio" name="scenario" value="LOCAL_EXPIRED_METHOD">
+            <div>
+              <strong>Expired Card / Method</strong>
+              <small style="display:block; color:#64748b;">Simulates expired credentials prompting update link.</small>
+            </div>
+          </label>
+
+          <label class="scenario-card">
+            <input type="radio" name="scenario" value="LOCAL_GATEWAY_TIMEOUT">
+            <div>
+              <strong>Gateway Connection Timeout</strong>
+              <small style="display:block; color:#64748b;">Socket hangs; transitions to UNKNOWN for reconciliation.</small>
+            </div>
+          </label>
+
+          <label class="scenario-card">
+            <input type="radio" name="scenario" value="LOCAL_LOST_RESPONSE">
+            <div>
+              <strong>Lost Response Hazard</strong>
+              <small style="display:block; color:#64748b;">Money settled at provider, response dropped in transit.</small>
+            </div>
+          </label>
+
+          <label class="scenario-card">
+            <input type="radio" name="scenario" value="LOCAL_DUPLICATE_SUBMIT">
+            <div>
+              <strong>Duplicate / Concurrent Replay</strong>
+              <small style="display:block; color:#64748b;">Tests idempotency barrier and prevents double charge.</small>
+            </div>
+          </label>
+        </fieldset>
+
+        <button type="submit" id="btn-submit-charge" style="margin-top: 1rem;">Confirm & Pay</button>
+      </form>
+    </div>
+
+    <!-- RESULT BANNER -->
+    <div id="section-result" class="hidden" style="margin-top: 1.5rem;">
+      <article id="result-article" style="padding: 1.25rem;">
+        <h4 id="result-title" style="margin-bottom: 0.5rem;"></h4>
+        <p id="result-message-en" style="margin-bottom: 0.5rem;"></p>
+        <p id="result-message-hi" style="margin-bottom: 0; color: #64748b; font-size: 0.9rem;"></p>
+      </article>
+      <button id="btn-retry" class="secondary" style="margin-top: 1rem;">Try Another Attempt</button>
+    </div>
+  </main>
+
+  <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+  <script>
+    const sessionToken = "{{SESSION_TOKEN}}";
+    const paymentMode = "{{PAYMENT_MODE}}";
+    const rzpKeyId = "{{RZP_KEY_ID}}";
+    const orderId = "{{ORDER_ID}}";
+    const amountPaise = {{AMOUNT_PAISE}};
+
+    if (paymentMode === 'REAL_SANDBOX') {
+      document.getElementById('section-real').classList.remove('hidden');
+    } else {
+      document.getElementById('section-local').classList.remove('hidden');
+    }
+
+    // REAL SANDBOX: Razorpay Checkout JS
+    document.getElementById('btn-rzp-pay')?.addEventListener('click', () => {
+      const options = {
+        key: rzpKeyId,
+        amount: amountPaise,
+        currency: "INR",
+        name: "ARBITER Demo Store",
+        description: "Payment for Order " + orderId,
+        order_id: orderId,
+        handler: function (response) {
+          showResult({
+            success: true,
+            title: "Payment Successful",
+            msgEn: `Payment ID: ${response.razorpay_payment_id}. Verified and settled!`,
+            msgHi: "आपका भुगतान सफल रहा।"
+          });
+        },
+        modal: {
+          ondismiss: function () {
+            showResult({
+              success: false,
+              title: "Payment Cancelled",
+              msgEn: "Payment checkout modal was closed without completing payment.",
+              msgHi: "भुगतान विंडो बंद कर दी गई।"
+            });
+          }
+        },
+        theme: { color: "#0284c7" }
+      };
+      const rzp = new Razorpay(options);
+      rzp.on('payment.failed', function (resp) {
+        showResult({
+          success: false,
+          title: "Payment Failed",
+          msgEn: resp.error.description || "The payment attempt was declined.",
+          msgHi: "भुगतान पूरा नहीं हो सका।"
+        });
+      });
+      rzp.open();
+    });
+
+    // LOCAL SANDBOX: Charge submission
+    document.getElementById('form-local-pay')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const scenario = document.querySelector('input[name="scenario"]:checked')?.value || 'LOCAL_SUCCESS';
+      const clientIdemKey = 'idem_' + sessionToken + '_' + Date.now();
+
+      const btn = document.getElementById('btn-submit-charge');
+      btn.disabled = true;
+      btn.textContent = 'Processing Payment...';
+
+      try {
+        const res = await fetch('/api/payments/charge', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            token: sessionToken,
+            clientIdemKey,
+            scenario
+          })
+        });
+
+        const data = await res.json();
+        btn.disabled = false;
+        btn.textContent = 'Confirm & Pay';
+
+        if (res.status === 200 || data.knowledgeStatus === 'RESOLVED_SUCCESS') {
+          showResult({
+            success: true,
+            title: "Payment Successful",
+            msgEn: data.userMessage || "Your payment was received and durably settled.",
+            msgHi: data.userMessageHi || "धन्यवाद! आपका भुगतान सफल रहा।"
+          });
+        } else if (res.status === 202 || data.knowledgeStatus === 'UNRESOLVED_UNKNOWN') {
+          showResult({
+            success: null,
+            title: "Payment Confirmation Pending",
+            msgEn: data.userMessage || "Confirming status with banking network...",
+            msgHi: data.userMessageHi || "हम आपके बैंक से भुगतान की पुष्टि कर रहे हैं।"
+          });
+        } else {
+          showResult({
+            success: false,
+            title: "Payment Declined",
+            msgEn: data.userMessage || "Payment was declined by payment provider.",
+            msgHi: data.userMessageHi || "भुगतान पूरा नहीं हो सका।"
+          });
+        }
+      } catch (err) {
+        btn.disabled = false;
+        btn.textContent = 'Confirm & Pay';
+        showResult({
+          success: null,
+          title: "Connection Lost",
+          msgEn: "Network transport was interrupted. Reconciliation will confirm status.",
+          msgHi: "कनेक्शन टूट गया। सिस्टम स्टेटस की जांच करेगा।"
+        });
+      }
+    });
+
+    function showResult(r) {
+      document.getElementById('section-real').classList.add('hidden');
+      document.getElementById('section-local').classList.add('hidden');
+      document.getElementById('section-result').classList.remove('hidden');
+
+      const art = document.getElementById('result-article');
+      const title = document.getElementById('result-title');
+      const msgEn = document.getElementById('result-message-en');
+      const msgHi = document.getElementById('result-message-hi');
+
+      title.textContent = r.title;
+      msgEn.textContent = r.msgEn;
+      msgHi.textContent = r.msgHi;
+
+      if (r.success === true) {
+        art.style.background = '#f0fdf4';
+        art.style.borderLeft = '4px solid #16a34a';
+      } else if (r.success === false) {
+        art.style.background = '#fef2f2';
+        art.style.borderLeft = '4px solid #dc2626';
+      } else {
+        art.style.background = '#fffbeb';
+        art.style.borderLeft = '4px solid #d97706';
+      }
+    }
+
+    document.getElementById('btn-retry').addEventListener('click', () => {
+      document.getElementById('section-result').classList.add('hidden');
+      if (paymentMode === 'REAL_SANDBOX') {
+        document.getElementById('section-real').classList.remove('hidden');
+      } else {
+        document.getElementById('section-local').classList.remove('hidden');
+      }
+    });
+  </script>
+</body>
+</html>
