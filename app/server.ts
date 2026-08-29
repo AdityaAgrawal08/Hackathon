@@ -20,6 +20,16 @@ import { randomBytes, createHash, timingSafeEqual } from "node:crypto";
 import { readFileSync, existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+
+// Load environment variables from .env file natively if it exists
+if (existsSync(".env")) {
+  try {
+    process.loadEnvFile();
+  } catch (err) {
+    console.warn("Failed to load .env file:", err);
+  }
+}
+
 import { isoUtc, formatINR, paise } from "../packages/shared/src/index.js";
 import {
   RazorpayLiveGateway,
