@@ -665,3 +665,33 @@ Ordered by win-probability impact. Each item lists effort (S/M/L) and target mod
 - **Smart Collect 2.0:** razorpay.com/docs/payments/smart-collect/
 - **DPDP Act 2023:** meity.gov.in/dpdp-act-2023
 - **TRAI DLT Regulations:** trai.gov.in/dlt-regulations
+
+---
+
+## 17. Novel Angles — Implementation Status (SHIPPED IN CODE)
+
+> Branch `feat/track3-novel-angles` (built on top of `feat/track3-differentiation`).
+> All eight §4 angles are now **real, tested code**, not sketches. `pnpm verify`
+> (typecheck + full suite) is green — **313 tests passing** across 41 files.
+
+| § | Angle | Status | Where it lives | Commit |
+|---|-------|--------|----------------|--------|
+| 4.1 | Cross-PSP / cross-rail recovery | ✅ | `catalog.ts` (`RECOVER_VIA_RAIL`, `railForFailureClass`), `executor/razorpay.ts` (`buildCrossPspPayload` → Optimizer `optimizer_secondary_psp`), `engine.ts` (immediate), `tests/core/cross_psp.test.ts` | `8771926` |
+| 4.2 | Privacy-preserving federated intelligence | ✅ | `federation.ts` (seeded `Rng` DP noise, fixed `FEDERATION_EPOCH_MS`), `registry.ts` (`promoteFederated` → INCUMBENT + audit `OUTCOME`), `federate.ts` (multi-silo demo), `tests/ml/federation.test.ts` | `ac09143` |
+| 4.3 | Regulatory / compliance auto-escalation | ✅ | `policy.ts` (`regulatory_profile`, `CONSENT_LAPSED`/`AUTOPAY_RETRY_CEILING`/`PRE_DEBIT_NOTICE`, hard refusals in `evaluateConstraints`), `config/policy.yaml`, `tests/core/regulatory.test.ts` | `6e085dd` |
+| 4.4 | LTV-aware recovery | ✅ | `shared/ltv.ts` (`LTV_NORM_PAISE = ₹25,000`), `features.ts` + `engine.ts` (`ltvWeight`), `tests/core/decide.test.ts` | `3efa661` |
+| 4.5 | Real-time rail-health | ✅ | `ingest/rail_health.ts` (`simulatedRailHealth`, `RailHealth`), `window.ts` (`nextRailHealthyWindowMs`, `RAIL_DEPENDENT_ACTIONS`), `engine.ts` (`railHealthScore` + `scheduleWithRailHealth`), `pipeline.ts`, `tests/core/rail_health.test.ts` | `df83e63` |
+| 4.6 | Audited multilingual voice + WhatsApp | ✅ | `catalog.ts` (`RECOVER_VOICE_HI`, `RECOVER_WHATSAPP`), `executor/razorpay.ts` (`buildVoicePayload`, `buildWhatsAppPayload` — Gupshup Hinglish `{{1}}`), rail-gated, `tests/core/voice_whatsapp.test.ts` | `a961421` |
+| 4.7 | Promise-to-pay behavioral loop | ✅ | `db/schema.ts` + migration `0004` (`promise_to_pay`), `promise_store.ts` (`recordPromiseToPay`/`reconcilePromises`/`markPromiseKept`/`queryPromiseKeptRate`), `features.ts` (`promise_kept_rate`), `pipeline.ts` (records on `PROMISE_TO_PAY`), `tests/ml/promise.test.ts` | `631f244` |
+| 4.8 | B2B partial-collect (Smart Collect) | ✅ | `catalog.ts` (`PARTIAL_COLLECT`, `PARTIAL_COLLECT_FRACTION = 0.3`), `executor/razorpay.ts` (`buildSmartCollectPayload` → `smart_collect_upi`, deterministic VPA), `tests/core/partial_collect.test.ts` | `f12d1c6` |
+
+### Why this wins the moat (one-liners)
+- **4.1** A neutral agent can switch rails for a merchant that owns several PSPs — something a single PSP's own retry product structurally cannot do.
+- **4.2** Federated, DP-noise-protected merchant intelligence with a real promotion trail — no competitor ships cross-merchant learning.
+- **4.3** Fail-closed RBI/NPCI/DPDP/TRAI rules live in the policy engine, independent of the merchant envelope, so a merchant **cannot** toggle them off.
+- **4.4** Stops chasing a ₹49 failure like a ₹5L whale — LTV-weighted EV, realistic norm.
+- **4.5** Defers rail-dependent recovery off UPI evening peaks using a deterministic rail-health signal (kept out of the frozen feature vector).
+- **4.6** Voice/WhatsApp as **EV-ranked, envelope-governed, audited** actions with Hinglish personalization — not just channels.
+- **4.7** Records a customer's promise-to-pay and learns the kept-rate — goodwill no single PSP models.
+- **4.8** Proposes a partial first installment on a large B2B invoice via a deterministic Smart Collect identifier — a single PSP only asks full-or-nothing.
+
