@@ -6,11 +6,12 @@ import { simulateFailureTriage } from "../../app/recovery.js";
 describe("Phase 3: Interactive Payment Flow Integration Tests", () => {
   let server: Server;
   let baseUrl: string;
+  let activeSession: any;
 
   beforeAll(async () => {
     // 11:00 AM IST daytime
     const DAYTIME_MS = Date.parse("2026-08-28T05:30:00.000Z");
-    await simulateFailureTriage("SALARY_DELAY", "http://localhost:3000", dbClient, DAYTIME_MS);
+    activeSession = await simulateFailureTriage("SALARY_DELAY", "http://localhost:3000", dbClient, DAYTIME_MS);
 
     await new Promise<void>((resolve) => {
       server = app.listen(0, "127.0.0.1", () => {
@@ -37,10 +38,11 @@ describe("Phase 3: Interactive Payment Flow Integration Tests", () => {
     expect(html).toContain("Payment Recovery Portal");
     expect(html).toContain("Remind Me on Salary Day");
 
-    const resToken = await fetch(`${baseUrl}/pay/tok_demo_123`);
+    const resToken = await fetch(`${baseUrl}/pay/${activeSession.recoveryToken}`);
     expect(resToken.status).toBe(200);
     expect(resToken.headers.get("content-type")).toContain("text/html");
   });
+
 
   it("Task 3.2: initiates a dedicated recovery order with dynamic UPI QR and deep links", async () => {
     const res = await fetch(`${baseUrl}/api/recovery/initiate`, {

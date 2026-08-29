@@ -238,16 +238,16 @@
       <!-- Channel & Language Controls -->
       <div style="display: flex; gap: 0.5rem; margin-bottom: 0.75rem;">
         <select id="sel-channel" style="margin: 0; font-size: 0.75rem; padding: 0.25rem 0.5rem;">
-          <option value="WHATSAPP">WhatsApp Business</option>
-          <option value="VOICE">Hinglish Voice IVR</option>
-          <option value="SMS">SMS (DLT)</option>
-          <option value="EMAIL">Email</option>
+          <option value="SMS">SMS (TRAI DLT Route 4)</option>
+          <option value="EMAIL">Transactional Email (Brevo)</option>
+          <option value="VOICE">Voice IVR (Twilio Polly)</option>
         </select>
         <select id="sel-lang" style="margin: 0; font-size: 0.75rem; padding: 0.25rem 0.5rem;">
           <option value="EN">English</option>
           <option value="HI">Hinglish</option>
         </select>
       </div>
+
 
       <!-- Smartphone Frame -->
       <div class="phone-mockup">
@@ -436,10 +436,11 @@
       const btnPay = document.getElementById('btn-complete-recovery');
 
       let msg = null;
-      if (ch === 'WHATSAPP') msg = lang === 'HI' ? activeSession.messages.whatsappHi : activeSession.messages.whatsappEn;
-      else if (ch === 'VOICE') msg = activeSession.messages.voiceHi;
-      else if (ch === 'SMS') msg = activeSession.messages.smsEn;
+      if (ch === 'SMS') msg = activeSession.messages.smsEn;
       else if (ch === 'EMAIL') msg = activeSession.messages.emailEn;
+      else if (ch === 'VOICE') msg = activeSession.messages.voiceHi;
+      else if (ch === 'WHATSAPP') msg = lang === 'HI' ? activeSession.messages.whatsappHi : activeSession.messages.whatsappEn;
+
 
       if (!msg) {
         bubble.innerHTML = '<span style="color: #ef4444;">Automated outreach prohibited for this failure class (Zero PII / Fraud quarantine).</span>';

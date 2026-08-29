@@ -183,10 +183,11 @@ app.get(["/", "/dashboard"], (_req, res) => {
 });
 
 // 2. Customer 1-Click Recovery Portal (Task 3.1 & 3.3)
-app.get(["/recover", "/pay/:token"], (_req, res) => {
+app.get("/recover", (_req, res) => {
   res.setHeader("Content-Type", "text/html");
   res.send(recoverHtml);
 });
+
 
 // Standalone Checkout UI (for test/manual checkout)
 app.get("/checkout", (_req, res) => {
