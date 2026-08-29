@@ -13,6 +13,7 @@
  *   HUMAN_REVIEW    → No API call; returns AMBIGUOUS
  */
 import { ActionProvider, ProviderContext, ProviderResult, ExecutionOutcome } from "./types.js";
+import { formatINR, paise } from "@arbiter/shared";
 import {
   multiplierFor,
   railForFailureClass,
@@ -118,6 +119,51 @@ function buildCrossPspPayload(ctx: ProviderContext) {
   };
 }
 
+/**
+ * Gupshup / WhatsApp Business API recovery template (§4.6).
+ * Hinglish template with a single {{1}} personalization slot — the failed
+ * amount in INR. Deterministic, auditable, and language-localized so the
+ * recovery reaches non-English customers (a real India differentiator).
+ */
+function buildWhatsAppPayload(ctx: ProviderContext) {
+  const amountInr = formatINR(paise(ctx.amountPaise));
+  return {
+    channel: "whatsapp",
+    provider: "gupshup",
+    template: {
+      name: "recovery_reminder_hinglish",
+      language: "hi",
+      // WhatsApp Business template variables; {{1}} is the failed amount.
+      components: [{ type: "body", parameters: [{ type: "text", text: amountInr }] }],
+    },
+    preview: `नमस्ते, आपका ₹${ctx.amountPaise / 100} का पेमेंट फेल हुआ है। कृपया दोबारा प्रयास करें।`,
+    personalization: { "1": amountInr },
+    idempotency_key: ctx.idempotencyKey,
+    rzp_request_ref: ctx.rzpRequestRef,
+    failure_class: ctx.failureClass,
+    notes: { proposal_id: ctx.proposalId, action: ctx.actionId },
+  };
+}
+
+/** Regional voice recovery (§4.6) — same template model, delivered by voice. */
+function buildVoicePayload(ctx: ProviderContext) {
+  const amountInr = formatINR(paise(ctx.amountPaise));
+  return {
+    channel: "voice",
+    provider: "gupshup",
+    template: {
+      name: "recovery_voice_hinglish",
+      language: "hi",
+      components: [{ type: "body", parameters: [{ type: "text", text: amountInr }] }],
+    },
+    personalization: { "1": amountInr },
+    idempotency_key: ctx.idempotencyKey,
+    rzp_request_ref: ctx.rzpRequestRef,
+    failure_class: ctx.failureClass,
+    notes: { proposal_id: ctx.proposalId, action: ctx.actionId },
+  };
+}
+
 function buildPayload(ctx: ProviderContext) {
   switch (ctx.actionId) {
     case "RETRY_NOW":
@@ -128,6 +174,10 @@ function buildPayload(ctx: ProviderContext) {
       return buildAlternateUpiLinkPayload(ctx);
     case "RECOVER_VIA_RAIL":
       return buildCrossPspPayload(ctx);
+    case "RECOVER_VOICE_HI":
+      return buildVoicePayload(ctx);
+    case "RECOVER_WHATSAPP":
+      return buildWhatsAppPayload(ctx);
     case "REMINDER_LINK":
       return buildReminderLinkPayload(ctx);
     default:

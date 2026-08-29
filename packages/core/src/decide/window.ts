@@ -59,9 +59,13 @@ export function nextRailHealthyWindowMs(
   return nowMs + slot;
 }
 
-/** Rail-dependent actions — retrying them on a dead rail is wasted effort. */
+/** Rail-dependent actions — retrying them on a dead rail is wasted effort.
+ *  Voice/WhatsApp recovery also needs a healthy network ("call only when
+ *  network healthy", §4.6), so they defer with the same gate. */
 export const RAIL_DEPENDENT_ACTIONS = new Set([
   "RETRY_NOW",
   "ALTERNATE_UPI_LINK",
   "RECOVER_VIA_RAIL",
+  "RECOVER_VOICE_HI",
+  "RECOVER_WHATSAPP",
 ]);
