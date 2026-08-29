@@ -64,11 +64,13 @@ import {
   initiateRecoveryOrder,
   recordPromiseToPay,
   getRecoveryResult,
+  getRecoveryTrace,
   runBatchBenchmark,
   recoverySessions,
   liveMetrics,
   PRESETS,
 } from "./recovery.js";
+
 
 
 
@@ -249,18 +251,23 @@ app.post("/api/recovery/promise-to-pay", async (req, res) => {
   }
 });
 
-// D. Approve proposal in merchant queue
+// D. Approve proposal in merchant queue (Task 5.4 & 6.3)
 app.post("/api/recovery/approve", async (req, res) => {
   try {
     const { proposalId } = req.body;
     const ok = await approveProposal(proposalId, dbClient);
+    const session = recoverySessions.get(proposalId);
+    if (session) {
+      broadcastStatus(session.recoveryToken, { type: "PROPOSAL_APPROVED", proposalId, status: "APPROVED" });
+      broadcastStatus("global", { type: "PROPOSAL_APPROVED", proposalId, status: "APPROVED" });
+    }
     res.json({ success: ok, proposalId });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }
 });
 
-// E. Complete customer recovery payment (with HMAC signature verification)
+// E. Complete customer recovery payment (with HMAC signature verification) (Task 4.9 & 6.4)
 app.post("/api/recovery/complete", async (req, res) => {
   try {
     const { proposalId, razorpay_payment_id, razorpay_order_id, razorpay_signature } = req.body || {};
@@ -277,6 +284,11 @@ app.post("/api/recovery/complete", async (req, res) => {
     }
 
     const ok = await completeRecovery(proposalId, dbClient);
+    const session = recoverySessions.get(proposalId);
+    if (session) {
+      broadcastStatus(session.recoveryToken, { type: "PAYMENT_RECOVERED", proposalId, status: "SETTLED_RECOVERED" });
+      broadcastStatus("global", { type: "PAYMENT_RECOVERED", proposalId, status: "SETTLED_RECOVERED" });
+    }
     res.json({ success: ok, proposalId });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
@@ -297,6 +309,21 @@ app.get(["/api/recovery/result", "/api/recovery/result/:id"], async (req, res) =
     res.status(500).json({ error: (err as Error).message });
   }
 });
+
+// G. Get Full Forensic Transaction Trace (Task 6.8 & 6.5)
+app.get(["/api/recovery/trace", "/api/recovery/trace/:id"], async (req, res) => {
+  try {
+    const id = (req.params.id as string) || (req.query.tok as string) || (req.query.prop as string) || "";
+    const trace = await getRecoveryTrace(id, dbClient);
+    if (!trace) {
+      return res.status(404).json({ error: "NO_ACTIVE_RECOVERY_TRACE" });
+    }
+    res.json(trace);
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
 
 
 
