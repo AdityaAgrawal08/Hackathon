@@ -7,9 +7,10 @@
  */
 import { formatINR, paise } from "@arbiter/shared";
 import type { FailureClassId } from "../decide/catalog.js";
+import type { OutreachChannel } from "./types.js";
 
-export type OutreachChannel = "WHATSAPP" | "SMS" | "VOICE_IVR" | "EMAIL";
 export type Language = "EN" | "HI";
+
 
 export interface MessageTokenContext {
   customerName: string;
@@ -35,7 +36,7 @@ interface TemplateDefinition {
   hi: (ctx: MessageTokenContext) => string;
 }
 
-const TEMPLATES_BY_CLASS: Record<FailureClassId, Record<OutreachChannel, TemplateDefinition | null>> = {
+const TEMPLATES_BY_CLASS: Record<FailureClassId, Partial<Record<OutreachChannel, TemplateDefinition | null>>> = {
   SOFT_RETRYABLE: {
     WHATSAPP: {
       templateId: "arbiter_rec_whatsapp_insufficient_v1",
@@ -156,8 +157,10 @@ export function renderComplianceMessage(
   language: Language,
   context: MessageTokenContext,
 ): RenderedMessage | null {
-  const def = TEMPLATES_BY_CLASS[failureClass]?.[channel];
+  const targetChannel: OutreachChannel = channel === "VOICE" ? "VOICE_IVR" : channel;
+  const def = TEMPLATES_BY_CLASS[failureClass]?.[targetChannel];
   if (!def) return null;
+
 
   const content = language === "HI" ? def.hi(context) : def.en(context);
 

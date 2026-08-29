@@ -52,7 +52,9 @@ import {
   RATE_LIMIT_WEBHOOKS_PER_MIN,
   RATE_LIMIT_ADMIN_PER_MIN,
   MAX_SSE_CONNECTIONS_PER_TOKEN,
+  generateTwilioHandoffTwiML,
 } from "../packages/core/src/index.js";
+
 
 import {
   simulateFailureTriage,
@@ -67,8 +69,9 @@ import {
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-const app = express();
+export const app = express();
 const PORT = parseInt(process.env.PORT || "3000", 10);
+
 const HOST = process.env.HOST || "0.0.0.0";
 const DEFAULT_MODE: PaymentMode = (process.env.PAYMENT_MODE as PaymentMode) || "LOCAL_SANDBOX";
 
@@ -246,6 +249,120 @@ app.get("/api/recovery/state", (_req, res) => {
     presets: PRESETS,
   });
 });
+
+// ── Provider DLR & IVR Webhook Endpoints (Task 2.8) ──────────────────
+
+// 1. Brevo Email DLR Webhook
+app.post("/api/webhooks/providers/brevo", async (req, res) => {
+  try {
+    const event = req.body;
+    if (dbClient) {
+      await dbClient.execute({
+        sql: `INSERT INTO audit_log (ts_utc, tenant_id, event_id, actor, entry_type, payload_json)
+              VALUES (?, ?, ?, ?, ?, ?)`,
+        args: [
+          isoUtc(Date.now()),
+          "demo",
+          String(event.messageId || event["message-id"] || `brevo_evt_${Date.now()}`),
+          "PIPELINE",
+          "OUTCOME",
+          JSON.stringify({ modelVersion: "logreg@1.0.0", policyVersion: "policy-v1", provider: "brevo", event: event.event, email: event.email, timestamp: event.date }),
+        ],
+      });
+    }
+    res.json({ received: true });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 2. MSG91 SMS DLR Webhook
+app.post("/api/webhooks/providers/msg91", async (req, res) => {
+  try {
+    const event = req.body;
+    if (dbClient) {
+      await dbClient.execute({
+        sql: `INSERT INTO audit_log (ts_utc, tenant_id, event_id, actor, entry_type, payload_json)
+              VALUES (?, ?, ?, ?, ?, ?)`,
+        args: [
+          isoUtc(Date.now()),
+          "demo",
+          String(event.requestId || `msg91_evt_${Date.now()}`),
+          "PIPELINE",
+          "OUTCOME",
+          JSON.stringify({ modelVersion: "logreg@1.0.0", policyVersion: "policy-v1", provider: "msg91", status: event.status, mobile: event.mobile }),
+        ],
+      });
+    }
+    res.json({ received: true });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 3. Gupshup WhatsApp DLR Webhook
+app.post("/api/webhooks/providers/gupshup", async (req, res) => {
+  try {
+    const event = req.body;
+    if (dbClient) {
+      await dbClient.execute({
+        sql: `INSERT INTO audit_log (ts_utc, tenant_id, event_id, actor, entry_type, payload_json)
+              VALUES (?, ?, ?, ?, ?, ?)`,
+        args: [
+          isoUtc(Date.now()),
+          "demo",
+          String(event.payload?.id || `gupshup_evt_${Date.now()}`),
+          "PIPELINE",
+          "OUTCOME",
+          JSON.stringify({ modelVersion: "logreg@1.0.0", policyVersion: "policy-v1", provider: "gupshup", type: event.type, payload: event.payload }),
+        ],
+      });
+    }
+    res.json({ received: true });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 4. Twilio IVR Keypad Gather Webhook (Press 1 Handoff)
+app.post("/api/webhooks/twilio/gather", async (req, res) => {
+  try {
+    const { Digits } = req.body;
+    const proposalId = String(req.query.proposalId || "");
+    const session = recoverySessions.get(proposalId);
+
+    // If user pressed "1", complete handoff to instant WhatsApp payment link
+    if (Digits === "1" || Digits === 1) {
+      if (dbClient) {
+        await dbClient.execute({
+          sql: `INSERT INTO audit_log (ts_utc, tenant_id, event_id, actor, entry_type, payload_json)
+                VALUES (?, ?, ?, ?, ?, ?)`,
+          args: [
+            isoUtc(Date.now()),
+            "demo",
+            proposalId || `twilio_gather_${Date.now()}`,
+            "CUSTOMER",
+            "ACTION",
+            JSON.stringify({ modelVersion: "logreg@1.0.0", policyVersion: "policy-v1", action: "PRESS_1_GATHER_HANDOFF", channel: "WHATSAPP", customer: session?.customerName }),
+          ],
+        });
+      }
+      const isHindi = session ? session.messages.voiceHi !== null : true;
+      const handoffXml = generateTwilioHandoffTwiML(isHindi);
+      res.setHeader("Content-Type", "text/xml");
+      res.send(handoffXml);
+      return;
+    }
+
+    // Default hangup response
+    res.setHeader("Content-Type", "text/xml");
+    res.send(`<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Response>`);
+  } catch (err) {
+    res.status(500).send(`<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Response>`);
+  }
+});
+
+
 
 
 // 2. Order & Checkout Session Creation

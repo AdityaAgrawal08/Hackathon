@@ -8,8 +8,11 @@ import {
 } from "../../app/recovery.js";
 
 describe("Recovery Command Center & Customer Simulator E2E (Task 1.1 - 1.5)", () => {
+  // 11:00 AM IST on August 28, 2026 (strictly during active daytime)
+  const DAYTIME_MS = Date.parse("2026-08-28T05:30:00.000Z");
+
   it("simulates full end-to-end failure triage for Salary Delay (SOFT_RETRYABLE)", async () => {
-    const session = await simulateFailureTriage("SALARY_DELAY", "http://localhost:3000");
+    const session = await simulateFailureTriage("SALARY_DELAY", "http://localhost:3000", undefined, DAYTIME_MS);
 
     expect(session).toBeDefined();
     expect(session.customerName).toBe("Rahul Sharma");
@@ -26,7 +29,7 @@ describe("Recovery Command Center & Customer Simulator E2E (Task 1.1 - 1.5)", ()
   });
 
   it("simulates Expired Card (HARD_METHOD_DEAD) requiring 1-click alternate method link", async () => {
-    const session = await simulateFailureTriage("CARD_EXPIRED", "http://localhost:3000");
+    const session = await simulateFailureTriage("CARD_EXPIRED", "http://localhost:3000", undefined, DAYTIME_MS);
 
     expect(session.diagnosis.rootCause).toBe("METHOD_EXPIRED");
     expect(session.diagnosis.recommendedIntervention).toBe("ALTERNATE_METHOD");
@@ -36,9 +39,9 @@ describe("Recovery Command Center & Customer Simulator E2E (Task 1.1 - 1.5)", ()
     expect(session.messages.whatsappEn?.content).toContain("has expired");
   });
 
-
   it("quarantines high-risk bot spammer to HUMAN_REVIEW with 0 customer outreach", async () => {
-    const session = await simulateFailureTriage("BOT_RISK", "http://localhost:3000");
+    const session = await simulateFailureTriage("BOT_RISK", "http://localhost:3000", undefined, DAYTIME_MS);
+
 
     expect(session.diagnosis.rootCause).toBe("RISK_FLAGGED");
     expect(session.diagnosis.recommendedIntervention).toBe("ESCALATE_HUMAN");

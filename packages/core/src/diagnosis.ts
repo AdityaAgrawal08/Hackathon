@@ -100,10 +100,47 @@ const EXPLANATION_BY_ROOT_CAUSE: Record<RootCause, string> = {
   UNKNOWN: "Failure code not in known taxonomy; escalate for investigation",
 };
 
+/** Deterministic, fail-closed error code classifier. */
+export function classifyRazorpayError(failureCode: string): FailureClassId {
+  const up = failureCode.trim().toUpperCase();
+  if (
+    up.includes("INSUFFICIENT") ||
+    up.includes("BALANCE") ||
+    up.includes("COLLECT_EXPIRED") ||
+    up.includes("OTP")
+  ) {
+    return "SOFT_RETRYABLE";
+  }
+  if (
+    up.includes("EXPIRED") ||
+    up.includes("REVOKED") ||
+    up.includes("INVALID") ||
+    up.includes("VPA")
+  ) {
+    return "HARD_METHOD_DEAD";
+  }
+  if (
+    up.includes("BANK") ||
+    up.includes("TIMEOUT") ||
+    up.includes("NETWORK") ||
+    up.includes("GATEWAY")
+  ) {
+    return "NETWORK_TIMEOUT";
+  }
+  if (
+    up.includes("FRAUD") ||
+    up.includes("RISK") ||
+    up.includes("STOLEN")
+  ) {
+    return "RISK_FLAGGED";
+  }
+  return "UNKNOWN";
+}
+
 /** Deterministic, fail-closed diagnosis. Unknown codes → UNKNOWN → INVESTIGATE. */
 export function diagnoseFailure(
   failureCode: string,
-  failureClass: FailureClassId,
+  failureClass: FailureClassId = classifyRazorpayError(failureCode),
 ): Diagnosis {
   const up = failureCode.trim().toUpperCase();
   const rootCause = ROOT_CAUSE_BY_CODE[up] ?? (
@@ -126,3 +163,4 @@ export function diagnoseFailure(
     recommendedIntervention: INTERVENTION_BY_ROOT_CAUSE[rootCause],
   };
 }
+

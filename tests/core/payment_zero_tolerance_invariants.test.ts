@@ -18,6 +18,9 @@ import {
   idempotencyKey,
   rzpRequestRef,
 } from "../../packages/core/src/executor/index.js";
+import { escapeXml } from "../../packages/core/src/messaging/providers/twilio_voice.js";
+import { escapeHtml } from "../../packages/core/src/messaging/providers/brevo.js";
+
 
 describe("Zero-Tolerance Payment Invariants Specification", () => {
   describe("Invariant 1: Integer Paise Money Math (Zero Floating-Point Corruptions)", () => {
@@ -151,4 +154,16 @@ describe("Zero-Tolerance Payment Invariants Specification", () => {
       expect(renderComplianceMessage("UNKNOWN", "SMS", "EN", ctx)).toBeNull();
     });
   });
+
+  describe("Invariant 5: Multi-Channel Security & Injection Defense", () => {
+    it("strictly sanitizes XML characters in TwiML generator to prevent telephony injection", () => {
+      expect(escapeXml("<script>alert('xss')</script>&\"")).toBe("&lt;script&gt;alert(&apos;xss&apos;)&lt;/script&gt;&amp;&quot;");
+    });
+
+    it("strictly sanitizes HTML characters in Brevo email generator", () => {
+      expect(escapeHtml("<img src=x onerror=alert(1)>")).toBe("&lt;img src=x onerror=alert(1)&gt;");
+    });
+  });
 });
+
+

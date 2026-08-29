@@ -143,10 +143,12 @@ export async function simulateFailureTriage(
   presetKey: string,
   baseUrl: string,
   dbClient?: Client,
+  simulatedTimeMs?: number,
 ): Promise<RecoveryProposalSession> {
   const preset = PRESETS[presetKey] || PRESETS.SALARY_DELAY!;
-  const nowMs = Date.now();
+  const nowMs = simulatedTimeMs ?? Date.now();
   const nowUtc = isoUtc(nowMs);
+
   const eventId = `evt_${nowMs}_${Math.random().toString(36).slice(2, 7)}`;
   const proposalId = `prop_${nowMs}_${Math.random().toString(36).slice(2, 7)}`;
   const recoveryToken = `tok_${Math.random().toString(36).slice(2, 10)}`;
@@ -262,47 +264,43 @@ export async function simulateFailureTriage(
         [
           {
             sql: `INSERT OR IGNORE INTO audit_log
-                    (ts_utc, tenant_id, event_id, actor, entry_type, model_version, policy_version, payload_json)
-                  VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                    (ts_utc, tenant_id, event_id, actor, entry_type, payload_json)
+                  VALUES (?, ?, ?, ?, ?, ?)`,
             args: [
               nowUtc,
               "demo",
               eventId,
               "PIPELINE",
               "TRIGGER",
-              "logreg@1.0.0",
-              "policy-v1",
-              JSON.stringify({ failureCode: preset.failureCode, amountPaise: preset.amountPaise, customer: preset.customerName }),
+              JSON.stringify({ modelVersion: "logreg@1.0.0", policyVersion: "policy-v1", failureCode: preset.failureCode, amountPaise: preset.amountPaise, customer: preset.customerName }),
             ],
           },
           {
             sql: `INSERT OR IGNORE INTO audit_log
-                    (ts_utc, tenant_id, event_id, actor, entry_type, model_version, policy_version, payload_json)
-                  VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                    (ts_utc, tenant_id, event_id, actor, entry_type, payload_json)
+                  VALUES (?, ?, ?, ?, ?, ?)`,
             args: [
               nowUtc,
               "demo",
               eventId,
               "PIPELINE",
               "DIAGNOSIS",
-              "logreg@1.0.0",
-              "policy-v1",
-              JSON.stringify({ rootCause: diagnosis.rootCause, explanation: diagnosis.explanation, class: diagClass }),
+              JSON.stringify({ modelVersion: "logreg@1.0.0", policyVersion: "policy-v1", rootCause: diagnosis.rootCause, explanation: diagnosis.explanation, class: diagClass }),
             ],
           },
           {
             sql: `INSERT OR IGNORE INTO audit_log
-                    (ts_utc, tenant_id, event_id, actor, entry_type, model_version, policy_version, payload_json)
-                  VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                    (ts_utc, tenant_id, event_id, actor, entry_type, payload_json)
+                  VALUES (?, ?, ?, ?, ?, ?)`,
             args: [
               nowUtc,
               "demo",
               eventId,
               "PIPELINE",
               "DECISION",
-              "logreg@1.0.0",
-              "policy-v1",
               JSON.stringify({
+                modelVersion: "logreg@1.0.0",
+                policyVersion: "policy-v1",
                 proposalId,
                 chosenAction: decideOutput.chosen.action,
                 evPaise: decideOutput.chosen.evPaise,
@@ -330,17 +328,15 @@ export async function approveProposal(proposalId: string, dbClient?: Client): Pr
     if (dbClient) {
       try {
         await dbClient.execute({
-          sql: `INSERT INTO audit_log (ts_utc, tenant_id, event_id, actor, entry_type, model_version, policy_version, payload_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          sql: `INSERT INTO audit_log (ts_utc, tenant_id, event_id, actor, entry_type, payload_json)
+                VALUES (?, ?, ?, ?, ?, ?)`,
           args: [
             isoUtc(Date.now()),
             "demo",
             proposalId,
             "MERCHANT",
             "APPROVAL",
-            "logreg@1.0.0",
-            "policy-v1",
-            JSON.stringify({ proposalId, action: "APPROVED" }),
+            JSON.stringify({ modelVersion: "logreg@1.0.0", policyVersion: "policy-v1", proposalId, action: "APPROVED" }),
           ],
         });
       } catch {}
@@ -361,23 +357,22 @@ export async function completeRecovery(proposalId: string, dbClient?: Client): P
     if (dbClient) {
       try {
         await dbClient.execute({
-          sql: `INSERT INTO audit_log (ts_utc, tenant_id, event_id, actor, entry_type, model_version, policy_version, payload_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          sql: `INSERT INTO audit_log (ts_utc, tenant_id, event_id, actor, entry_type, payload_json)
+                VALUES (?, ?, ?, ?, ?, ?)`,
           args: [
             session.settledAtUtc,
             "demo",
             proposalId,
             "CUSTOMER",
             "OUTCOME",
-            "logreg@1.0.0",
-            "policy-v1",
-            JSON.stringify({ proposalId, amountPaise: session.amountPaise, status: "SETTLED_RECOVERED" }),
+            JSON.stringify({ modelVersion: "logreg@1.0.0", policyVersion: "policy-v1", proposalId, amountPaise: session.amountPaise, status: "SETTLED_RECOVERED" }),
           ],
         });
       } catch {}
     }
     return true;
   }
+
   return false;
 }
 
