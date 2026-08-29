@@ -13,6 +13,7 @@ import {
   transition,
 } from "@arbiter/core/approval";
 import { diagnoseFailure } from "@arbiter/core/diagnosis";
+import { simulatedRailHealth } from "@arbiter/core/ingest";
 import { MAX_EDIT_VERSIONS } from "@arbiter/core/constants";
 import type { ActionId } from "@arbiter/core/decide";
 import { computeFeatures } from "./features.js";
@@ -141,6 +142,10 @@ export async function processEvent(
 
   const score = scoreWithArtifact(computed.values, model);
 
+  // §4.5 — real-time rail health: defer rail-dependent recovery when the rail
+  // is degraded (e.g., UPI evening peak). Deterministic, reproducible feed.
+  const railHealth = simulatedRailHealth(nowMs);
+
   const decision = decide({
     probability: score.probability,
     failureClass: computed.raw.failureClass,
@@ -153,6 +158,7 @@ export async function processEvent(
     inferredPaydayDay: computed.raw.inferredPaydayDay,
     ltvPaise: computed.raw.ltvPaise,
     churnRiskBp: computed.raw.churnRiskBp,
+    railHealthScore: railHealth.overall,
   });
 
   const chosen = decision.chosen;
@@ -411,6 +417,8 @@ export async function editProposal(
 
   const score = scoreWithArtifact(recomputed.values, model);
 
+  const railHealth = simulatedRailHealth(nowMs);
+
   const decision = decide({
     probability: score.probability,
     failureClass: recomputed.raw.failureClass,
@@ -422,6 +430,7 @@ export async function editProposal(
     inferredPaydayDay: recomputed.raw.inferredPaydayDay,
     ltvPaise: recomputed.raw.ltvPaise,
     churnRiskBp: recomputed.raw.churnRiskBp,
+    railHealthScore: railHealth.overall,
   });
 
   const target = decision.ranked.find((r) => r.action === actionId);

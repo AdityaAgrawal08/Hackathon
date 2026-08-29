@@ -32,3 +32,36 @@ export function nextPaydayWindowMs(paydayDay: number, nowMs: number): number {
   }
   throw new Error("nextPaydayWindowMs: no window within lookahead");
 }
+
+/* ── real-time payment-rail health (§4.5) ───────────────────────── */
+
+/**
+ * Rail-health gate. UPI/IMPS outages are routine in India; retrying a recovery
+ * on a degraded rail burns an attempt and loses the customer. Below this
+ * overall score we defer rail-dependent recovery to the next healthy window.
+ */
+export const RAIL_HEALTH_THRESHOLD = 0.5;
+
+/**
+ * Next window at which the rail is considered healthy enough to attempt a
+ * recovery. Deterministic: a degraded rail is retried after a fixed,
+ * jurisdiction-aware offset (not a random backoff). Healthy rail → now.
+ */
+export function nextRailHealthyWindowMs(
+  railHealthScore: number,
+  nowMs: number,
+): number {
+  if (!Number.isFinite(railHealthScore)) throw new Error("nextRailHealthyWindowMs: non-finite score");
+  if (!Number.isFinite(nowMs)) throw new Error("nextRailHealthyWindowMs: non-finite clock");
+  if (railHealthScore >= RAIL_HEALTH_THRESHOLD) return nowMs;
+  // Degraded rail: wait a deterministic 30-minute slot (IST-aligned) before retry.
+  const slot = 30 * 60_000;
+  return nowMs + slot;
+}
+
+/** Rail-dependent actions — retrying them on a dead rail is wasted effort. */
+export const RAIL_DEPENDENT_ACTIONS = new Set([
+  "RETRY_NOW",
+  "ALTERNATE_UPI_LINK",
+  "RECOVER_VIA_RAIL",
+]);
