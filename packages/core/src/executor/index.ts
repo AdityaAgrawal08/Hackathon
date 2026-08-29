@@ -17,6 +17,7 @@ import { transition } from "../approval/state_machine.js";
 import { multiplierFor, type ActionId, type FailureClassId } from "../decide/catalog.js";
 import { STALE_EXECUTION_MINUTES } from "../constants.js";
 import { getProvider } from "./providers/index.js";
+export * from "./payment_intent.js";
 
 /* ── types ─────────────────────────────────────────────────────── */
 
@@ -33,6 +34,9 @@ export interface ExecuteResult {
 export interface ExecuteInput {
   proposalId: string;
   nowMs: number;
+  /** Stable client-supplied idempotency key. When present, a retry that already
+   *  settled (SUCCEEDED/FAILED/CANCELLED) will NOT re-execute (double-charge guard). */
+  clientIdempotencyKey?: string;
 }
 
 export interface ReconcileInput {
@@ -148,6 +152,23 @@ export async function executeProposal(
     throw new Error(`executor: proposal in state ${p.state}, not APPROVED/AUTO_APPROVED`);
   }
 
+  // Idempotency guard (payment-intent registry): a retry that already settled
+  // must not re-execute. Without an explicit key we derive one from the proposal
+  // content (unique per proposal), so this is a no-op for normal single executions.
+  const clientIdem =
+    input.clientIdempotencyKey ??
+    idempotencyKey(proposalId, p.model_version_id, p.policy_version, p.action_json);
+  const existingIntent = await client.execute({
+    sql: `SELECT status FROM payment_intents WHERE client_idem_key = ?`,
+    args: [clientIdem],
+  });
+  if (existingIntent.rows.length > 0) {
+    const st = String((existingIntent.rows[0] as unknown as { status: string }).status);
+    if (st === "SUCCEEDED" || st === "FAILED" || st === "CANCELLED") {
+      throw new Error(`executor: IDEMPOTENT_ALREADY_SETTLED (${st}) — refusing re-execution`);
+    }
+  }
+
   // 2. Parse action from the proposal (failureClass is the PIPELINE-COMPUTED
   //    class, not the untrusted seed hint — see pipeline.ts action_json).
   const chosen = JSON.parse(p.action_json) as {
@@ -259,6 +280,30 @@ export async function executeProposal(
         provider: provider.name,
         dryRunPayload: providerResult.dryRunPayload ?? null,
       }),
+    ],
+  });
+
+  // 9b. Record the payment intent (idempotency registry) so a client retry with
+  //     the same clientIdempotencyKey cannot re-settle this collection.
+  //     Map the proposal-level finalState to a valid intent status.
+  const intentStatus = outcome === "SUCCEEDED" ? "SUCCEEDED" : "FAILED";
+  await client.execute({
+    sql: `INSERT INTO payment_intents
+            (id, client_idem_key, proposal_id, customer_id, tenant_id, amount_paise, status, charge_id, client_visible, scenario, created_at_utc, resolved_at_utc)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
+          ON CONFLICT(client_idem_key) DO NOTHING`,
+    args: [
+      `pint_${clientIdem}`,
+      clientIdem,
+      proposalId,
+      p.customer_id,
+      tenantId,
+      amountPaise,
+      intentStatus,
+      ref,
+      intentStatus,
+      nowIso,
+      nowIso,
     ],
   });
 
