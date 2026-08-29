@@ -5,6 +5,7 @@ export * from "./executor/index.js";
 export * from "./ingest/index.js";
 export * from "./constants.js";
 export * from "./diagnosis.js";
-export * from "./messaging/templates.js";
+export * from "./messaging/index.js";
 export type { ProposalState } from "./approval/index.js";
+
 
