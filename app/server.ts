@@ -458,6 +458,25 @@ app.get("/pay/:token", async (req, res) => {
     });
 
     if (r.rows.length === 0) {
+      // Check if token belongs to an active recovery session
+      const recoverySession = Array.from(recoverySessions.values()).find(
+        (s) => s.recoveryToken === token || s.id === token,
+      );
+      if (recoverySession) {
+        const formattedAmount = (recoverySession.amountPaise / 100).toFixed(2);
+        const rendered = mobilePayHtml
+          .replace(/{{SESSION_TOKEN}}/g, recoverySession.recoveryToken)
+          .replace(/{{TOKEN}}/g, recoverySession.recoveryToken)
+          .replace(/{{ORDER_ID}}/g, `order_rec_${recoverySession.id}`)
+          .replace(/{{AMOUNT_PAISE}}/g, String(recoverySession.amountPaise))
+          .replace(/{{AMOUNT_FORMATTED}}/g, formattedAmount)
+          .replace(/{{PAYMENT_MODE}}/g, "RECOVERY_PORTAL")
+          .replace(/{{MODE_BADGE_CLASS}}/g, "badge-real")
+          .replace(/{{RZP_KEY_ID}}/g, process.env.RZP_KEY_ID || "rzp_test_demo")
+          .replace(/{{KEY_ID}}/g, process.env.RZP_KEY_ID || "rzp_test_demo");
+        res.setHeader("Content-Type", "text/html");
+        return res.send(rendered);
+      }
       return res.status(404).send("<h3>Checkout Session Not Found</h3>");
     }
 
@@ -483,12 +502,14 @@ app.get("/pay/:token", async (req, res) => {
 
     const rendered = mobilePayHtml
       .replace(/{{SESSION_TOKEN}}/g, session.token)
+      .replace(/{{TOKEN}}/g, session.token)
       .replace(/{{ORDER_ID}}/g, session.order_id)
       .replace(/{{AMOUNT_PAISE}}/g, String(session.amount_paise))
       .replace(/{{AMOUNT_FORMATTED}}/g, formattedAmount)
       .replace(/{{PAYMENT_MODE}}/g, session.payment_mode)
       .replace(/{{MODE_BADGE_CLASS}}/g, badgeClass)
-      .replace(/{{RZP_KEY_ID}}/g, process.env.RZP_TEST_KEY_ID || "");
+      .replace(/{{RZP_KEY_ID}}/g, process.env.RZP_TEST_KEY_ID || process.env.RZP_KEY_ID || "rzp_test_demo")
+      .replace(/{{KEY_ID}}/g, process.env.RZP_TEST_KEY_ID || process.env.RZP_KEY_ID || "rzp_test_demo");
 
     res.setHeader("Content-Type", "text/html");
     res.send(rendered);
@@ -496,6 +517,7 @@ app.get("/pay/:token", async (req, res) => {
     res.status(500).send("Server Error: " + (err as Error).message);
   }
 });
+
 
 // 4. Payment Execution & Charge Endpoint
 app.post("/api/payments/charge", chargeLimiter, async (req, res) => {

@@ -3,325 +3,322 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Complete Your Payment — ARBITER Sandbox</title>
+  <title>Payment Checkout — ARBITER</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+  <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
   <style>
     :root {
-      --pico-font-size: 100%;
+      --bg: #0f172a;
+      --card-bg: #1e293b;
+      --border: #334155;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --primary: #2563eb;
+      --primary-hover: #1d4ed8;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+    }
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1rem;
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    .checkout-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 2rem;
+      max-width: 480px;
+      width: 100%;
+      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
     }
     .badge {
       display: inline-block;
-      padding: 0.2rem 0.5rem;
+      padding: 0.25rem 0.75rem;
       border-radius: 9999px;
-      font-size: 0.75rem;
+      font-size: 0.8rem;
       font-weight: 600;
     }
     .badge-real { background-color: #0284c7; color: white; }
     .badge-local { background-color: #7c3aed; color: white; }
-    .scenario-card {
-      border: 1px solid #e2e8f0;
+    .banner {
+      padding: 0.75rem 1rem;
       border-radius: 8px;
-      padding: 0.75rem;
-      margin-bottom: 0.5rem;
-      cursor: pointer;
+      margin-bottom: 1.25rem;
+      font-size: 0.85rem;
+      line-height: 1.4;
       display: flex;
       align-items: center;
-      gap: 0.75rem;
+      gap: 0.5rem;
     }
-    .scenario-card:hover {
-      background-color: #f8fafc;
-      border-color: #cbd5e1;
+    .banner-offline {
+      background: rgba(239, 68, 68, 0.2);
+      border: 1px solid var(--danger);
+      color: #fca5a5;
+      display: none;
     }
-    .scenario-card input[type="radio"] {
-      margin: 0;
+    .banner-status {
+      background: rgba(59, 130, 246, 0.15);
+      border: 1px solid rgba(59, 130, 246, 0.3);
+      color: #93c5fd;
+    }
+    .amount-display {
+      font-size: 2rem;
+      font-weight: 800;
+      color: #60a5fa;
+      margin: 0.5rem 0;
+    }
+    .btn-pay {
+      background-color: var(--primary);
+      border: none;
+      color: white;
+      font-weight: 700;
+      padding: 0.85rem 1.5rem;
+      border-radius: 10px;
+      width: 100%;
+      cursor: pointer;
+      font-size: 1.1rem;
+      transition: background-color 0.2s;
+    }
+    .btn-pay:hover {
+      background-color: var(--primary-hover);
+    }
+    .btn-pay:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+    .qr-section {
+      text-align: center;
+      margin: 1.5rem 0;
+      padding: 1rem;
+      background: #ffffff;
+      border-radius: 12px;
+      display: inline-block;
+    }
+    .qr-section img {
+      width: 180px;
+      height: 180px;
+      display: block;
     }
     .hidden { display: none; }
   </style>
 </head>
-<body style="padding: 1rem;">
-  <main class="container" style="max-width: 500px;">
+<body>
+  <div class="checkout-card">
     <header style="text-align: center; margin-bottom: 1.5rem;">
-      <h3 style="margin-bottom: 0.25rem;">Payment Checkout</h3>
-      <p style="margin: 0; color: #64748b;">Order: <span id="lbl-order-id">{{ORDER_ID}}</span></p>
-      <div style="margin-top: 0.5rem;">
-        <span id="lbl-amount" style="font-size: 1.5rem; font-weight: 700;">₹{{AMOUNT_FORMATTED}}</span>
-        <span id="lbl-mode" class="badge {{MODE_BADGE_CLASS}}">{{PAYMENT_MODE}}</span>
-      </div>
+      <h3 style="margin-bottom: 0.25rem; color: #ffffff;">Order Checkout</h3>
+      <p style="margin: 0; color: var(--text-muted); font-size: 0.9rem;">Order ID: <code id="lbl-order-id">{{ORDER_ID}}</code></p>
+      <div class="amount-display" id="lbl-amount">₹{{AMOUNT_FORMATTED}}</div>
+      <span id="lbl-mode" class="badge {{MODE_BADGE_CLASS}}">{{PAYMENT_MODE}}</span>
     </header>
 
-    <!-- REAL SANDBOX FORM -->
-    <div id="section-real" class="hidden">
-      <article>
-        <p>Proceed to official Razorpay Test Mode checkout.</p>
-        <button id="btn-rzp-pay" class="contrast">Pay with Razorpay Test Mode</button>
-      </article>
+    <!-- Offline Alert Banner (Task 3.4) -->
+    <div class="banner banner-offline" id="banner-offline">
+      <span>⚠️</span>
+      <div><strong>Network Offline:</strong> Reconnecting to verify payment status...</div>
     </div>
 
-    <!-- LOCAL SANDBOX FORM -->
-    <div id="section-local" class="hidden">
-      <form id="form-local-pay">
-        <fieldset>
-          <legend><strong>Select Test Execution Profile:</strong></legend>
-
-          <label class="scenario-card">
-            <input type="radio" name="scenario" value="LOCAL_SUCCESS" checked>
-            <div>
-              <strong>Normal Success (Capture)</strong>
-              <small style="display:block; color:#64748b;">Simulates a clean, successful transaction authorization.</small>
-            </div>
-          </label>
-
-          <label class="scenario-card">
-            <input type="radio" name="scenario" value="LOCAL_INSUFFICIENT_FUNDS">
-            <div>
-              <strong>Insufficient Balance</strong>
-              <small style="display:block; color:#64748b;">Triggers customer decline & recovery advisory.</small>
-            </div>
-          </label>
-
-          <label class="scenario-card">
-            <input type="radio" name="scenario" value="LOCAL_EXPIRED_METHOD">
-            <div>
-              <strong>Expired Card / Method</strong>
-              <small style="display:block; color:#64748b;">Simulates expired credentials prompting update link.</small>
-            </div>
-          </label>
-
-          <label class="scenario-card">
-            <input type="radio" name="scenario" value="LOCAL_GATEWAY_TIMEOUT">
-            <div>
-              <strong>Gateway Connection Timeout</strong>
-              <small style="display:block; color:#64748b;">Socket hangs; transitions to UNKNOWN for reconciliation.</small>
-            </div>
-          </label>
-
-          <label class="scenario-card">
-            <input type="radio" name="scenario" value="LOCAL_LOST_RESPONSE">
-            <div>
-              <strong>Lost Response Hazard</strong>
-              <small style="display:block; color:#64748b;">Money settled at provider, response dropped in transit.</small>
-            </div>
-          </label>
-
-          <label class="scenario-card">
-            <input type="radio" name="scenario" value="LOCAL_DUPLICATE_SUBMIT">
-            <div>
-              <strong>Duplicate / Concurrent Replay</strong>
-              <small style="display:block; color:#64748b;">Tests idempotency barrier and prevents double charge.</small>
-            </div>
-          </label>
-        </fieldset>
-
-        <button type="submit" id="btn-submit-charge" style="margin-top: 1rem;">Confirm & Pay</button>
-      </form>
+    <!-- Live Status Banner -->
+    <div class="banner banner-status" id="banner-status">
+      <span>⚡</span>
+      <div id="lbl-status-text">Ready to checkout via UPI or Card</div>
     </div>
 
-    <!-- RESULT BANNER -->
-    <div id="section-result" class="hidden" style="margin-top: 1.5rem;">
-      <article id="result-article" style="padding: 1.25rem;">
-        <h4 id="result-title" style="margin-bottom: 0.5rem;"></h4>
-        <p id="result-message-en" style="margin-bottom: 0.5rem;"></p>
-        <p id="result-message-hi" style="margin-bottom: 0; color: #64748b; font-size: 0.9rem;"></p>
-      </article>
-      <button id="btn-retry" class="secondary" style="margin-top: 1rem;">Try Another Attempt</button>
+    <!-- Dynamic Desktop UPI QR Section (Task 3.2) -->
+    <div id="qr-container" style="text-align: center; display: none;">
+      <div class="qr-section">
+        <img id="qr-image" src="" alt="Scan with UPI App">
+      </div>
+      <p style="font-size: 0.8rem; color: var(--text-muted);">Scan with Google Pay, PhonePe, Paytm, or BHIM</p>
     </div>
-  </main>
+
+    <!-- Single 1-Click Pay Button (Zero Radio Buttons - Task 3.3) -->
+    <button id="btn-pay" class="btn-pay" onclick="handlePayClick()">
+      Pay ₹{{AMOUNT_FORMATTED}} Now
+    </button>
+
+    <!-- Success Outcome View -->
+    <div id="section-success" class="hidden" style="text-align: center; margin-top: 1.5rem;">
+      <div style="font-size: 3rem; color: var(--success); margin-bottom: 0.5rem;">✓</div>
+      <h4 style="color: #ffffff; margin-bottom: 0.25rem;">Payment Successful!</h4>
+      <p style="color: var(--text-muted); font-size: 0.9rem;">Reference: <code id="lbl-payment-id">pay_123456</code></p>
+    </div>
+  </div>
 
   <script>
-    const sessionToken = "{{SESSION_TOKEN}}";
-    const paymentMode = "{{PAYMENT_MODE}}";
-    const rzpKeyId = "{{RZP_KEY_ID}}";
     const orderId = "{{ORDER_ID}}";
-    const amountPaise = {{AMOUNT_PAISE}};
+    const amountPaise = parseInt("{{AMOUNT_PAISE}}", 10) || 199900;
+    const token = "{{TOKEN}}";
+    const paymentMode = "{{PAYMENT_MODE}}";
+    const keyId = "{{KEY_ID}}" || "rzp_test_arbiter_mock";
+    let isProcessing = false;
 
-    if (paymentMode === 'REAL_SANDBOX') {
-      document.getElementById('section-real').classList.remove('hidden');
-      // Dynamically load Razorpay SDK only when in REAL_SANDBOX mode
-      const rzpScript = document.createElement('script');
-      rzpScript.src = "https://checkout.razorpay.com/v1/checkout.js";
-      rzpScript.onload = setupRazorpay;
-      document.head.appendChild(rzpScript);
-    } else {
-      document.getElementById('section-local').classList.remove('hidden');
-    }
+    // 1. Task 3.3: Auto-open Razorpay Checkout on Mobile
+    window.addEventListener("DOMContentLoaded", () => {
+      listenToPaymentStatus(token);
 
-    function setupRazorpay() {
-      document.getElementById('btn-rzp-pay')?.addEventListener('click', () => {
-        const options = {
-          key: rzpKeyId,
-          amount: amountPaise,
-          currency: "INR",
-          name: "ARBITER Demo Store",
-          description: "Payment for Order " + orderId,
-          order_id: orderId,
-          handler: async function (response) {
-            // Send captured payment to backend to commit settlement and broadcast SSE
-            try {
-              const res = await fetch('/api/payments/charge', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  token: sessionToken,
-                  clientIdemKey: 'idem_' + response.razorpay_payment_id,
-                  instrument: {
-                    token: response.razorpay_payment_id,
-                    signature: response.razorpay_signature,
-                  },
-                }),
-              });
-              const data = await res.json();
-              showResult({
-                success: true,
-                title: "Payment Successful",
-                msgEn: `Payment ID: ${response.razorpay_payment_id}. Verified and durably settled!`,
-                msgHi: data.userMessageHi || "धन्यवाद! आपका भुगतान सफल रहा।"
-              });
-            } catch (err) {
-              showResult({
-                success: true,
-                title: "Payment Successful",
-                msgEn: `Payment ID: ${response.razorpay_payment_id}. Settling via background reconciliation...`,
-                msgHi: "आपका भुगतान सफल रहा।"
-              });
-            }
-          },
-          modal: {
-            ondismiss: function () {
-              showResult({
-                success: false,
-                title: "Payment Cancelled",
-                msgEn: "Payment checkout modal was closed without completing payment.",
-                msgHi: "भुगतान विंडो बंद कर दी गई।"
-              });
-            }
-          },
-          theme: { color: "#0284c7" }
-        };
-        const rzp = new window.Razorpay(options);
-        rzp.on('payment.failed', async function (resp) {
-          // Send decline event to backend so ARBITER can trigger real-time AI Recovery Advisory on desktop
-          try {
-            await fetch('/api/payments/charge', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                token: sessionToken,
-                clientIdemKey: 'idem_failed_' + (resp.error?.metadata?.payment_id || Date.now()),
-                scenario: resp.error?.code || 'RZP_REJECTED',
-                instrument: {
-                  token: resp.error?.metadata?.payment_id,
-                  errorCode: resp.error?.code,
-                  errorDescription: resp.error?.description,
-                },
-              }),
-            });
-          } catch {}
+      // If mobile, auto-open immediately with zero radio buttons
+      if (/Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) {
+        setTimeout(() => {
+          handlePayClick();
+        }, 300);
+      } else {
+        // Desktop: Fetch dynamic QR code
+        fetchQrCode();
+      }
+    });
 
-          showResult({
-            success: false,
-            title: "Payment Failed",
-            msgEn: resp.error?.description || "The payment attempt was declined.",
-            msgHi: "भुगतान पूरा नहीं हो सका।"
-          });
-        });
-        rzp.open();
-      });
-    }
-
-
-    // LOCAL SANDBOX: Charge submission
-    document.getElementById('form-local-pay')?.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const scenario = document.querySelector('input[name="scenario"]:checked')?.value || 'LOCAL_SUCCESS';
-      const clientIdemKey = 'idem_' + sessionToken + '_' + Date.now();
-
-      const btn = document.getElementById('btn-submit-charge');
-      btn.disabled = true;
-      btn.textContent = 'Processing Payment...';
-
+    async function fetchQrCode() {
       try {
-        const res = await fetch('/api/payments/charge', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+        const res = await fetch("/api/recovery/initiate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token, preferredMethod: "upi" })
+        });
+        const data = await res.json();
+        if (data.qrDataUrl) {
+          document.getElementById("qr-image").src = data.qrDataUrl;
+          document.getElementById("qr-container").style.display = "block";
+        }
+      } catch (e) {}
+    }
+
+    // 2. Primary 1-Click Payment Handler
+    async function handlePayClick() {
+      if (isProcessing) return;
+      isProcessing = true;
+      const btn = document.getElementById("btn-pay");
+      btn.disabled = true;
+      btn.innerText = "Opening Checkout...";
+
+      if (paymentMode === "REAL_SANDBOX" || window.Razorpay) {
+        openRazorpayCheckout();
+      } else {
+        // Local deterministic fallback
+        simulateLocalPayment();
+      }
+    }
+
+    function openRazorpayCheckout() {
+      const options = {
+        key: keyId,
+        amount: amountPaise,
+        currency: "INR",
+        name: "ARBITER Demo Store",
+        description: "Order #" + orderId,
+        order_id: orderId.startsWith("order_") ? orderId : undefined,
+        prefill: {
+          name: "Rahul Sharma",
+          contact: "+919876543210",
+          email: "customer@example.com"
+        },
+        theme: { color: "#2563eb" },
+        handler: async function (response) {
+          showPaymentSuccess(response.razorpay_payment_id || "pay_mock_success");
+        },
+        modal: {
+          ondismiss: function () {
+            isProcessing = false;
+            const btn = document.getElementById("btn-pay");
+            btn.disabled = false;
+            btn.innerText = "Pay ₹{{AMOUNT_FORMATTED}} Now";
+          }
+        }
+      };
+
+      const rzp = new Razorpay(options);
+      rzp.on("payment.failed", function (response) {
+        handlePaymentFailure(response.error);
+      });
+      rzp.open();
+    }
+
+    async function simulateLocalPayment() {
+      try {
+        const res = await fetch("/api/charges", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            token: sessionToken,
-            clientIdemKey,
-            scenario
+            checkoutToken: token,
+            paymentScenario: "LOCAL_SUCCESS",
+            instrumentDetails: { type: "upi", upiId: "customer@okhdfcbank" }
           })
         });
-
         const data = await res.json();
-        btn.disabled = false;
-        btn.textContent = 'Confirm & Pay';
-
-        if (res.status === 200 || data.knowledgeStatus === 'RESOLVED_SUCCESS') {
-          showResult({
-            success: true,
-            title: "Payment Successful",
-            msgEn: data.userMessage || "Your payment was received and durably settled.",
-            msgHi: data.userMessageHi || "धन्यवाद! आपका भुगतान सफल रहा।"
-          });
-        } else if (res.status === 202 || data.knowledgeStatus === 'UNRESOLVED_UNKNOWN') {
-          showResult({
-            success: null,
-            title: "Payment Confirmation Pending",
-            msgEn: data.userMessage || "Confirming status with banking network...",
-            msgHi: data.userMessageHi || "हम आपके बैंक से भुगतान की पुष्टि कर रहे हैं।"
-          });
+        if (data.executionState === "SUCCEEDED") {
+          showPaymentSuccess(data.providerPaymentId || "pay_loc_success");
         } else {
-          showResult({
-            success: false,
-            title: "Payment Declined",
-            msgEn: data.userMessage || "Payment was declined by payment provider.",
-            msgHi: data.userMessageHi || "भुगतान पूरा नहीं हो सका।"
-          });
+          handlePaymentFailure(data.failureReason || { description: "Payment declined" });
         }
       } catch (err) {
-        btn.disabled = false;
-        btn.textContent = 'Confirm & Pay';
-        showResult({
-          success: null,
-          title: "Connection Lost",
-          msgEn: "Network transport was interrupted. Reconciliation will confirm status.",
-          msgHi: "कनेक्शन टूट गया। सिस्टम स्टेटस की जांच करेगा।"
-        });
-      }
-    });
-
-    function showResult(r) {
-      document.getElementById('section-real').classList.add('hidden');
-      document.getElementById('section-local').classList.add('hidden');
-      document.getElementById('section-result').classList.remove('hidden');
-
-      const art = document.getElementById('result-article');
-      const title = document.getElementById('result-title');
-      const msgEn = document.getElementById('result-message-en');
-      const msgHi = document.getElementById('result-message-hi');
-
-      title.textContent = r.title;
-      msgEn.textContent = r.msgEn;
-      msgHi.textContent = r.msgHi;
-
-      if (r.success === true) {
-        art.style.background = '#f0fdf4';
-        art.style.borderLeft = '4px solid #16a34a';
-      } else if (r.success === false) {
-        art.style.background = '#fef2f2';
-        art.style.borderLeft = '4px solid #dc2626';
-      } else {
-        art.style.background = '#fffbeb';
-        art.style.borderLeft = '4px solid #d97706';
+        handlePaymentFailure({ description: "Network connection lost" });
       }
     }
 
-    document.getElementById('btn-retry').addEventListener('click', () => {
-      document.getElementById('section-result').classList.add('hidden');
-      if (paymentMode === 'REAL_SANDBOX') {
-        document.getElementById('section-real').classList.remove('hidden');
-      } else {
-        document.getElementById('section-local').classList.remove('hidden');
-      }
+    // 3. Task 3.4: Client-side Offline & Failure Recovery
+    window.addEventListener("offline", () => {
+      document.getElementById("banner-offline").style.display = "flex";
     });
+
+    window.addEventListener("online", () => {
+      document.getElementById("banner-offline").style.display = "none";
+      pollStatusWithBackoff();
+    });
+
+    function handlePaymentFailure(error) {
+      isProcessing = false;
+      const btn = document.getElementById("btn-pay");
+      btn.disabled = false;
+      btn.innerText = "Retry Payment (₹{{AMOUNT_FORMATTED}})";
+
+      if (!navigator.onLine) {
+        document.getElementById("banner-offline").style.display = "flex";
+        pollStatusWithBackoff();
+      } else {
+        alert("Payment Error: " + (error?.description || error?.reason || "Declined by bank"));
+      }
+    }
+
+    function showPaymentSuccess(paymentId) {
+      document.getElementById("btn-pay").style.display = "none";
+      document.getElementById("qr-container").style.display = "none";
+      document.getElementById("banner-status").style.display = "none";
+      document.getElementById("lbl-payment-id").innerText = paymentId;
+      document.getElementById("section-success").classList.remove("hidden");
+    }
+
+    // 4. Real-time Status Synchronization
+    function listenToPaymentStatus(tok) {
+      if (!tok || tok === "{{TOKEN}}") return;
+      const evtSource = new EventSource("/api/status/" + tok);
+      evtSource.onmessage = function (event) {
+        try {
+          const payload = JSON.parse(event.data);
+          if (payload.executionState === "SUCCEEDED" || payload.knowledgeStatus === "RESOLVED_SUCCESS") {
+            showPaymentSuccess(payload.providerPaymentId || "pay_synced");
+            evtSource.close();
+          }
+        } catch (e) {}
+      };
+    }
+
+    async function pollStatusWithBackoff() {
+      if (!token || token === "{{TOKEN}}") return;
+      try {
+        const res = await fetch("/api/status/" + token);
+        const data = await res.json();
+        if (data.executionState === "SUCCEEDED") {
+          showPaymentSuccess(data.providerPaymentId);
+        }
+      } catch (e) {}
+    }
   </script>
 </body>
 </html>

@@ -82,4 +82,19 @@ describe("Phase 3: Interactive Payment Flow Integration Tests", () => {
     expect(data.promisedDay).toBe(28);
     expect(data.scheduledReminderUtc).toBeDefined();
   });
+
+  it("Task 3.3 & 3.4: mobile payment page contains zero radio buttons and includes offline recovery handling", async () => {
+    const res = await fetch(`${baseUrl}/recover`);
+    const html = await res.text();
+
+    // Verify zero radio buttons
+    expect(html).not.toContain('type="radio"');
+
+    // Verify offline resilience and Razorpay SDK integration
+    expect(html).toContain("checkout.razorpay.com/v1/checkout.js");
+    expect(html).toContain("banner-offline");
+    expect(html).toContain("addEventListener(\"offline\"");
+    expect(html).toContain("addEventListener(\"online\"");
+  });
 });
+
