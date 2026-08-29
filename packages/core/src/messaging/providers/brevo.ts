@@ -16,6 +16,15 @@ export interface BrevoConfig {
   webhookSecret?: string;
 }
 
+export function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
 export class BrevoEmailProvider implements OutreachProvider {
   readonly name = "brevo";
   readonly channel = "EMAIL" as const;
@@ -47,6 +56,8 @@ export class BrevoEmailProvider implements OutreachProvider {
         ? `Payment Update: ${this.config.senderName} (${formattedAmount})`
         : `Action Required: Subscription Payment for ${this.config.senderName} (${formattedAmount})`;
 
+    const messageText = escapeHtml(rendered?.content || `Your payment of ${formattedAmount} needs attention.`);
+
     const htmlContent = `
 <!DOCTYPE html>
 <html>
@@ -56,19 +67,20 @@ export class BrevoEmailProvider implements OutreachProvider {
   </div>
   <div style="background: #ffffff; padding: 32px; border: 1px solid #e2e8f0; border-top: none; border-radius: 0 0 8px 8px;">
     <h2 style="font-size: 18px; color: #0f172a; margin-top: 0;">Payment Recovery Notice</h2>
-    <p style="font-size: 15px; color: #475569;">${rendered?.content || `Your payment of ${formattedAmount} needs attention.`}</p>
+    <p style="font-size: 15px; color: #475569;">${messageText}</p>
     <div style="margin: 32px 0; text-align: center;">
-      <a href="${payload.recoveryUrl}" style="background: #2563eb; color: #ffffff; padding: 14px 28px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">
+      <a href="${escapeHtml(payload.recoveryUrl)}" style="background: #2563eb; color: #ffffff; padding: 14px 28px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">
         Complete Payment via UPI / Card (${formattedAmount})
       </a>
     </div>
     <p style="font-size: 13px; color: #94a3b8; border-top: 1px solid #f1f5f9; padding-top: 16px;">
-      Transaction ID: <code>${payload.proposalId}</code><br>
-      This is a secure transactional message from ${this.config.senderName}.
+      Transaction ID: <code>${escapeHtml(payload.proposalId)}</code><br>
+      This is a secure transactional message from ${escapeHtml(this.config.senderName || "ARBITER")}.
     </p>
   </div>
 </body>
 </html>`;
+
 
     // If no API key is provided, execute deterministic simulated dispatch
     if (!this.config.apiKey) {

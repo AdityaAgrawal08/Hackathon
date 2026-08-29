@@ -15,6 +15,15 @@ export interface TwilioConfig {
   webhookBaseUrl?: string;
 }
 
+export function escapeXml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
 export function generateTwilioIVRTwiML(
   payload: OutreachPayload,
   gatherActionUrl: string,
@@ -41,17 +50,18 @@ export function generateTwilioIVRTwiML(
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Gather numDigits="1" action="${gatherActionUrl}" method="POST" timeout="8">
+  <Gather numDigits="1" action="${escapeXml(gatherActionUrl)}" method="POST" timeout="8">
     <Say voice="${voice}" language="${languageCode}">
-      ${scriptText}
+      ${escapeXml(scriptText)}
     </Say>
   </Gather>
   <Say voice="${voice}" language="${languageCode}">
-    ${isHindi ? "Aapka koi response nahi mila. Dhanyawad." : "We did not receive any input. Thank you."}
+    ${escapeXml(isHindi ? "Aapka koi response nahi mila. Dhanyawad." : "We did not receive any input. Thank you.")}
   </Say>
   <Hangup/>
 </Response>`;
 }
+
 
 export function generateTwilioHandoffTwiML(isHindi: boolean): string {
   const voice = isHindi ? "Polly.Aditi" : "Polly.Raveena";
