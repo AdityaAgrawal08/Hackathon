@@ -15,9 +15,18 @@ export type Db = ReturnType<typeof drizzle<typeof schema>>;
  */
 export async function openDb(dbPath?: string): Promise<{ client: Client; db: Db }> {
   const raw = dbPath ?? process.env.ARBITER_DB_PATH ?? DEFAULT_DB_PATH;
-  // In-memory must be detected BEFORE path resolution: resolve(":memory:")
-  // would turn it into a relative FILE path (e.g. /cwd/:memory:), creating a
-  // persistent on-disk database that silently accumulates data across runs.
+
+  // Remote libSQL / Turso databases
+  if (raw.startsWith("libsql:") || raw.startsWith("http:") || raw.startsWith("https:")) {
+    const client = createClient({
+      url: raw,
+      authToken: process.env.ARBITER_DB_TOKEN,
+    });
+    const db = drizzle(client, { schema });
+    return { client, db };
+  }
+
+  // In-memory must be detected BEFORE path resolution
   if (raw === ":memory:" || raw === "file::memory:?cache=shared") {
     const client = createClient({ url: ":memory:" });
     await client.executeMultiple(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=${SQLITE_BUSY_TIMEOUT_MS};`);
@@ -26,9 +35,10 @@ export async function openDb(dbPath?: string): Promise<{ client: Client; db: Db 
     return { client, db };
   }
   const path = resolve(raw);
-  if (!path.startsWith("file:")) {
+  if (!path.startsWith("file:") && !path.startsWith("libsql:") && !path.startsWith("http:") && !path.startsWith("https:")) {
     mkdirSync(dirname(path), { recursive: true });
   }
+
   const url = path.startsWith("file:") ? path : `file:${path}`;
 
   const client = createClient({ url });

@@ -12,7 +12,10 @@ export interface MSG91Config {
   authKey?: string;
   senderId?: string; // e.g. "ARBITR"
   webhookSecret?: string;
+  dltTemplateId?: string;
+  flowId?: string;
 }
+
 
 export const MSG91_DLT_TEMPLATES: Record<FailureClassId, { flowId: string; dltId: string }> = {
   SOFT_RETRYABLE: {
@@ -42,11 +45,13 @@ export class MSG91SmsProvider implements OutreachProvider {
   readonly channel = "SMS" as const;
 
   constructor(private config: MSG91Config = {}) {
-    this.config.authKey = config.authKey || process.env.MSG91_AUTH_KEY;
+    const rawKey = config.authKey || process.env.MSG91_AUTH_KEY;
+    this.config.authKey = (rawKey && !rawKey.includes("xxxxxx")) ? rawKey : undefined;
     this.config.senderId = config.senderId || process.env.MSG91_SENDER_ID || "ARBITR";
     this.config.dltTemplateId = config.dltTemplateId || process.env.MSG91_DLT_TEMPLATE_ID || "1407168923450011";
     this.config.flowId = config.flowId || process.env.MSG91_FLOW_ID;
   }
+
 
 
   async send(payload: OutreachPayload): Promise<ProviderDispatchResult> {

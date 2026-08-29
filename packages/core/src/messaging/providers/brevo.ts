@@ -30,11 +30,13 @@ export class BrevoEmailProvider implements OutreachProvider {
   readonly channel = "EMAIL" as const;
 
   constructor(private config: BrevoConfig = {}) {
-    this.config.apiKey = config.apiKey || process.env.BREVO_API_KEY;
+    const rawKey = config.apiKey || process.env.BREVO_API_KEY;
+    this.config.apiKey = (rawKey && !rawKey.includes("xxxxxx")) ? rawKey : undefined;
     this.config.senderEmail = config.senderEmail || process.env.BREVO_SENDER_EMAIL || "billing@arbiter.in";
     this.config.senderName = config.senderName || process.env.BREVO_SENDER_NAME || "ARBITER Recovery";
     this.config.webhookSecret = config.webhookSecret || process.env.BREVO_WEBHOOK_SECRET;
   }
+
 
 
   async send(payload: OutreachPayload): Promise<ProviderDispatchResult> {
