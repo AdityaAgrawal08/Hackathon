@@ -1,17 +1,9 @@
 /**
  * Root-cause diagnosis — Track 3 brief: "Payment degradation → root cause → recovery action".
  *
- * The pipeline classifies a failure into a FailureClass (soft/hard/network/risk/unknown).
- * This module adds the EXPLICIT diagnosis step: map the raw failure code to a
- * structured root cause and a recommended intervention family. This is the
- * "diagnose" half of the agent's job, recorded as a DIAGNOSIS audit entry so the
- * loop is fully explainable end-to-end.
- *
- * Invariant: diagnosis NEVER invents a recovery amount. It only explains WHY a
- * failure happened and which intervention family is appropriate. The decision
- * engine still owns the final action + EV math.
+ * Decomposes Razorpay error codes, decline reasons, and failure classes into
+ * deterministic root causes and recommended intervention families.
  */
-
 import type { FailureClassId } from "./decide/catalog.js";
 
 export type RootCause =
@@ -38,20 +30,56 @@ export interface Diagnosis {
   recommendedIntervention: InterventionFamily;
 }
 
-/** Raw failure code → root cause taxonomy (mirrors features.ts classifyByCode). */
+/** Comprehensive Razorpay + industry error code mapping */
 const ROOT_CAUSE_BY_CODE: Record<string, RootCause> = {
+  // Soft Retryable / Balance / Transients
   INSUFFICIENT_FUNDS: "INSUFFICIENT_FUNDS",
+  BAD_REQUEST_PAYMENT_ACCOUNT_INSUFFICIENT_BALANCE: "INSUFFICIENT_FUNDS",
+  BAD_REQUEST_PAYMENT_UPI_COLLECT_EXPIRED: "INSUFFICIENT_FUNDS",
+  BAD_REQUEST_PAYMENT_OTP_VALIDATION_FAILED: "INSUFFICIENT_FUNDS",
   TEMPORARY_DECLINE: "INSUFFICIENT_FUNDS",
   NO_MANDATE_RESPONSE: "INSUFFICIENT_FUNDS",
+  LOCAL_INSUFFICIENT_FUNDS: "INSUFFICIENT_FUNDS",
+  RZP_INSUFFICIENT_FUNDS: "INSUFFICIENT_FUNDS",
+
+  // Hard Method Dead
   CARD_EXPIRED: "METHOD_EXPIRED",
+  BAD_REQUEST_PAYMENT_CARD_EXPIRED: "METHOD_EXPIRED",
+  BAD_REQUEST_PAYMENT_CARD_INVALID: "METHOD_EXPIRED",
+  BAD_REQUEST_PAYMENT_MANDATE_REVOKED: "METHOD_EXPIRED",
+  BAD_REQUEST_PAYMENT_UPI_INVALID_VPA: "METHOD_EXPIRED",
   MANDATE_REVOKED: "METHOD_EXPIRED",
   TOKEN_INVALID: "METHOD_EXPIRED",
+  LOCAL_EXPIRED_METHOD: "METHOD_EXPIRED",
+  LOCAL_INVALID_DETAILS: "METHOD_EXPIRED",
+  RZP_EXPIRED_METHOD: "METHOD_EXPIRED",
+  RZP_INVALID_DETAILS: "METHOD_EXPIRED",
+
+  // Network / Gateway / Bank Downtime
   GATEWAY_TIMEOUT: "NETWORK_GATEWAY",
+  GATEWAY_ERROR: "NETWORK_GATEWAY",
+  BANK_DOWNTIME_NETWORK_ERROR: "NETWORK_GATEWAY",
+  BAD_REQUEST_PAYMENT_TIMED_OUT: "NETWORK_GATEWAY",
   ISSUER_TIMEOUT: "NETWORK_GATEWAY",
   NETWORK_ERROR: "NETWORK_GATEWAY",
+  LOCAL_GATEWAY_TIMEOUT: "NETWORK_GATEWAY",
+  LOCAL_GATEWAY_503: "NETWORK_GATEWAY",
+  LOCAL_LOST_RESPONSE: "NETWORK_GATEWAY",
+  RZP_RATE_LIMITED: "NETWORK_GATEWAY",
+  RZP_SERVER_ERROR: "NETWORK_GATEWAY",
+
+  // Risk / Fraud
   SUSPECTED_FRAUD: "RISK_FLAGGED",
+  BAD_REQUEST_PAYMENT_FRAUD_IDENTIFIED: "RISK_FLAGGED",
+  BAD_REQUEST_PAYMENT_CARD_STOLEN: "RISK_FLAGGED",
   RISK_BLOCKED: "RISK_FLAGGED",
+  LOCAL_RISK_REJECTED: "RISK_FLAGGED",
+  RZP_REJECTED: "RISK_FLAGGED",
+
+  // Unknown
+  BAD_REQUEST_PAYMENT_DECLINED_BY_BANK: "UNKNOWN",
   UNKNOWN_CODE: "UNKNOWN",
+  UNKNOWN: "UNKNOWN",
 };
 
 const INTERVENTION_BY_ROOT_CAUSE: Record<RootCause, InterventionFamily> = {
@@ -78,7 +106,18 @@ export function diagnoseFailure(
   failureClass: FailureClassId,
 ): Diagnosis {
   const up = failureCode.trim().toUpperCase();
-  const rootCause = ROOT_CAUSE_BY_CODE[up] ?? "UNKNOWN";
+  const rootCause = ROOT_CAUSE_BY_CODE[up] ?? (
+    failureClass === "SOFT_RETRYABLE"
+      ? "INSUFFICIENT_FUNDS"
+      : failureClass === "HARD_METHOD_DEAD"
+        ? "METHOD_EXPIRED"
+        : failureClass === "NETWORK_TIMEOUT"
+          ? "NETWORK_GATEWAY"
+          : failureClass === "RISK_FLAGGED"
+            ? "RISK_FLAGGED"
+            : "UNKNOWN"
+  );
+
   return {
     failureCode: up,
     failureClass,
