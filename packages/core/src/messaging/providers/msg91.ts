@@ -42,8 +42,12 @@ export class MSG91SmsProvider implements OutreachProvider {
   readonly channel = "SMS" as const;
 
   constructor(private config: MSG91Config = {}) {
-    this.config.senderId = config.senderId || "ARBITR";
+    this.config.authKey = config.authKey || process.env.MSG91_AUTH_KEY;
+    this.config.senderId = config.senderId || process.env.MSG91_SENDER_ID || "ARBITR";
+    this.config.dltTemplateId = config.dltTemplateId || process.env.MSG91_DLT_TEMPLATE_ID || "1407168923450011";
+    this.config.flowId = config.flowId || process.env.MSG91_FLOW_ID;
   }
+
 
   async send(payload: OutreachPayload): Promise<ProviderDispatchResult> {
     const nowUtc = isoUtc(Date.now());

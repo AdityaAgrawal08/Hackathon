@@ -20,9 +20,12 @@ export class GupshupWhatsAppProvider implements OutreachProvider {
   readonly channel = "WHATSAPP" as const;
 
   constructor(private config: GupshupConfig = {}) {
-    this.config.sourceNumber = config.sourceNumber || "919000000000";
-    this.config.appName = config.appName || "ARBITER";
+    this.config.apiKey = config.apiKey || process.env.GUPSHUP_API_KEY;
+    this.config.sourceNumber = config.sourceNumber || process.env.GUPSHUP_SOURCE_NUMBER || "919000000000";
+    this.config.appName = config.appName || process.env.GUPSHUP_APP_NAME || "ARBITER";
+    this.config.webhookSecret = config.webhookSecret || process.env.GUPSHUP_WEBHOOK_SECRET;
   }
+
 
   async send(payload: OutreachPayload): Promise<ProviderDispatchResult> {
     const nowUtc = isoUtc(Date.now());
