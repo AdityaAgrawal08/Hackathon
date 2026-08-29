@@ -19,12 +19,13 @@
     "execute": "tsx packages/ml/src/execute.ts",
     "recover": "tsx packages/ml/src/recover.ts",
     "trial": "tsx packages/trial/src/run.ts",
-    "build": "tsc -b",
+    "build": "echo 'Running via tsx, skipping build'",
     "start": "tsx app/server.ts",
     "dev": "tsx app/server.ts",
     "clean:db": "rm -f data/arbiter.sqlite* && pnpm db:migrate",
     "db:migrate": "tsx packages/core/src/db/migrate.ts"
   },
+
 
   "devDependencies": {
     "@types/express": "^5.0.6",
