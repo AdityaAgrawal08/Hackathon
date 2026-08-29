@@ -182,6 +182,8 @@ export const DEFAULT_ACTION_MULTIPLIERS: Record<FailureClassId, Record<ActionId,
   },
 };
 
+
+
 /**
  * Override-shaped adjustment table: every cell optional at the edges, but
  * boot-time completeness is enforced by assertTableComplete().

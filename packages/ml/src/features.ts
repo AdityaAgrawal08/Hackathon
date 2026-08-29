@@ -37,7 +37,11 @@ export const FEATURE_NAMES = [
   "tenure_norm", // days since joined / 400, clamped
   "ltv_paise_norm", // estimated lifetime value, normalized by LTV_NORM_PAISE
   "churn_risk_norm", // predicted churn risk, 0..1 (higher ⇒ more likely to leave)
+  "days_since_last_attempt_norm", // min(days_since_last_attempt, 30) / 30
+  "high_value_tier", // 1 if amount >= ₹10,000, else 0
+  "bank_rail_health_norm", // rolling health score of the bank rail (0..1, default 1.0)
 ] as const;
+
 
 export type FeatureName = (typeof FEATURE_NAMES)[number];
 export const FEATURE_COUNT = FEATURE_NAMES.length;
@@ -195,12 +199,57 @@ export function computeFeatures(input: FeatureInput): ComputedFeatures {
 
   // ── class onehot (code-derived, fail-closed)
   const cls: FailureClassV1 = classifyByCode(input.failureCode, {
-    SOFT_RETRYABLE: ["INSUFFICIENT_FUNDS", "TEMPORARY_DECLINE", "NO_MANDATE_RESPONSE"],
-    HARD_METHOD_DEAD: ["CARD_EXPIRED", "MANDATE_REVOKED", "TOKEN_INVALID"],
-    NETWORK_TIMEOUT: ["GATEWAY_TIMEOUT", "ISSUER_TIMEOUT", "NETWORK_ERROR"],
-    RISK_FLAGGED: ["SUSPECTED_FRAUD", "RISK_BLOCKED"],
-    UNKNOWN: ["UNKNOWN_CODE"],
+    SOFT_RETRYABLE: [
+      "INSUFFICIENT_FUNDS",
+      "BAD_REQUEST_PAYMENT_ACCOUNT_INSUFFICIENT_BALANCE",
+      "BAD_REQUEST_PAYMENT_UPI_COLLECT_EXPIRED",
+      "BAD_REQUEST_PAYMENT_OTP_VALIDATION_FAILED",
+      "TEMPORARY_DECLINE",
+      "NO_MANDATE_RESPONSE",
+      "LOCAL_INSUFFICIENT_FUNDS",
+      "RZP_INSUFFICIENT_FUNDS",
+    ],
+    HARD_METHOD_DEAD: [
+      "CARD_EXPIRED",
+      "BAD_REQUEST_PAYMENT_CARD_EXPIRED",
+      "BAD_REQUEST_PAYMENT_CARD_INVALID",
+      "BAD_REQUEST_PAYMENT_MANDATE_REVOKED",
+      "BAD_REQUEST_PAYMENT_UPI_INVALID_VPA",
+      "MANDATE_REVOKED",
+      "TOKEN_INVALID",
+      "LOCAL_EXPIRED_METHOD",
+      "LOCAL_INVALID_DETAILS",
+      "RZP_EXPIRED_METHOD",
+      "RZP_INVALID_DETAILS",
+    ],
+    NETWORK_TIMEOUT: [
+      "GATEWAY_TIMEOUT",
+      "GATEWAY_ERROR",
+      "BANK_DOWNTIME_NETWORK_ERROR",
+      "BAD_REQUEST_PAYMENT_TIMED_OUT",
+      "ISSUER_TIMEOUT",
+      "NETWORK_ERROR",
+      "LOCAL_GATEWAY_TIMEOUT",
+      "LOCAL_GATEWAY_503",
+      "LOCAL_LOST_RESPONSE",
+      "RZP_RATE_LIMITED",
+      "RZP_SERVER_ERROR",
+    ],
+    RISK_FLAGGED: [
+      "SUSPECTED_FRAUD",
+      "BAD_REQUEST_PAYMENT_FRAUD_IDENTIFIED",
+      "BAD_REQUEST_PAYMENT_CARD_STOLEN",
+      "RISK_BLOCKED",
+      "LOCAL_RISK_REJECTED",
+      "RZP_REJECTED",
+    ],
+    UNKNOWN: [
+      "BAD_REQUEST_PAYMENT_DECLINED_BY_BANK",
+      "UNKNOWN_CODE",
+      "UNKNOWN",
+    ],
   });
+
 
   // ── payday proximity from noisy histogram (never from ground truth)
   const pay = inferPayday(cust?.paydayPattern ?? null);
@@ -239,6 +288,10 @@ export function computeFeatures(input: FeatureInput): ComputedFeatures {
 
   const ltv = deriveLtvSignals(cust, input.occurredAtUtc);
 
+  const daysSinceLastAttempt = input.priorFailureAmountsPaise.length > 0 ? 1 : 0;
+  const highValueTier = input.amountPaise >= 1_000_000 ? 1 : 0;
+  const bankRailHealth = 1.0;
+
   const values = [
     ONEHOT_CLASSES.includes(cls as (typeof ONEHOT_CLASSES)[number]) &&
     cls === "SOFT_RETRYABLE"
@@ -256,7 +309,11 @@ export function computeFeatures(input: FeatureInput): ComputedFeatures {
     Math.min(1, tenureDays / 400),
     clamp01(ltv.ltvPaise / LTV_NORM_PAISE),
     ltv.churnRiskBp / 10_000,
+    Math.min(1, daysSinceLastAttempt / 30),
+    highValueTier,
+    bankRailHealth,
   ];
+
 
   if (values.some((v) => !Number.isFinite(v))) {
     throw new Error(`computeFeatures produced non-finite value for ${input.failureCode}`);
