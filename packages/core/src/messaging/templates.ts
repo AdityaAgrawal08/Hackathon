@@ -75,10 +75,11 @@ const TEMPLATES_BY_CLASS: Record<FailureClassId, Record<OutreachChannel, Templat
       templateId: "arbiter_rec_whatsapp_card_expired_v1",
       dltRegistered: true,
       en: (ctx) =>
-        `Hi ${ctx.customerName}, your payment method (${ctx.instrumentDescription}) for ${ctx.merchantName} has expired or been revoked. To avoid service disruption, please update your details or switch to UPI AutoPay here: ${ctx.recoveryUrl}`,
+        `Hi ${ctx.customerName}, your payment method (${ctx.instrumentDescription}) for ${ctx.merchantName} (${formatINR(paise(ctx.amountPaise))}) has expired or been revoked. To avoid service disruption, please update your details or switch to UPI AutoPay here: ${ctx.recoveryUrl}`,
       hi: (ctx) =>
-        `Namaste ${ctx.customerName}, ${ctx.merchantName} ke liye aapka payment method (${ctx.instrumentDescription}) expire ho gaya hai. Service bina kisi rukawat chalte rehne ke liye kripya naya method update karein: ${ctx.recoveryUrl}`,
+        `Namaste ${ctx.customerName}, ${ctx.merchantName} ke liye aapka payment method (${ctx.instrumentDescription} - ${formatINR(paise(ctx.amountPaise))}) expire ho gaya hai. Service bina kisi rukawat chalte rehne ke liye kripya naya method update karein: ${ctx.recoveryUrl}`,
     },
+
     SMS: {
       templateId: "1407168923450012",
       dltRegistered: true,
