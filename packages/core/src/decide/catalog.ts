@@ -18,12 +18,44 @@ export const ACTIONS = [
   "RETRY_NOW",
   "RETRY_PAYDAY",
   "ALTERNATE_UPI_LINK",
+  "PARTIAL_COLLECT",
+  "RECOVER_VIA_RAIL",
+  "RECOVER_VOICE_HI",
+  "RECOVER_WHATSAPP",
+  "PROMISE_TO_PAY",
   "REMINDER_LINK",
   "HUMAN_REVIEW",
   "NO_ACTION",
 ] as const;
 
 export type ActionId = (typeof ACTIONS)[number];
+
+/** Rails a failed Razorpay charge can be recovered through (§4.1 moat). */
+export type RecoveryRail =
+  | "razorpay_payment_link" // card/UPI Payment Link on the same PSP
+  | "smart_collect_upi" // Razorpay Smart Collect UPI (B2B)
+  | "optimizer_secondary_psp"; // Razorpay Optimizer → secondary PSP
+
+/**
+ * Map a failure class to the best alternate rail. A single PSP can never mix
+ * merchant data, but a neutral recovery agent CAN switch rails for the one
+ * merchant that owns several — that is the cross-PSP moat.
+ *   HARD_METHOD_DEAD  → same-PSP Payment Link (the method is dead, not the PSP)
+ *   NETWORK_TIMEOUT   → Optimizer routes to a secondary PSP (issuer was down)
+ *   SOFT_RETRYABLE    → Payment Link (a nudge on a different instrument)
+ */
+export function railForFailureClass(cls: FailureClassId): RecoveryRail {
+  switch (cls) {
+    case "HARD_METHOD_DEAD":
+      return "razorpay_payment_link";
+    case "NETWORK_TIMEOUT":
+      return "optimizer_secondary_psp";
+    case "SOFT_RETRYABLE":
+      return "razorpay_payment_link";
+    default:
+      return "razorpay_payment_link";
+  }
+}
 
 /** Structurally identical to the seed generator's FailureClass — no import, no cycle. */
 export type FailureClassId =
@@ -34,6 +66,14 @@ export type FailureClassId =
   | "UNKNOWN";
 
 /**
+ * §4.8 — B2B partial-collect: when a full invoice can't be recovered in one hit,
+ * ARBITER proposes collecting a fraction of the billed amount via Razorpay Smart
+ * Collect. 30% is the default first-installment ask (merchant-tunable). Stored as
+ * a constant so the executor and the EV math agree on the partial amount.
+ */
+export const PARTIAL_COLLECT_FRACTION = 0.3;
+
+/**
  * Per-action contact cost in integer paise (cited assumption, metrics-methodology).
  * HUMAN_REVIEW prices merchant labor; every contact action costs > 0 so spamming
  * cannot win the argmax (P3-B6/P7-B7).
@@ -42,6 +82,11 @@ export const CONTACT_COST_PAISE: Record<ActionId, Paise> = {
   RETRY_NOW: paise(300),
   RETRY_PAYDAY: paise(300),
   ALTERNATE_UPI_LINK: paise(150),
+  PARTIAL_COLLECT: paise(250),
+  RECOVER_VIA_RAIL: paise(200),
+  RECOVER_VOICE_HI: paise(800),
+  RECOVER_WHATSAPP: paise(120),
+  PROMISE_TO_PAY: paise(80),
   REMINDER_LINK: paise(100),
   HUMAN_REVIEW: paise(5000),
   NO_ACTION: paise(0),
@@ -52,6 +97,11 @@ const CONTACT_ACTIONS: ReadonlySet<ActionId> = new Set([
   "RETRY_NOW",
   "RETRY_PAYDAY",
   "ALTERNATE_UPI_LINK",
+  "PARTIAL_COLLECT",
+  "RECOVER_VIA_RAIL",
+  "RECOVER_VOICE_HI",
+  "RECOVER_WHATSAPP",
+  "PROMISE_TO_PAY",
   "REMINDER_LINK",
 ]);
 
@@ -69,6 +119,11 @@ export const DEFAULT_ACTION_MULTIPLIERS: Record<FailureClassId, Record<ActionId,
     RETRY_NOW: 0.6,
     RETRY_PAYDAY: 1.4,
     ALTERNATE_UPI_LINK: 0.5,
+    PARTIAL_COLLECT: 0.5,
+    RECOVER_VIA_RAIL: 0.3,
+    RECOVER_VOICE_HI: 0.8,
+    RECOVER_WHATSAPP: 0.7,
+    PROMISE_TO_PAY: 0.5,
     REMINDER_LINK: 0.7,
     HUMAN_REVIEW: 0.3,
     NO_ACTION: 0.02,
@@ -77,6 +132,11 @@ export const DEFAULT_ACTION_MULTIPLIERS: Record<FailureClassId, Record<ActionId,
     RETRY_NOW: 0.0,
     RETRY_PAYDAY: 0.0,
     ALTERNATE_UPI_LINK: 1.0,
+    PARTIAL_COLLECT: 0.9,
+    RECOVER_VIA_RAIL: 1.1,
+    RECOVER_VOICE_HI: 0.5,
+    RECOVER_WHATSAPP: 0.4,
+    PROMISE_TO_PAY: 0.7,
     REMINDER_LINK: 0.6,
     HUMAN_REVIEW: 0.1,
     NO_ACTION: 0.0,
@@ -85,6 +145,11 @@ export const DEFAULT_ACTION_MULTIPLIERS: Record<FailureClassId, Record<ActionId,
     RETRY_NOW: 1.5,
     RETRY_PAYDAY: 0.4,
     ALTERNATE_UPI_LINK: 0.3,
+    PARTIAL_COLLECT: 1.2,
+    RECOVER_VIA_RAIL: 1.6,
+    RECOVER_VOICE_HI: 0.6,
+    RECOVER_WHATSAPP: 0.5,
+    PROMISE_TO_PAY: 0.4,
     REMINDER_LINK: 0.2,
     HUMAN_REVIEW: 0.05,
     NO_ACTION: 0.05,
@@ -93,6 +158,11 @@ export const DEFAULT_ACTION_MULTIPLIERS: Record<FailureClassId, Record<ActionId,
     RETRY_NOW: 0.0,
     RETRY_PAYDAY: 0.0,
     ALTERNATE_UPI_LINK: 0.0,
+    PARTIAL_COLLECT: 0.1,
+    RECOVER_VIA_RAIL: 0.0,
+    RECOVER_VOICE_HI: 0.0,
+    RECOVER_WHATSAPP: 0.0,
+    PROMISE_TO_PAY: 0.2,
     REMINDER_LINK: 0.0,
     HUMAN_REVIEW: 1.0,
     NO_ACTION: 0.0,
@@ -101,6 +171,11 @@ export const DEFAULT_ACTION_MULTIPLIERS: Record<FailureClassId, Record<ActionId,
     RETRY_NOW: 0.1,
     RETRY_PAYDAY: 0.1,
     ALTERNATE_UPI_LINK: 0.1,
+    PARTIAL_COLLECT: 0.3,
+    RECOVER_VIA_RAIL: 0.1,
+    RECOVER_VOICE_HI: 0.2,
+    RECOVER_WHATSAPP: 0.2,
+    PROMISE_TO_PAY: 0.2,
     REMINDER_LINK: 0.1,
     HUMAN_REVIEW: 1.0,
     NO_ACTION: 0.0,

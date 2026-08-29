@@ -42,7 +42,7 @@ beforeAll(async () => {
         envelope_version: "env-v1",
         enabled: true,
         classes: ["SOFT_RETRYABLE", "HARD_METHOD_DEAD", "NETWORK_TIMEOUT"],
-        channels: ["RETRY_NOW", "RETRY_PAYDAY", "ALTERNATE_UPI_LINK", "REMINDER_LINK"],
+        channels: ["RETRY_NOW", "RETRY_PAYDAY", "ALTERNATE_UPI_LINK", "RECOVER_VIA_RAIL", "REMINDER_LINK"],
         max_attempts: 3,
         max_amount_paise: 10_000_000,
         require_quiet_ok: false,

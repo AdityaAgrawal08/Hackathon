@@ -8,8 +8,13 @@ import {
   type Multipliers,
 } from "./catalog.js";
 import { evaluateConstraints, type PolicyPack, type RuleId } from "./policy.js";
-import { nextPaydayWindowMs } from "./window.js";
-import { formatINR, paise, percentBp } from "@arbiter/shared";
+import {
+  nextPaydayWindowMs,
+  nextRailHealthyWindowMs,
+  RAIL_HEALTH_THRESHOLD,
+  RAIL_DEPENDENT_ACTIONS,
+} from "./window.js";
+import { formatINR, paise, percentBp, LTV_NORM_PAISE } from "@arbiter/shared";
 
 export interface DecideInput {
   probability: number;
@@ -26,6 +31,9 @@ export interface DecideInput {
   ltvPaise?: number;
   /** Predicted churn risk in basis points (0..10000). */
   churnRiskBp?: number;
+  /** Overall payment-rail health (0..1). When < threshold, rail-dependent
+   *  actions are deferred to the next healthy window (§4.5). Opt-in. */
+  railHealthScore?: number;
 }
 
 /**
@@ -37,7 +45,7 @@ export interface DecideInput {
  */
 export function ltvWeight(ltvPaise?: number, churnRiskBp?: number): number {
   if (ltvPaise == null || churnRiskBp == null) return 1;
-  const ltvScore = clamp01(ltvPaise / 5_00_00_000);
+  const ltvScore = clamp01(ltvPaise / LTV_NORM_PAISE);
   const churn = clamp01(churnRiskBp / 10_000);
   return clamp(1.0 + 0.5 * ltvScore - 0.7 * churn, 0.2, 1.5);
 }
@@ -80,6 +88,24 @@ function scheduleFor(action: ActionId, input: DecideInput): number | null {
   return null;
 }
 
+/**
+ * Rail-health-aware scheduling (§4.5): a rail-dependent action attempted while
+ * the rail is degraded is deferred to the next healthy window instead of
+ * wasting an attempt. Healthy rail → unchanged schedule. Opt-in (only when
+ * `railHealthScore` is supplied).
+ */
+function scheduleWithRailHealth(action: ActionId, input: DecideInput): number | null {
+  let scheduled = scheduleFor(action, input);
+  if (
+    input.railHealthScore != null &&
+    RAIL_DEPENDENT_ACTIONS.has(action) &&
+    input.railHealthScore < RAIL_HEALTH_THRESHOLD
+  ) {
+    scheduled = nextRailHealthyWindowMs(input.railHealthScore, input.nowMs);
+  }
+  return scheduled;
+}
+
 function evaluateAction(
   input: DecideInput,
   action: ActionId,
@@ -103,6 +129,7 @@ function evaluateAction(
         Number.isInteger(input.inferredPaydayDay) &&
         input.inferredPaydayDay >= 1 &&
         input.inferredPaydayDay <= 31),
+    actionId: action,
   };
   const violations = evaluateConstraints(input.policy, ctx);
 
@@ -112,7 +139,7 @@ function evaluateAction(
     evPaise: gross - CONTACT_COST_PAISE[action],
     adjustedProbabilityBp: pBp,
     multiplierUsed: mult,
-    scheduledForMs: violations.length === 0 ? scheduleFor(action, input) : null,
+    scheduledForMs: violations.length === 0 ? scheduleWithRailHealth(action, input) : null,
   };
   return { ev, violations };
 }

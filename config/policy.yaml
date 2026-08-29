@@ -9,3 +9,10 @@ exposure_cap_paise: 10000000
 human_review_classes:
   - RISK_FLAGGED
   - UNKNOWN
+regulatory_profile:
+  jurisdiction: IN
+  mandate_type: NONE
+  dpdp_consent_status: GRANTED
+  autopay_retry_ceiling: 3
+  pre_debit_notice_hours: 24
+  trai_dlt_template_id: rzp_recovery_dl

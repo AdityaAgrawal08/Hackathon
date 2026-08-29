@@ -211,8 +211,10 @@ describe("golden cases (plan gate)", () => {
     expect(ltvWeight(1_00_00_00_000, -1_000)).toBe(1.5); // clamped high
     expect(ltvWeight(0, 99_999)).toBeCloseTo(0.3, 10); // churn > 1 clamps to 1
     // monotonic: more LTV ⇒ heavier; more churn ⇒ lighter
-    expect(ltvWeight(4_00_00_000, 1_000)).toBeGreaterThan(ltvWeight(1_00_00_000, 1_000));
-    expect(ltvWeight(4_00_00_000, 5_000)).toBeLessThan(ltvWeight(4_00_00_000, 1_000));
+    // (use sub-norm LTV values so the weight actually differentiates; the
+    //  norm is ₹25,000 = 25_00_000 paise, so 4cr/1cr both saturate at 1.5)
+    expect(ltvWeight(20_00_000, 1_000)).toBeGreaterThan(ltvWeight(5_00_000, 1_000));
+    expect(ltvWeight(20_00_000, 5_000)).toBeLessThan(ltvWeight(20_00_000, 1_000));
   });
 
   it("LTV-aware EV: scales magnitude, preserves action ordering (chosen unchanged)", () => {

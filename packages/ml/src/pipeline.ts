@@ -13,11 +13,13 @@ import {
   transition,
 } from "@arbiter/core/approval";
 import { diagnoseFailure } from "@arbiter/core/diagnosis";
+import { simulatedRailHealth } from "@arbiter/core/ingest";
 import { MAX_EDIT_VERSIONS } from "@arbiter/core/constants";
 import type { ActionId } from "@arbiter/core/decide";
 import { computeFeatures } from "./features.js";
 import { saveFeatures, loadFeatureVectors } from "./features_store.js";
 import { scoreWithArtifact } from "./predict.js";
+import { recordPromiseToPay, queryPromiseKeptRate } from "./promise_store.js";
 import { getIncumbent, getModelById } from "./registry.js";
 import type { ModelArtifact } from "./artifact.js";
 
@@ -123,6 +125,9 @@ export async function processEvent(
 
   const { customer, priorAmountsPaise, priorFailureCount } = await resolveContext(client, event);
 
+  // §4.7 — per-customer promise-kept behavioral signal (reproducible).
+  const promiseKeptRate = await queryPromiseKeptRate(client, event.customer_id as string);
+
   const computed = computeFeatures({
     failureCode: event.failure_code,
     amountPaise: event.amount_paise,
@@ -135,11 +140,16 @@ export async function processEvent(
       priorSuccessCount: customer.prior_success_count,
       joinedAtUtc: customer.joined_at_utc,
       optedOut: customer.opted_out !== 0,
+      promiseKeptRate,
     },
   });
   await saveFeatures(client, [{ eventId, values: computed.values }], nowMs);
 
   const score = scoreWithArtifact(computed.values, model);
+
+  // §4.5 — real-time rail health: defer rail-dependent recovery when the rail
+  // is degraded (e.g., UPI evening peak). Deterministic, reproducible feed.
+  const railHealth = simulatedRailHealth(nowMs);
 
   const decision = decide({
     probability: score.probability,
@@ -153,6 +163,7 @@ export async function processEvent(
     inferredPaydayDay: computed.raw.inferredPaydayDay,
     ltvPaise: computed.raw.ltvPaise,
     churnRiskBp: computed.raw.churnRiskBp,
+    railHealthScore: railHealth.overall,
   });
 
   const chosen = decision.chosen;
@@ -278,6 +289,28 @@ export async function processEvent(
     ],
   });
 
+  // ── §4.7 — record the promise-to-pay when the optimizer picks that action
+  if (chosen.action === "PROMISE_TO_PAY") {
+    await recordPromiseToPay(client, {
+      tenantId: event.tenant_id,
+      customerId: event.customer_id as string,
+      proposalId,
+      eventId,
+      amountPaise: event.amount_paise,
+      nowMs,
+    });
+    await client.execute({
+      sql: `INSERT INTO audit_log (ts_utc, tenant_id, event_id, actor, entry_type, payload_json)
+            VALUES (?, ?, ?, 'PIPELINE', 'PROMISE', ?)`,
+      args: [
+        nowIso,
+        event.tenant_id,
+        eventId,
+        JSON.stringify({ proposalId, amountPaise: event.amount_paise, promiseKeptRate }),
+      ],
+    });
+  }
+
   return {
     ...base,
     status: "PROPOSED",
@@ -340,7 +373,9 @@ export async function editProposal(
   client: Client,
   proposalId: string,
   actionId: ActionId,
-  opts: { actor?: string; note?: string; nowMs?: number } = { actor: "merchant@demo" },
+  opts: { actor?: string; note?: string; nowMs?: number; policy?: PolicyPack } = {
+    actor: "merchant@demo",
+  },
 ): Promise<EditOutcome> {
   const nowMs = opts.nowMs ?? Date.now();
   const actor = (opts.actor ?? "merchant@demo").trim() || "merchant@demo";
@@ -370,7 +405,7 @@ export async function editProposal(
   const model = await getModelById(client, prop.model_version_id);
   if (!model) return { ok: false, reason: "MODEL_VERSION_GONE" };
 
-  const policy = loadPolicyFile(resolvePolicyPath());
+  const policy = opts.policy ?? loadPolicyFile(resolvePolicyPath());
   if (policy.policy_version !== prop.policy_version) {
     return { ok: false, reason: "POLICY_VERSION_MISMATCH" };
   }
@@ -400,6 +435,7 @@ export async function editProposal(
       priorSuccessCount: ctxData.customer.prior_success_count,
       joinedAtUtc: ctxData.customer.joined_at_utc,
       optedOut: ctxData.customer.opted_out !== 0,
+      promiseKeptRate: await queryPromiseKeptRate(client, prop.customer_id),
     },
   });
   if (
@@ -410,6 +446,8 @@ export async function editProposal(
   }
 
   const score = scoreWithArtifact(recomputed.values, model);
+
+  const railHealth = simulatedRailHealth(nowMs);
 
   const decision = decide({
     probability: score.probability,
@@ -422,6 +460,7 @@ export async function editProposal(
     inferredPaydayDay: recomputed.raw.inferredPaydayDay,
     ltvPaise: recomputed.raw.ltvPaise,
     churnRiskBp: recomputed.raw.churnRiskBp,
+    railHealthScore: railHealth.overall,
   });
 
   const target = decision.ranked.find((r) => r.action === actionId);
@@ -506,6 +545,17 @@ export async function editProposal(
             }),
           ],
         });
+        // §4.7 — record promise when the redirect lands on PROMISE_TO_PAY
+        if (actionId === "PROMISE_TO_PAY") {
+          await recordPromiseToPay(client, {
+            tenantId: String(row.rows[0]!.tenant_id),
+            customerId: prop.customer_id,
+            proposalId: newId,
+            eventId: prop.event_id,
+            amountPaise: amountPaise,
+            nowMs,
+          });
+        }
         return { ok: true, newProposalId: newId, newState: initialState };
       }
     } catch (err) {

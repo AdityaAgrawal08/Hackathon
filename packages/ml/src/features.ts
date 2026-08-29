@@ -9,14 +9,19 @@
  *    ground-truth salary day is NEVER an input (it exists only to score
  *    inference quality later).
  */
-import { hashSeed } from "@arbiter/shared";
+import { hashSeed, LTV_NORM_PAISE } from "@arbiter/shared";
 
 export const FEATURE_VERSION = "feat-v1";
 
 /** Proxy average ticket used to estimate lifetime value from prior successes. */
 export const ESTIMATED_AVG_TICKET_PAISE = 50_000;
-/** LTV at/above which the LTV weight saturates at its maximum. */
-export const LTV_NORM_PAISE = 5_00_00_000;
+/**
+ * LTV normalization constant (saturation point for the LTV weight).
+ * Defined in @arbiter/shared so the EV engine (core) and feature pipeline (ml)
+ * share one value — bug fix (#1) set it to a realistic ₹25,000 (was 100× too
+ * high at ₹5,00,000, which made the LTV weight effectively constant).
+ */
+export { LTV_NORM_PAISE };
 
 export const FEATURE_NAMES = [
   "f_class_soft", // SOFT_RETRYABLE onehot (UNKNOWN = reference class)
@@ -47,6 +52,8 @@ export interface FeatureCustomerContext {
   priorSuccessCount?: number | null;
   joinedAtUtc?: string | null;
   optedOut?: boolean | null;
+  /** §4.7 — fraction of prior promises-to-pay this customer kept (0..1). */
+  promiseKeptRate?: number | null;
 }
 
 function clamp01(x: number): number {
@@ -100,6 +107,7 @@ export interface ComputedFeatures {
     failureClass: FailureClassV1;
     ltvPaise: number;
     churnRiskBp: number;
+    promiseKeptRate: number;
   };
 }
 
@@ -177,6 +185,13 @@ export function computeFeatures(input: FeatureInput): ComputedFeatures {
     }
   }
   const cust = input.customer ?? null;
+
+  // §4.7 — behavioral signal: fraction of prior promises-to-pay the customer kept.
+  // Surfaced in `raw` (available to the learning loop / narrative). Kept out of the
+  // frozen 13-d model vector so the contract + incumbent weights stay intact.
+  const promiseKeptRate = clamp01(
+    Number.isFinite(cust?.promiseKeptRate ?? NaN) ? (cust?.promiseKeptRate as number) : 0,
+  );
 
   // ── class onehot (code-derived, fail-closed)
   const cls: FailureClassV1 = classifyByCode(input.failureCode, {
@@ -256,6 +271,7 @@ export function computeFeatures(input: FeatureInput): ComputedFeatures {
       failureClass: cls,
       ltvPaise: ltv.ltvPaise,
       churnRiskBp: ltv.churnRiskBp,
+      promiseKeptRate,
     },
   };
 }

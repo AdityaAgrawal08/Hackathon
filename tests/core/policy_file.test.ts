@@ -27,10 +27,18 @@ quiet_hours:
 exposure_cap_paise: 250000
 human_review_classes:
   - UNKNOWN
+regulatory_profile:
+  jurisdiction: IN
+  mandate_type: NONE
+  dpdp_consent_status: GRANTED
+  autopay_retry_ceiling: 3
+  pre_debit_notice_hours: 24
+  trai_dlt_template_id: rzp_recovery_dl
 `);
     expect(pack.confidence_floor_bp).toBe(3500);
     expect(pack.quiet_hours.start_minute).toBe(1300);
     expect(pack.human_review_classes).toEqual(["UNKNOWN"]);
+    expect(pack.regulatory_profile.autopay_retry_ceiling).toBe(3);
   });
 
   it("rejects unknown keys as boot errors", () => {

@@ -9,10 +9,19 @@
  *   RETRY_NOW       → Payment Link (card/UPI) for immediate retry
  *   RETRY_PAYDAY    → UPI Autopay retry scheduled at payday window
  *   ALTERNATE_UPI_LINK → UPI Intent/Collect link for alternative method
+ *   PARTIAL_COLLECT → Razorpay Smart Collect UPI (B2B partial first-installment, §4.8)
  *   REMINDER_LINK   → Payment Link with custom message
  *   HUMAN_REVIEW    → No API call; returns AMBIGUOUS
  */
 import { ActionProvider, ProviderContext, ProviderResult, ExecutionOutcome } from "./types.js";
+import { formatINR, paise } from "@arbiter/shared";
+import {
+  multiplierFor,
+  railForFailureClass,
+  PARTIAL_COLLECT_FRACTION,
+  type ActionId,
+  type FailureClassId,
+} from "../../decide/catalog.js";
 
 const MODE = process.env.REAL_EXECUTION_MODE ?? "dry-run";
 const IS_LIVE = MODE === "live";
@@ -92,6 +101,105 @@ function buildReminderLinkPayload(ctx: ProviderContext) {
   };
 }
 
+function buildCrossPspPayload(ctx: ProviderContext) {
+  const rail = railForFailureClass(ctx.failureClass as FailureClassId);
+  return {
+    recovery_rail: rail,
+    source_psp: "razorpay",
+    amount: ctx.amountPaise,
+    currency: "INR",
+    idempotency_key: ctx.idempotencyKey,
+    rzp_request_ref: ctx.rzpRequestRef,
+    failure_class: ctx.failureClass,
+    optimizer_route: rail === "optimizer_secondary_psp",
+    notes: {
+      proposal_id: ctx.proposalId,
+      action: ctx.actionId,
+      switched_from: "primary_rail",
+      idempotency_key: ctx.idempotencyKey,
+    },
+  };
+}
+
+/**
+ * Gupshup / WhatsApp Business API recovery template (§4.6).
+ * Hinglish template with a single {{1}} personalization slot — the failed
+ * amount in INR. Deterministic, auditable, and language-localized so the
+ * recovery reaches non-English customers (a real India differentiator).
+ */
+function buildWhatsAppPayload(ctx: ProviderContext) {
+  const amountInr = formatINR(paise(ctx.amountPaise));
+  return {
+    channel: "whatsapp",
+    provider: "gupshup",
+    template: {
+      name: "recovery_reminder_hinglish",
+      language: "hi",
+      // WhatsApp Business template variables; {{1}} is the failed amount.
+      components: [{ type: "body", parameters: [{ type: "text", text: amountInr }] }],
+    },
+    preview: `नमस्ते, आपका ₹${ctx.amountPaise / 100} का पेमेंट फेल हुआ है। कृपया दोबारा प्रयास करें।`,
+    personalization: { "1": amountInr },
+    idempotency_key: ctx.idempotencyKey,
+    rzp_request_ref: ctx.rzpRequestRef,
+    failure_class: ctx.failureClass,
+    notes: { proposal_id: ctx.proposalId, action: ctx.actionId },
+  };
+}
+
+/** Regional voice recovery (§4.6) — same template model, delivered by voice. */
+function buildVoicePayload(ctx: ProviderContext) {
+  const amountInr = formatINR(paise(ctx.amountPaise));
+  return {
+    channel: "voice",
+    provider: "gupshup",
+    template: {
+      name: "recovery_voice_hinglish",
+      language: "hi",
+      components: [{ type: "body", parameters: [{ type: "text", text: amountInr }] }],
+    },
+    personalization: { "1": amountInr },
+    idempotency_key: ctx.idempotencyKey,
+    rzp_request_ref: ctx.rzpRequestRef,
+    failure_class: ctx.failureClass,
+    notes: { proposal_id: ctx.proposalId, action: ctx.actionId },
+  };
+}
+
+/**
+ * §4.8 B2B partial-collect via Razorpay Smart Collect.
+ * Collects PARTIAL_COLLECT_FRACTION of the billed amount as a first installment
+ * on a large B2B invoice, with a deterministic Smart Collect identifier derived
+ * from the proposal (stable across retries → idempotent collector). The partial
+ * amount is reproducible (round(full * fraction)), so the merchant's ledger and
+ * the audit trail always agree.
+ */
+function buildSmartCollectPayload(ctx: ProviderContext) {
+  const partialPaise = Math.max(100, Math.round(ctx.amountPaise * PARTIAL_COLLECT_FRACTION));
+  const vpa = `rzpsc.${ctx.tenantId}.${ctx.proposalId}`;
+  return {
+    rail: "smart_collect_upi",
+    amount: partialPaise,
+    full_amount: ctx.amountPaise,
+    currency: "INR",
+    description: `Partial collection (${Math.round(PARTIAL_COLLECT_FRACTION * 100)}%) via Razorpay Smart Collect`,
+    smart_collect: {
+      vpa,
+      collector_id: `sc_${ctx.rzpRequestRef}`,
+      partial_allowed: true,
+      min_amount: partialPaise,
+    },
+    idempotency_key: ctx.idempotencyKey,
+    rzp_request_ref: ctx.rzpRequestRef,
+    failure_class: ctx.failureClass,
+    notes: {
+      proposal_id: ctx.proposalId,
+      action: ctx.actionId,
+      partial_fraction: PARTIAL_COLLECT_FRACTION,
+    },
+  };
+}
+
 function buildPayload(ctx: ProviderContext) {
   switch (ctx.actionId) {
     case "RETRY_NOW":
@@ -100,6 +208,14 @@ function buildPayload(ctx: ProviderContext) {
       return buildUpiAutopayRetryPayload(ctx);
     case "ALTERNATE_UPI_LINK":
       return buildAlternateUpiLinkPayload(ctx);
+    case "PARTIAL_COLLECT":
+      return buildSmartCollectPayload(ctx);
+    case "RECOVER_VIA_RAIL":
+      return buildCrossPspPayload(ctx);
+    case "RECOVER_VOICE_HI":
+      return buildVoicePayload(ctx);
+    case "RECOVER_WHATSAPP":
+      return buildWhatsAppPayload(ctx);
     case "REMINDER_LINK":
       return buildReminderLinkPayload(ctx);
     default:
@@ -107,10 +223,15 @@ function buildPayload(ctx: ProviderContext) {
   }
 }
 
-function mockOutcome(actionId: string): ExecutionOutcome {
+/**
+ * Honest dry-run outcome (bug #13): mirror the catalog multiplier so a DEAD
+ * action for this class fails even in dry-run, instead of blindly succeeding.
+ * HUMAN_REVIEW always needs a human (AMBIGUOUS).
+ */
+function mockOutcome(actionId: string, failureClass: string): ExecutionOutcome {
   if (actionId === "HUMAN_REVIEW") return "AMBIGUOUS";
-  // In dry-run, viable actions succeed
-  return actionId === "HUMAN_REVIEW" ? "AMBIGUOUS" : "SUCCEEDED";
+  const mult = multiplierFor(failureClass as FailureClassId, actionId as ActionId);
+  return mult === 0 ? "FAILED" : "SUCCEEDED";
 }
 
 export const razorpayProvider: ActionProvider = {
@@ -132,7 +253,7 @@ export const razorpayProvider: ActionProvider = {
     console.log(JSON.stringify(payload, null, 2));
 
     return {
-      outcome: mockOutcome(ctx.actionId),
+      outcome: mockOutcome(ctx.actionId, ctx.failureClass),
       dryRunPayload: payload,
     };
   },
