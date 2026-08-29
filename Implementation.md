@@ -19,10 +19,8 @@
 1. **Execution is simulated.** `deterministicOutcome()` in `executor/index.ts` decides SUCCEEDED/FAILED by looking up a hand-authored multiplier table (`catalog.ts:67`). We never call a real Razorpay API. A judge who asks "show me a real recovered payment" gets a stub. This is the #1 gap.
 2. **Data is synthetic.** `packages/seed` generates the corpus; the "measured recovery" is self-fulfilling — it is a function of our own assumed multipliers, not observed outcomes. The control-vs-pipeline lift in `metrics_runs` is produced by our own generator. Honest framing: it is a *simulation*, not a *measurement*.
 3. **The "agent" is non-authoritative by design.** Decisioning is an EV model + rules, not an LLM agent. That is actually a *correct* engineering choice (determinism, auditability, no hallucination on the money path) — but it conflicts with the hackathon's "agent" narrative and with Razorpay's own Agent Studio story (see §2). Our `narrative.ts` "Claude case brief" is decorative and explicitly off the money path.
-4. **We overlap incumbents squarely.** Razorpay *already ships* Failed Payment Recovery (multichannel WhatsApp/Email/SMS payment links, "recover up to 20%") and Intelligent Payment Retry. Stripe/Adyen/GoCardless/Chargebee/Recurly all ship retry/dunning. Our core loop is a competent re-implementation of what they already do, minus the real integration.
+4. **We overlap incumbents squarely.** Razorpay *already ships* Failed Payment Recovery (multichannel WhatsApp/Email/SMS payment links, "recover up to 20%") and Intelligent Payment Retry. Stripe/Adyen/GoCardless/Chargebee/Recurly all ship retry/dunning. Our core loop is a competent re-implementation of what they already do, plus the real integration.
 
-### Verdict
-We will score well on **engineering quality, completeness, and the audit/guardrail story** — exactly what the Razorpay *hiring* eval rewards (the Buildathon is a ₹75k/month internship funnel; judges are Razorpay engineers/PMs, not VCs). But to *win* we must add one or two things incumbents demonstrably do **not** do, and we must close the "simulated execution" gap enough to demonstrate a real Razorpay touch.
 
 ---
 

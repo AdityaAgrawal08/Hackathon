@@ -9,7 +9,7 @@ import {
 } from "./catalog.js";
 import { evaluateConstraints, type PolicyPack, type RuleId } from "./policy.js";
 import { nextPaydayWindowMs } from "./window.js";
-import { formatINR, paise, percentBp } from "@arbiter/shared";
+import { formatINR, paise, percentBp, LTV_NORM_PAISE } from "@arbiter/shared";
 
 export interface DecideInput {
   probability: number;
@@ -37,7 +37,7 @@ export interface DecideInput {
  */
 export function ltvWeight(ltvPaise?: number, churnRiskBp?: number): number {
   if (ltvPaise == null || churnRiskBp == null) return 1;
-  const ltvScore = clamp01(ltvPaise / 5_00_00_000);
+  const ltvScore = clamp01(ltvPaise / LTV_NORM_PAISE);
   const churn = clamp01(churnRiskBp / 10_000);
   return clamp(1.0 + 0.5 * ltvScore - 0.7 * churn, 0.2, 1.5);
 }
