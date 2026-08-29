@@ -562,9 +562,12 @@ export async function recordPromiseToPay(
   promisedDay: number = 28,
   dbClient?: Client,
 ): Promise<{ success: boolean; proposalId: string; promisedDay: number; scheduledReminderUtc: string }> {
+  // Strict day-of-month validation (1 to 31, default 28)
+  const validDay = Number.isInteger(promisedDay) && promisedDay >= 1 && promisedDay <= 31 ? promisedDay : 28;
   const session = recoverySessions.get(proposalId);
   const nowMs = Date.now();
   const scheduledReminderUtc = isoUtc(nowMs + 86400000 * 2); // Scheduled for upcoming payday morning
+
 
   if (dbClient) {
     try {
@@ -581,7 +584,7 @@ export async function recordPromiseToPay(
             modelVersion: "logreg@1.0.0",
             policyVersion: "policy-v1",
             action: "PROMISE_TO_PAY",
-            promisedDay,
+            promisedDay: validDay,
             customer: session?.customerName,
             scheduledReminderUtc,
           }),
@@ -593,8 +596,9 @@ export async function recordPromiseToPay(
   return {
     success: true,
     proposalId,
-    promisedDay,
+    promisedDay: validDay,
     scheduledReminderUtc,
   };
 }
+
 
