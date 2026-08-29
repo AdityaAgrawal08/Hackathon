@@ -52,33 +52,42 @@ export function userFacingMessage(input: UserMessageInput): string {
 }
 
 function failedMessage(input: UserMessageInput, amount: string, hi: boolean): string {
-  switch (input.errorCode) {
-    case "RZP_INSUFFICIENT_FUNDS":
-      return hi
-        ? `आपके खाते में पर्याप्त बैलेंस नहीं था। हम वेतन तारीख पर अपने-आप रिट्राई करेंगे — कोई कार्रवाई आवश्यक नहीं।`
-        : `Your account had insufficient balance. We'll retry automatically on your salary date — no action needed.`;
-    case "RZP_EXPIRED_METHOD":
-      return hi
-        ? `आपका सेव्ह कार्ड एक्सपायर हो गया है। कृपया नई भुगतान विधि जोड़ें।`
-        : `Your saved card has expired. Please add a new payment method to continue.`;
-    case "RZP_INVALID_DETAILS":
-      return hi
-        ? `कुछ भुगतान विवरण गलत थे। कृपया ऐप में अपडेट करें।`
-        : `Some payment details were invalid. Please update them in the app.`;
-    case "RZP_REJECTED":
-      return hi
-        ? `आपके बैंक ने चार्ज अस्वीकार कर दिया। कोई दूसरी विधि आज़माएँ।`
-        : `Your bank declined this charge. You can try a different method.`;
-    case "RZP_RATE_LIMITED":
-      return hi
-        ? `अभी बहुत अनुरोध हैं; हम जल्द ही रिट्राई करेंगे।`
-        : `Too many requests right now — we'll retry shortly.`;
-    default:
-      return hi
-        ? `भुगतान पूरा नहीं हो सका (${amount})। कृपया बाद में पुनः प्रयास करें।`
-        : `We couldn't complete your payment of ${amount}. Please try again later.`;
+  const code = input.errorCode ?? "";
+  if (code === "RZP_INSUFFICIENT_FUNDS" || code === "LOCAL_INSUFFICIENT_FUNDS") {
+    return hi
+      ? `आपके खाते में पर्याप्त बैलेंस नहीं था। कृपया बैलेंस चेक करें या दूसरी भुगतान विधि चुनें।`
+      : `Your account had insufficient balance. Please check your balance or try a different payment method.`;
   }
+  if (code === "RZP_EXPIRED_METHOD" || code === "LOCAL_EXPIRED_METHOD") {
+    return hi
+      ? `आपका कार्ड या भुगतान विधि एक्सपायर हो गई है। कृपया नई विधि जोड़ें।`
+      : `Your payment method has expired. Please add a valid payment method to continue.`;
+  }
+  if (code === "RZP_INVALID_DETAILS" || code === "LOCAL_INVALID_DETAILS") {
+    return hi
+      ? `कुछ भुगतान विवरण अमान्य थे। कृपया विवरण जांचें और पुनः प्रयास करें।`
+      : `Some payment details were invalid. Please review your details and try again.`;
+  }
+  if (code === "RZP_REJECTED" || code === "LOCAL_RISK_REJECTED") {
+    return hi
+      ? `आपके बैंक ने इस लेनदेन को अस्वीकार कर दिया। कृपया दूसरी विधि आज़माएँ।`
+      : `Your bank declined this transaction. You can try a different payment method.`;
+  }
+  if (code === "RZP_RATE_LIMITED" || code === "LOCAL_GATEWAY_503") {
+    return hi
+      ? `गेटवे पर अभी अधिक लोड है। कृपया कुछ पलों बाद पुनः प्रयास करें।`
+      : `Payment services are experiencing temporary load. Please try again in a few moments.`;
+  }
+  if (code === "LOCAL_GATEWAY_TIMEOUT") {
+    return hi
+      ? `गेटवे से समय पर जवाब नहीं मिला। हम बैंक से पुष्टि कर रहे हैं।`
+      : `The gateway did not respond in time. We are confirming the status with your bank.`;
+  }
+  return hi
+    ? `भुगतान पूरा नहीं हो सका (${amount})। कृपया बाद में पुनः प्रयास करें।`
+    : `We couldn't complete your payment of ${amount}. Please try again later.`;
 }
+
 
 /** Which channel the recovery action would use (for the notification record). */
 export function channelForAction(actionId: string): "SMS" | "WHATSAPP" | "VOICE" | "EMAIL" | "IN_APP" {

@@ -193,3 +193,159 @@ function normalizeCode(s: string): string {
   const head = s.trim().toUpperCase().replace(/[^A-Z0-9_ ]/g, "").split(/\s+/)[0] ?? "";
   return head.length > 0 && head.length <= 32 ? head : "UNKNOWN_CODE";
 }
+
+/* ── async domain webhook ingestion (inbox_events) ─────────────── */
+
+export interface IngestDomainWebhookInput {
+  client: Client;
+  rawBody: Buffer | string;
+  signature: string | null;
+  webhookSecret: string;
+  provider?: "razorpay" | "local";
+  nowMs?: number;
+}
+
+export interface IngestDomainWebhookResult {
+  statusCode: number;
+  status: "ACCEPTED" | "DUPLICATE" | "REJECTED" | "SECURITY_ANOMALY";
+  eventId?: string;
+  message?: string;
+}
+
+export async function ingestDomainWebhook(
+  input: IngestDomainWebhookInput,
+): Promise<IngestDomainWebhookResult> {
+  const nowMs = input.nowMs ?? Date.now();
+  const nowIso = isoUtc(nowMs);
+  const provider = input.provider ?? "razorpay";
+  const rawBuf = Buffer.isBuffer(input.rawBody) ? input.rawBody : Buffer.from(input.rawBody, "utf8");
+  const rawStr = rawBuf.toString("utf8");
+
+  // 1. Verify HMAC Signature
+  if (!input.signature || !verifySignature(rawStr, input.signature, input.webhookSecret)) {
+    return {
+      statusCode: 400,
+      status: "REJECTED",
+      message: "Invalid webhook signature.",
+    };
+  }
+
+  // 2. Parse & validate envelope
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(rawStr);
+  } catch {
+    return {
+      statusCode: 400,
+      status: "REJECTED",
+      message: "Malformed JSON payload.",
+    };
+  }
+
+  const eventType = String(parsed.event || "unknown");
+  const payloadObj = (parsed.payload as Record<string, unknown>) || {};
+  const paymentObj = (payloadObj.payment as { entity?: { id?: string; order_id?: string; amount?: number; status?: string } })?.entity;
+  const eventId = String(parsed.id || (paymentObj?.id ? `evt_${paymentObj.id}` : `evt_wh_${Date.now()}`));
+  const payloadHash = createHmac("sha256", "payload_hash_key").update(rawBuf).digest("hex");
+
+  // 3. Check inbox_events for duplicate or anomaly
+  const existing = await input.client.execute({
+    sql: `SELECT id, payload_hash, status FROM inbox_events WHERE id = ?`,
+    args: [eventId],
+  });
+
+  if (existing.rows.length > 0) {
+    const row = existing.rows[0] as unknown as { payload_hash: string; status: string };
+    if (row.payload_hash === payloadHash) {
+      // Idempotent duplicate delivery
+      return {
+        statusCode: 200,
+        status: "DUPLICATE",
+        eventId,
+        message: "Duplicate event acknowledged.",
+      };
+    } else {
+      // Same event ID with different payload -> Security anomaly
+      return {
+        statusCode: 400,
+        status: "SECURITY_ANOMALY",
+        eventId,
+        message: "Duplicate event ID with conflicting payload detected.",
+      };
+    }
+  }
+
+  // 4. Durably persist to inbox_events with PENDING status
+  await input.client.execute({
+    sql: `INSERT INTO inbox_events
+            (id, provider, event_type, payload_json, payload_hash, status, received_at_utc)
+          VALUES (?, ?, ?, ?, ?, 'PENDING', ?)`,
+    args: [eventId, provider, eventType, rawStr, payloadHash, nowIso],
+  });
+
+  // 5. Asynchronously project payment state in background (non-blocking for HTTP response)
+  projectInboxEvent(input.client, eventId, eventType, parsed, nowIso).catch((err) => {
+    console.error(`projectInboxEvent failed for ${eventId}:`, err);
+  });
+
+  return {
+    statusCode: 200,
+    status: "ACCEPTED",
+    eventId,
+    message: "Event ingested successfully.",
+  };
+}
+
+async function projectInboxEvent(
+  client: Client,
+  eventId: string,
+  eventType: string,
+  parsed: Record<string, unknown>,
+  nowIso: string,
+): Promise<void> {
+  const payloadObj = (parsed.payload as Record<string, unknown>) || {};
+  const pay = (payloadObj.payment as { entity?: { id?: string; order_id?: string; amount?: number; status?: string } })?.entity;
+
+  if (pay && pay.order_id && pay.id) {
+    if (eventType === "payment.captured" || pay.status === "captured") {
+      // 1. Find payment intent by order_id or provider lookup
+      const piRes = await client.execute({
+        sql: `SELECT pi.id, pi.tenant_id, pi.amount_paise, cs.order_id
+              FROM payment_intents pi
+              JOIN checkout_sessions cs ON cs.token = pi.checkout_token
+              WHERE cs.order_id = ? OR pi.order_id = ?
+              LIMIT 1`,
+        args: [pay.order_id, pay.order_id],
+      });
+
+      if (piRes.rows.length > 0) {
+        const intent = piRes.rows[0] as unknown as { id: string; tenant_id: string; amount_paise: number };
+        await client.batch(
+          [
+            {
+              sql: `INSERT INTO local_settlements
+                      (id, payment_intent_id, idem_key, provider_payment_id, amount_paise, currency, settled_at_utc)
+                    VALUES (?, ?, ?, ?, ?, 'INR', ?)
+                    ON CONFLICT(payment_intent_id) DO NOTHING`,
+              args: [`set_${intent.id}`, intent.id, `idem_${intent.id}`, pay.id, pay.amount ?? intent.amount_paise, nowIso],
+            },
+            {
+              sql: `UPDATE payment_intents
+                    SET status = 'SUCCEEDED', client_visible = 'SUCCEEDED', resolved_at_utc = ?
+                    WHERE id = ?`,
+              args: [nowIso, intent.id],
+            },
+          ],
+          "write",
+        );
+      }
+    }
+  }
+
+  // Mark inbox event PROCESSED
+  await client.execute({
+    sql: `UPDATE inbox_events SET status = 'PROCESSED', processed_at_utc = ? WHERE id = ?`,
+    args: [nowIso, eventId],
+  });
+}
+

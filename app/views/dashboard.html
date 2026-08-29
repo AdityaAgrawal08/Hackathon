@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ARBITER Merchant Console — Reconciliation & Recovery</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+  <style>
+    :root { --pico-font-size: 90%; }
+    .badge {
+      display: inline-block;
+      padding: 0.2rem 0.5rem;
+      border-radius: 9999px;
+      font-size: 0.7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+    .badge-success { background-color: #16a34a; color: white; }
+    .badge-failed { background-color: #dc2626; color: white; }
+    .badge-pending { background-color: #d97706; color: white; }
+    .badge-info { background-color: #0284c7; color: white; }
+    table th, table td { padding: 0.5rem 0.75rem; }
+  </style>
+</head>
+<body style="padding: 1.5rem 2rem;">
+  <header style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem;">
+    <div>
+      <h2 style="margin: 0;">ARBITER Merchant Console</h2>
+      <p style="margin: 0; color: #64748b;">Autonomous Reconciliation & Revenue Recovery Decision Engine</p>
+    </div>
+    <div style="display: flex; gap: 1rem; align-items: center;">
+      <button id="btn-sweep-reconcile" class="outline" style="margin: 0; padding: 0.4rem 0.8rem;">Run Sweeper Now</button>
+      <a href="/checkout" role="button" class="secondary" style="margin: 0; padding: 0.4rem 0.8rem;">Open Checkout &rarr;</a>
+    </div>
+  </header>
+
+  <!-- Metrics Grid -->
+  <div class="grid" style="margin-bottom: 2rem;">
+    <article style="padding: 1rem; text-align: center;">
+      <small style="color: #64748b;">Total Payment Intents</small>
+      <h3 id="stat-intents" style="margin: 0.25rem 0 0 0;">0</h3>
+    </article>
+    <article style="padding: 1rem; text-align: center;">
+      <small style="color: #64748b;">Durable Local Settlements</small>
+      <h3 id="stat-settlements" style="margin: 0.25rem 0 0 0; color: #16a34a;">₹0.00</h3>
+    </article>
+    <article style="padding: 1rem; text-align: center;">
+      <small style="color: #64748b;">Active Reconciliations</small>
+      <h3 id="stat-reconciling" style="margin: 0.25rem 0 0 0; color: #d97706;">0</h3>
+    </article>
+    <article style="padding: 1rem; text-align: center;">
+      <small style="color: #64748b;">Advisory Recovery Actions</small>
+      <h3 id="stat-advisory" style="margin: 0.25rem 0 0 0; color: #0284c7;">0</h3>
+    </article>
+  </div>
+
+  <!-- Main Tables -->
+  <section style="margin-bottom: 2.5rem;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+      <h4 style="margin: 0;">Recent Payment Intents & Settlements</h4>
+      <small style="color: #64748b;">Auto-refreshes every 5s</small>
+    </div>
+    <div style="overflow-x: auto; background: #ffffff; border-radius: 8px; border: 1px solid #e2e8f0;">
+      <table style="margin: 0;">
+        <thead>
+          <tr style="background: #f8fafc;">
+            <th>Intent ID</th>
+            <th>Order Ref</th>
+            <th>Amount</th>
+            <th>Knowledge State</th>
+            <th>Reconciliation</th>
+            <th>Settlement Record</th>
+            <th>Time (UTC)</th>
+          </tr>
+        </thead>
+        <tbody id="tbl-intents-body">
+          <tr><td colspan="7" style="text-align: center; color: #94a3b8;">Loading payment records...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h4 style="margin-bottom: 0.75rem;">Immutable Audit Timeline</h4>
+    <div style="overflow-x: auto; background: #ffffff; border-radius: 8px; border: 1px solid #e2e8f0; max-height: 350px;">
+      <table style="margin: 0;">
+        <thead>
+          <tr style="background: #f8fafc;">
+            <th>Timestamp (UTC)</th>
+            <th>Actor</th>
+            <th>Type</th>
+            <th>Event Details</th>
+          </tr>
+        </thead>
+        <tbody id="tbl-audit-body">
+          <tr><td colspan="4" style="text-align: center; color: #94a3b8;">Loading audit trail...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <script>
+    async function loadData() {
+      try {
+        const res = await fetch('/api/admin/intents');
+        if (!res.ok) return;
+        const data = await res.json();
+
+        // Update stats
+        document.getElementById('stat-intents').textContent = data.intents.length;
+        const totalPaise = data.settlements.reduce((acc, s) => acc + (s.amount_paise || 0), 0);
+        document.getElementById('stat-settlements').textContent = '₹' + (totalPaise / 100).toFixed(2);
+        document.getElementById('stat-reconciling').textContent = data.intents.filter(i => i.status === 'UNKNOWN').length;
+        document.getElementById('stat-advisory').textContent = data.proposals.length;
+
+        // Render intents
+        const tbody = document.getElementById('tbl-intents-body');
+        if (data.intents.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #94a3b8;">No payment intents yet. Open checkout to test.</td></tr>';
+        } else {
+          tbody.innerHTML = data.intents.map(i => {
+            const isSettled = i.status === 'SUCCEEDED';
+            const isFailed = i.status === 'FAILED';
+            const badgeClass = isSettled ? 'badge-success' : isFailed ? 'badge-failed' : 'badge-pending';
+            const settlement = data.settlements.find(s => s.payment_intent_id === i.id);
+
+            return `
+              <tr>
+                <td><code>${i.id}</code></td>
+                <td>${i.order_id || i.proposal_id || '-'}</td>
+                <td><strong>₹${(i.amount_paise / 100).toFixed(2)}</strong></td>
+                <td><span class="badge ${badgeClass}">${i.status}</span></td>
+                <td><span class="badge badge-info">${i.status === 'UNKNOWN' ? 'RECONCILING' : 'NONE'}</span></td>
+                <td>${settlement ? `<code>${settlement.id}</code>` : '<span style="color:#94a3b8;">Unsettled</span>'}</td>
+                <td><small>${i.created_at_utc.replace('T', ' ').slice(0, 19)}</small></td>
+              </tr>
+            `;
+          }).join('');
+        }
+
+        // Render audit trail
+        const auditBody = document.getElementById('tbl-audit-body');
+        if (data.auditLog.length === 0) {
+          auditBody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: #94a3b8;">No audit entries.</td></tr>';
+        } else {
+          auditBody.innerHTML = data.auditLog.map(a => `
+            <tr>
+              <td><small>${a.ts_utc.replace('T', ' ').slice(0, 19)}</small></td>
+              <td><code>${a.actor}</code></td>
+              <td><span class="badge badge-info">${a.entry_type}</span></td>
+              <td><code>${a.payload_json}</code></td>
+            </tr>
+          `).join('');
+        }
+      } catch (err) {
+        console.error('Error fetching admin data:', err);
+      }
+    }
+
+    document.getElementById('btn-sweep-reconcile').addEventListener('click', async () => {
+      const btn = document.getElementById('btn-sweep-reconcile');
+      btn.disabled = true;
+      btn.textContent = 'Sweeping...';
+      try {
+        const res = await fetch('/api/admin/reconcile', { method: 'POST' });
+        const data = await res.json();
+        alert(`Sweeper finished: ${data.resolvedCount} unresolved payment(s) reconciled.`);
+        await loadData();
+      } catch (err) {
+        alert('Error: ' + err.message);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Run Sweeper Now';
+      }
+    });
+
+    loadData();
+    setInterval(loadData, 5000);
+  </script>
+</body>
+</html>
