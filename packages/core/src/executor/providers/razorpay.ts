@@ -13,6 +13,12 @@
  *   HUMAN_REVIEW    → No API call; returns AMBIGUOUS
  */
 import { ActionProvider, ProviderContext, ProviderResult, ExecutionOutcome } from "./types.js";
+import {
+  multiplierFor,
+  railForFailureClass,
+  type ActionId,
+  type FailureClassId,
+} from "../../decide/catalog.js";
 
 const MODE = process.env.REAL_EXECUTION_MODE ?? "dry-run";
 const IS_LIVE = MODE === "live";
@@ -92,6 +98,26 @@ function buildReminderLinkPayload(ctx: ProviderContext) {
   };
 }
 
+function buildCrossPspPayload(ctx: ProviderContext) {
+  const rail = railForFailureClass(ctx.failureClass as FailureClassId);
+  return {
+    recovery_rail: rail,
+    source_psp: "razorpay",
+    amount: ctx.amountPaise,
+    currency: "INR",
+    idempotency_key: ctx.idempotencyKey,
+    rzp_request_ref: ctx.rzpRequestRef,
+    failure_class: ctx.failureClass,
+    optimizer_route: rail === "optimizer_secondary_psp",
+    notes: {
+      proposal_id: ctx.proposalId,
+      action: ctx.actionId,
+      switched_from: "primary_rail",
+      idempotency_key: ctx.idempotencyKey,
+    },
+  };
+}
+
 function buildPayload(ctx: ProviderContext) {
   switch (ctx.actionId) {
     case "RETRY_NOW":
@@ -100,6 +126,8 @@ function buildPayload(ctx: ProviderContext) {
       return buildUpiAutopayRetryPayload(ctx);
     case "ALTERNATE_UPI_LINK":
       return buildAlternateUpiLinkPayload(ctx);
+    case "RECOVER_VIA_RAIL":
+      return buildCrossPspPayload(ctx);
     case "REMINDER_LINK":
       return buildReminderLinkPayload(ctx);
     default:
@@ -107,10 +135,15 @@ function buildPayload(ctx: ProviderContext) {
   }
 }
 
-function mockOutcome(actionId: string): ExecutionOutcome {
+/**
+ * Honest dry-run outcome (bug #13): mirror the catalog multiplier so a DEAD
+ * action for this class fails even in dry-run, instead of blindly succeeding.
+ * HUMAN_REVIEW always needs a human (AMBIGUOUS).
+ */
+function mockOutcome(actionId: string, failureClass: string): ExecutionOutcome {
   if (actionId === "HUMAN_REVIEW") return "AMBIGUOUS";
-  // In dry-run, viable actions succeed
-  return actionId === "HUMAN_REVIEW" ? "AMBIGUOUS" : "SUCCEEDED";
+  const mult = multiplierFor(failureClass as FailureClassId, actionId as ActionId);
+  return mult === 0 ? "FAILED" : "SUCCEEDED";
 }
 
 export const razorpayProvider: ActionProvider = {
@@ -132,7 +165,7 @@ export const razorpayProvider: ActionProvider = {
     console.log(JSON.stringify(payload, null, 2));
 
     return {
-      outcome: mockOutcome(ctx.actionId),
+      outcome: mockOutcome(ctx.actionId, ctx.failureClass),
       dryRunPayload: payload,
     };
   },
