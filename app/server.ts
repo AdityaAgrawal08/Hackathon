@@ -60,11 +60,14 @@ import {
   simulateFailureTriage,
   approveProposal,
   completeRecovery,
+  initiateRecoveryOrder,
+  recordPromiseToPay,
   runBatchBenchmark,
   recoverySessions,
   liveMetrics,
   PRESETS,
 } from "./recovery.js";
+
 
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -169,6 +172,7 @@ function broadcastStatus(token: string, state: Record<string, unknown>) {
 const checkoutHtml = readFileSync(resolve(__dirname, "views/checkout.html"), "utf8");
 const mobilePayHtml = readFileSync(resolve(__dirname, "views/mobile_pay.html"), "utf8");
 const dashboardHtml = readFileSync(resolve(__dirname, "views/dashboard.html"), "utf8");
+const recoverHtml = readFileSync(resolve(__dirname, "views/recover.html"), "utf8");
 
 // ── Routes ──────────────────────────────────────────────────────────
 
@@ -176,6 +180,12 @@ const dashboardHtml = readFileSync(resolve(__dirname, "views/dashboard.html"), "
 app.get(["/", "/dashboard"], (_req, res) => {
   res.setHeader("Content-Type", "text/html");
   res.send(dashboardHtml);
+});
+
+// 2. Customer 1-Click Recovery Portal (Task 3.1 & 3.3)
+app.get(["/recover", "/pay/:token"], (_req, res) => {
+  res.setHeader("Content-Type", "text/html");
+  res.send(recoverHtml);
 });
 
 // Standalone Checkout UI (for test/manual checkout)
@@ -200,7 +210,32 @@ app.post("/api/recovery/triage", async (req, res) => {
   }
 });
 
-// B. Approve proposal in merchant queue
+// B. Initiate dedicated recovery order & dynamic QR (Task 3.2)
+app.post("/api/recovery/initiate", async (req, res) => {
+  try {
+    const { proposalId, token, preferredMethod = "upi" } = req.body || {};
+    const order = await initiateRecoveryOrder(proposalId || token, preferredMethod, dbClient);
+    if (!order) {
+      return res.status(404).json({ error: "NO_ACTIVE_RECOVERY_SESSION" });
+    }
+    res.json(order);
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// C. Promise-to-Pay Salary Day Commitment (Task 3.5)
+app.post("/api/recovery/promise-to-pay", async (req, res) => {
+  try {
+    const { proposalId, promisedDay = 28 } = req.body || {};
+    const result = await recordPromiseToPay(proposalId, promisedDay, dbClient);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// D. Approve proposal in merchant queue
 app.post("/api/recovery/approve", async (req, res) => {
   try {
     const { proposalId } = req.body;
@@ -211,7 +246,7 @@ app.post("/api/recovery/approve", async (req, res) => {
   }
 });
 
-// C. Complete customer recovery payment
+// E. Complete customer recovery payment
 app.post("/api/recovery/complete", async (req, res) => {
   try {
     const { proposalId } = req.body;
@@ -223,8 +258,9 @@ app.post("/api/recovery/complete", async (req, res) => {
 });
 
 
-// D. Run 100-event Monte Carlo Batch Benchmark (The Bar)
+// F. Run 100-event Monte Carlo Batch Benchmark (The Bar)
 app.get("/api/recovery/batch-proof", (_req, res) => {
+
   try {
     const result = runBatchBenchmark();
     res.json(result);
