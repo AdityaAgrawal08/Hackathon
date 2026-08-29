@@ -28,25 +28,30 @@ export function generateTwilioIVRTwiML(
   payload: OutreachPayload,
   gatherActionUrl: string,
 ): string {
-  const isHindi = payload.recipient.language === "HI";
+  const isHindi = (payload.language || payload.recipient.language) === "HI";
   const voice = isHindi ? "Polly.Aditi" : "Polly.Raveena";
   const languageCode = isHindi ? "hi-IN" : "en-IN";
+  const customerName = payload.recipient.name || payload.recipient.customerName || "Customer";
+  const recoveryUrl = payload.recoveryUrl || payload.paymentLinkUrl || "";
 
   const rendered = renderComplianceMessage(
     payload.failureClass,
     "VOICE_IVR",
-    payload.recipient.language,
+    isHindi ? "HI" : "EN",
     {
-      customerName: payload.recipient.name,
+      customerName,
       amountPaise: payload.amountPaise,
       merchantName: "ARBITER Store",
-      instrumentDescription: payload.instrumentDescription,
-      recoveryUrl: payload.recoveryUrl,
+      instrumentDescription: payload.instrumentDescription || "Card / UPI",
+      recoveryUrl,
     },
   );
 
   const scriptText = rendered?.content ||
-    `Namaste ${payload.recipient.name}! Aapka ${formatINR(paise(payload.amountPaise))} ka subscription payment complete nahi ho paya. WhatsApp par 1-click link paane ke liye 1 dabayein.`;
+    (isHindi
+      ? `Namaste ${customerName}! Aapka ${formatINR(paise(payload.amountPaise))} ka subscription payment complete nahi ho paya. WhatsApp par 1-click link paane ke liye 1 dabayein.`
+      : `Hello ${customerName}, this is a call from ARBITER Store. Your payment of ${formatINR(paise(payload.amountPaise))} could not be completed. Press 1 to receive a 1-click payment link on your phone.`);
+
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <Response>

@@ -190,21 +190,27 @@ export async function simulateFailureTriage(
   if (typeof presetKeyOrCustom === "string") {
     preset = PRESETS[presetKeyOrCustom] || PRESETS.SALARY_DELAY!;
   } else {
+    const safeAmount = Math.max(100, Math.min(10000000000, Math.round(Math.abs(Number(presetKeyOrCustom.amountPaise) || 199900))));
+    const safeFailures = Math.max(0, Math.min(50, Math.round(Number(presetKeyOrCustom.pastFailures) || 0)));
+    const safeSuccesses = Math.max(0, Math.min(100, Math.round(Number(presetKeyOrCustom.pastSuccesses) || 5)));
+    const safeTenure = Math.max(0, Math.min(120, Math.round(Number(presetKeyOrCustom.tenureMonths) || 12)));
+
     preset = {
       id: presetKeyOrCustom.id || `CUSTOM_${Date.now()}`,
       name: presetKeyOrCustom.name || "Custom Injected Failure",
-      customerName: presetKeyOrCustom.customerName || "Customer",
-      customerPhone: presetKeyOrCustom.customerPhone || "+91 98765 43210",
-      amountPaise: Math.max(100, Math.round(Math.abs(presetKeyOrCustom.amountPaise || 199900))),
-      failureCode: presetKeyOrCustom.failureCode || "BAD_REQUEST_PAYMENT_ACCOUNT_INSUFFICIENT_BALANCE",
+      customerName: String(presetKeyOrCustom.customerName || "Customer"),
+      customerPhone: String(presetKeyOrCustom.customerPhone || "+91 98765 43210"),
+      amountPaise: safeAmount,
+      failureCode: String(presetKeyOrCustom.failureCode || "BAD_REQUEST_PAYMENT_ACCOUNT_INSUFFICIENT_BALANCE"),
 
-      instrumentDesc: presetKeyOrCustom.instrumentDesc || "UPI / Card",
+      instrumentDesc: String(presetKeyOrCustom.instrumentDesc || "UPI / Card"),
       paydayDay: presetKeyOrCustom.paydayDay ?? 28,
-      tenureMonths: presetKeyOrCustom.tenureMonths ?? 12,
-      pastSuccesses: presetKeyOrCustom.pastSuccesses ?? 5,
-      pastFailures: presetKeyOrCustom.pastFailures ?? 0,
+      tenureMonths: safeTenure,
+      pastSuccesses: safeSuccesses,
+      pastFailures: safeFailures,
     };
   }
+
 
   const nowMs = simulatedTimeMs ?? Date.now();
   const nowUtc = isoUtc(nowMs);
@@ -218,7 +224,7 @@ export async function simulateFailureTriage(
   const diagClass: FailureClassId =
     preset.failureCode.includes("INSUFFICIENT") || preset.failureCode.includes("BALANCE")
       ? "SOFT_RETRYABLE"
-      : preset.failureCode.includes("EXPIRED") || preset.failureCode.includes("REVOKED") || preset.failureCode.includes("INVALID")
+      : preset.failureCode.includes("EXPIRED") || preset.failureCode.includes("REVOKED") || preset.failureCode.includes("INVALID") || preset.failureCode.includes("OTP") || preset.failureCode.includes("INCORRECT") || preset.failureCode.includes("DECLINED")
         ? "HARD_METHOD_DEAD"
         : preset.failureCode.includes("BANK") || preset.failureCode.includes("TIMEOUT") || preset.failureCode.includes("NETWORK") || preset.failureCode.includes("GATEWAY")
           ? "NETWORK_TIMEOUT"
@@ -238,6 +244,7 @@ export async function simulateFailureTriage(
     priorFailureAmountsPaise: Array(preset.pastFailures).fill(preset.amountPaise),
     priorFailureCount: preset.pastFailures,
     customer: {
+
       paydayPattern: preset.paydayDay ? { [String(preset.paydayDay)]: 4 } : null,
       priorSuccessCount: preset.pastSuccesses,
       joinedAtUtc: isoUtc(nowMs - preset.tenureMonths * 30 * 86400000),

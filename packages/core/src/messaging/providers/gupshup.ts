@@ -38,18 +38,20 @@ export class GupshupWhatsAppProvider implements OutreachProvider {
       payload.recoveryUrl,
     ];
 
+    const lang = (payload.language || payload.recipient.language) === "HI" ? "HI" : "EN";
     const rendered = renderComplianceMessage(
       payload.failureClass,
       "WHATSAPP",
-      payload.recipient.language,
+      lang,
       {
-        customerName: payload.recipient.name,
+        customerName: payload.recipient.name || payload.recipient.customerName || "Customer",
         amountPaise: payload.amountPaise,
         merchantName: "ARBITER Store",
-        instrumentDescription: payload.instrumentDescription,
-        recoveryUrl: payload.recoveryUrl,
+        instrumentDescription: payload.instrumentDescription || "Card / UPI",
+        recoveryUrl: payload.recoveryUrl || payload.paymentLinkUrl || "",
       },
     );
+
 
     // If API credentials are not provided, return simulated success
     if (!this.config.apiKey) {

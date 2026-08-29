@@ -592,10 +592,12 @@ app.get("/pay/:token", async (req, res) => {
 // 4. Payment Execution & Charge Endpoint
 app.post("/api/payments/charge", chargeLimiter, async (req, res) => {
   try {
-    const { token, clientIdemKey, scenario, instrument } = req.body;
+    const { token, scenario, instrument } = req.body || {};
+    const clientIdemKey = req.body?.clientIdemKey || req.body?.idempotency_key;
     if (!token || !clientIdemKey) {
       return res.status(400).json({ error: "Missing token or clientIdemKey" });
     }
+
 
     // 1. Verify Checkout Session
     const sessRes = await dbClient.execute({
@@ -648,10 +650,13 @@ app.post("/api/payments/charge", chargeLimiter, async (req, res) => {
       const pi = piRes.rows[0] as unknown as { status: string; client_visible: string };
       return res.status(200).json({
         idempotent: true,
+        intentId: prior.payment_intent_id,
+        intent_id: prior.payment_intent_id,
         knowledgeStatus: pi.status === "SUCCEEDED" ? "RESOLVED_SUCCESS" : pi.status === "FAILED" ? "RESOLVED_FAILED" : "UNRESOLVED_UNKNOWN",
         userMessage: userFacingMessage({ visible: pi.client_visible as any, amountPaise: session.amount_paise }),
       });
     }
+
 
     // 3. Create Intent & Attempt Record
     const intentId = `pi_${clientIdemKey.slice(0, 16)}`;
@@ -726,11 +731,14 @@ app.post("/api/payments/charge", chargeLimiter, async (req, res) => {
       });
 
       return res.status(200).json({
+        intentId,
+        intent_id: intentId,
         knowledgeStatus: "RESOLVED_SUCCESS",
         providerPaymentId: chargeResult.providerPaymentId,
         userMessage: msgEn,
         userMessageHi: msgHi,
       });
+
     }
 
     if (chargeResult.status === "failed") {
@@ -765,11 +773,14 @@ app.post("/api/payments/charge", chargeLimiter, async (req, res) => {
       });
 
       return res.status(400).json({
+        intentId,
+        intent_id: intentId,
         knowledgeStatus: "RESOLVED_FAILED",
         errorCode: chargeResult.errorCode,
         userMessage: msgEn,
         userMessageHi: msgHi,
       });
+
     }
 
     // Transport Dropped / Lost Response / Timeout -> Hold in UNRESOLVED_UNKNOWN
@@ -819,9 +830,39 @@ app.post("/api/payments/charge", chargeLimiter, async (req, res) => {
       userMessageHi: msgHi,
     });
   } catch (err) {
+    const errorMsg = (err as Error).message || "";
+    if (errorMsg.includes("UNIQUE") || errorMsg.includes("constraint") || errorMsg.includes("conflict")) {
+      try {
+        const clientIdemKey = req.body?.clientIdemKey || req.body?.idempotency_key;
+        if (clientIdemKey) {
+          const attemptRes = await dbClient.execute({
+            sql: `SELECT * FROM payment_attempts WHERE client_idem_key = ?`,
+            args: [clientIdemKey],
+          });
+          if (attemptRes.rows.length > 0) {
+            const prior = attemptRes.rows[0] as unknown as { payment_intent_id: string };
+            const piRes = await dbClient.execute({
+              sql: `SELECT * FROM payment_intents WHERE id = ?`,
+              args: [prior.payment_intent_id],
+            });
+            if (piRes.rows.length > 0) {
+              const pi = piRes.rows[0] as unknown as { status: string; client_visible: string; amount_paise: number };
+              return res.status(200).json({
+                idempotent: true,
+                intentId: prior.payment_intent_id,
+                intent_id: prior.payment_intent_id,
+                knowledgeStatus: pi.status === "SUCCEEDED" ? "RESOLVED_SUCCESS" : pi.status === "FAILED" ? "RESOLVED_FAILED" : "UNRESOLVED_UNKNOWN",
+                userMessage: userFacingMessage({ visible: (pi.client_visible || "SUCCEEDED") as any, amountPaise: pi.amount_paise || 199900 }),
+              });
+            }
+          }
+        }
+      } catch {}
+    }
     res.status(500).json({ error: (err as Error).message });
   }
 });
+
 
 // 5. Fast-ACK Webhook Ingestion Endpoint
 app.post("/api/webhooks/razorpay", webhookLimiter, async (req, res) => {

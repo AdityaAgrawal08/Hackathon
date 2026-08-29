@@ -9,24 +9,30 @@ import type { FailureClassId } from "../decide/catalog.js";
 export type OutreachChannel = "EMAIL" | "SMS" | "VOICE" | "VOICE_IVR" | "WHATSAPP";
 
 export interface RecipientProfile {
-  customerId: string;
-  name: string;
+  customerId?: string;
+  name?: string;
+  customerName?: string;
   email?: string;
   phone?: string; // E.164 format (+91...)
-  language: "EN" | "HI";
+  language?: "EN" | "HI" | string;
 }
 
 export interface OutreachPayload {
-  tenantId: string;
+  tenantId?: string;
   proposalId: string;
-  idempotencyKey: string;
+  idempotencyKey?: string;
   recipient: RecipientProfile;
   amountPaise: number;
   failureClass: FailureClassId;
-  instrumentDescription: string;
-  recoveryUrl: string;
+  instrumentDescription?: string;
+  recoveryUrl?: string;
+  paymentLinkUrl?: string;
+  language?: "EN" | "HI" | string;
+  action?: string;
+  rawErrorReason?: string;
   scheduledForUtc?: string;
 }
+
 
 export type DispatchStatus =
   | "QUEUED"

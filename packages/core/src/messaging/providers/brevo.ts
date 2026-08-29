@@ -16,8 +16,8 @@ export interface BrevoConfig {
   webhookSecret?: string;
 }
 
-export function escapeHtml(str: string): string {
-  return str
+export function escapeHtml(str?: string): string {
+  return String(str || "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
@@ -37,24 +37,28 @@ export class BrevoEmailProvider implements OutreachProvider {
   async send(payload: OutreachPayload): Promise<ProviderDispatchResult> {
     const nowUtc = isoUtc(Date.now());
     const formattedAmount = formatINR(paise(payload.amountPaise));
+    const recoveryUrl = payload.recoveryUrl || payload.paymentLinkUrl || "";
+    const customerName = payload.recipient.name || payload.recipient.customerName || "Customer";
+    const language = (payload.language || payload.recipient.language || "EN") as any;
 
     const rendered = renderComplianceMessage(
       payload.failureClass,
       "EMAIL",
-      payload.recipient.language,
+      language,
       {
-        customerName: payload.recipient.name,
+        customerName,
         amountPaise: payload.amountPaise,
         merchantName: this.config.senderName || "ARBITER Store",
-        instrumentDescription: payload.instrumentDescription,
-        recoveryUrl: payload.recoveryUrl,
+        instrumentDescription: payload.instrumentDescription || "Card / UPI",
+        recoveryUrl,
       },
     );
 
     const subject =
-      payload.recipient.language === "HI"
+      language === "HI"
         ? `Payment Update: ${this.config.senderName} (${formattedAmount})`
         : `Action Required: Subscription Payment for ${this.config.senderName} (${formattedAmount})`;
+
 
     const messageText = escapeHtml(rendered?.content || `Your payment of ${formattedAmount} needs attention.`);
 
@@ -69,10 +73,11 @@ export class BrevoEmailProvider implements OutreachProvider {
     <h2 style="font-size: 18px; color: #0f172a; margin-top: 0;">Payment Recovery Notice</h2>
     <p style="font-size: 15px; color: #475569;">${messageText}</p>
     <div style="margin: 32px 0; text-align: center;">
-      <a href="${escapeHtml(payload.recoveryUrl)}" style="background: #2563eb; color: #ffffff; padding: 14px 28px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">
+      <a href="${escapeHtml(recoveryUrl)}" style="background: #2563eb; color: #ffffff; padding: 14px 28px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">
         Complete Payment via UPI / Card (${formattedAmount})
       </a>
     </div>
+
     <p style="font-size: 13px; color: #94a3b8; border-top: 1px solid #f1f5f9; padding-top: 16px;">
       Transaction ID: <code>${escapeHtml(payload.proposalId)}</code><br>
       This is a secure transactional message from ${escapeHtml(this.config.senderName || "ARBITER")}.

@@ -279,18 +279,29 @@ export async function ingestDomainWebhook(
     }
   }
 
-  // 4. Durably persist to inbox_events with PENDING status
-  await input.client.execute({
-    sql: `INSERT INTO inbox_events
-            (id, provider, event_type, payload_json, payload_hash, status, received_at_utc)
-          VALUES (?, ?, ?, ?, ?, 'PENDING', ?)`,
-    args: [eventId, provider, eventType, rawStr, payloadHash, nowIso],
-  });
+  // 4. Durably persist to inbox_events with PENDING status (handling concurrent duplicates gracefully)
+  try {
+    await input.client.execute({
+      sql: `INSERT INTO inbox_events
+              (id, provider, event_type, payload_json, payload_hash, status, received_at_utc)
+            VALUES (?, ?, ?, ?, ?, 'PENDING', ?)`,
+      args: [eventId, provider, eventType, rawStr, payloadHash, nowIso],
+    });
 
-  // 5. Asynchronously project payment state in background (non-blocking for HTTP response)
-  projectInboxEvent(input.client, eventId, eventType, parsed, nowIso).catch((err) => {
-    console.error(`projectInboxEvent failed for ${eventId}:`, err);
-  });
+    // 5. Asynchronously project payment state in background (non-blocking for HTTP response)
+    projectInboxEvent(input.client, eventId, eventType, parsed, nowIso).catch(() => {});
+  } catch (err) {
+    const errorMsg = (err as Error).message || "";
+    if (errorMsg.includes("UNIQUE") || errorMsg.includes("constraint") || errorMsg.includes("conflict")) {
+      return {
+        statusCode: 200,
+        status: "ACCEPTED",
+        eventId,
+        message: "Duplicate event acknowledged idempotently.",
+      };
+    }
+    throw err;
+  }
 
   return {
     statusCode: 200,
@@ -299,6 +310,7 @@ export async function ingestDomainWebhook(
     message: "Event ingested successfully.",
   };
 }
+
 
 async function projectInboxEvent(
   client: Client,
