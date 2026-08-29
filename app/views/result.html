@@ -38,7 +38,7 @@
     
     /* Receipt Table */
     .receipt-box { background: rgba(15, 23, 42, 0.4); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 20px; }
-    .receipt-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; font-size: 13px; }
+    .receipt-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-size: 13px; }
     .receipt-row:last-child { margin-bottom: 0; padding-top: 10px; border-top: 1px solid var(--border); }
     .receipt-label { color: var(--text-muted); }
     .receipt-val { font-weight: 600; color: #fff; }
@@ -50,6 +50,9 @@
     .msg-tabs { display: flex; gap: 6px; }
     .tab-btn { background: transparent; border: 1px solid var(--border); color: var(--text-muted); font-size: 11px; font-weight: 600; padding: 4px 8px; border-radius: 6px; cursor: pointer; }
     .tab-btn.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+    .lang-switcher { display: flex; gap: 4px; background: rgba(0,0,0,0.3); padding: 2px; border-radius: 6px; }
+    .lang-btn { background: transparent; border: none; color: var(--text-muted); font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px; cursor: pointer; }
+    .lang-btn.active { background: #334155; color: #fff; }
     .msg-content { font-size: 13px; line-height: 1.5; color: #e2e8f0; background: rgba(0,0,0,0.2); padding: 12px; border-radius: 8px; border-left: 3px solid var(--primary); font-family: monospace; }
     
     /* Action Buttons */
@@ -88,7 +91,7 @@
       <div class="outcome-subtitle" id="diagnosisExplanation">Your subscription payment couldn't be completed. Complete it via 1-click UPI to avoid interruption.</div>
     </div>
 
-    <!-- Receipt Details Table -->
+    <!-- Receipt Details Table (Task 4.1 & 4.6 GST Breakdown) -->
     <div class="receipt-box">
       <div class="receipt-row">
         <span class="receipt-label">Customer</span>
@@ -103,7 +106,15 @@
         <span class="receipt-val" id="lblInstrument">UPI / Card</span>
       </div>
       <div class="receipt-row">
-        <span class="receipt-label">Amount</span>
+        <span class="receipt-label">Base Subtotal</span>
+        <span class="receipt-val" id="lblBaseAmount">₹1,694.07</span>
+      </div>
+      <div class="receipt-row">
+        <span class="receipt-label">GST (18% Integrated)</span>
+        <span class="receipt-val" id="lblGstAmount">₹304.93</span>
+      </div>
+      <div class="receipt-row">
+        <span class="receipt-label">Total Amount Paid</span>
         <span class="amount-large" id="lblAmount">₹1,999.00</span>
       </div>
     </div>
@@ -111,15 +122,21 @@
     <!-- Personalized Dispatched Multi-Channel Message Preview (Task 4.2) -->
     <div class="msg-section">
       <div class="msg-header">
-        <small style="font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Dispatched Customer Nudge:</small>
         <div class="msg-tabs">
           <button class="tab-btn active" id="tabSms" onclick="switchChannel('SMS')">SMS (DLT)</button>
           <button class="tab-btn" id="tabEmail" onclick="switchChannel('EMAIL')">Email</button>
           <button class="tab-btn" id="tabVoice" onclick="switchChannel('VOICE')">Voice IVR</button>
         </div>
+        <div class="lang-switcher">
+          <button class="lang-btn active" id="langEn" onclick="switchLang('EN')">EN</button>
+          <button class="lang-btn" id="langHi" onclick="switchLang('HI')">HI</button>
+        </div>
       </div>
       <div class="msg-content" id="msgContentBox">Loading customer message...</div>
-      <small style="display: block; margin-top: 8px; font-size: 11px; color: #10b981;">✓ Local Token Isolation: Zero customer PII sent to external LLMs</small>
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px;">
+        <small style="font-size: 11px; color: #10b981;">✓ Local Token Isolation (0 PII to LLMs)</small>
+        <small style="font-size: 11px; color: var(--text-muted);" id="lblAuditRef">Seq #1042 • Hash: 8f9a2b</small>
+      </div>
     </div>
 
     <!-- Pending Recovery Actions (Task 4.3 & 4.4) -->
@@ -138,12 +155,16 @@
       <button class="btn btn-secondary" onclick="schedulePaydayReminder()">
         📅 Remind Me on Salary Day (28th)
       </button>
+
+      <button class="btn btn-secondary" onclick="contactSupport()" style="font-size: 12px;">
+        💬 Need Help? Contact Merchant Support
+      </button>
     </div>
 
     <!-- Success Actions -->
     <div id="successActions" class="hidden">
       <button class="btn btn-secondary" onclick="window.print()">
-        🖨️ Print / Download Tax Receipt
+        🖨️ Print / Download GST Receipt
       </button>
       <button class="btn btn-primary" onclick="window.location.href='/dashboard'">
         ← Return to Merchant Console
@@ -159,6 +180,7 @@
 <script>
   let sessionResult = null;
   let activeChannel = "SMS";
+  let activeLang = "EN";
 
   window.addEventListener("DOMContentLoaded", async () => {
     const params = new URLSearchParams(window.location.search);
@@ -187,6 +209,15 @@
     document.getElementById("btnPayAmount").innerText = data.formattedAmount;
     document.getElementById("lblInstrument").innerText = data.instrumentDesc;
     document.getElementById("lblTxnId").innerText = data.paymentId;
+
+    if (data.gstBreakdown) {
+      document.getElementById("lblBaseAmount").innerText = data.gstBreakdown.baseAmountFormatted;
+      document.getElementById("lblGstAmount").innerText = data.gstBreakdown.gstAmountFormatted;
+    }
+
+    if (data.auditSeq && data.auditHash) {
+      document.getElementById("lblAuditRef").innerText = `Seq #${data.auditSeq} • Hash: ${data.auditHash}`;
+    }
 
     if (data.isSettled) {
       document.getElementById("statusBadge").className = "badge badge-success";
@@ -219,12 +250,19 @@
     updateMessagePreview();
   }
 
+  function switchLang(lang) {
+    activeLang = lang;
+    document.getElementById("langEn").className = lang === "EN" ? "lang-btn active" : "lang-btn";
+    document.getElementById("langHi").className = lang === "HI" ? "lang-btn active" : "lang-btn";
+    updateMessagePreview();
+  }
+
   function updateMessagePreview() {
     if (!sessionResult || !sessionResult.messages) return;
     let msg = null;
-    if (activeChannel === "SMS") msg = sessionResult.messages.smsEn;
-    else if (activeChannel === "EMAIL") msg = sessionResult.messages.emailEn;
-    else if (activeChannel === "VOICE") msg = sessionResult.messages.voiceHi;
+    if (activeChannel === "SMS") msg = activeLang === "EN" ? sessionResult.messages.smsEn : sessionResult.messages.smsHi;
+    else if (activeChannel === "EMAIL") msg = activeLang === "EN" ? sessionResult.messages.emailEn : sessionResult.messages.emailHi;
+    else if (activeChannel === "VOICE") msg = activeLang === "EN" ? sessionResult.messages.voiceEn : sessionResult.messages.voiceHi;
 
     const box = document.getElementById("msgContentBox");
     if (msg) {
@@ -267,6 +305,11 @@
     } catch (e) {
       alert("Failed to schedule.");
     }
+  }
+
+  function contactSupport() {
+    if (!sessionResult) return;
+    alert(`Support Desk Ticket Context:\nProposal: ${sessionResult.proposalId}\nCustomer: ${sessionResult.customerName}\nReason: ${sessionResult.diagnosis.rootCause}\nAmount: ${sessionResult.formattedAmount}`);
   }
 
   function listenToSSE(tok) {

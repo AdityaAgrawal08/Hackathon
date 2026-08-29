@@ -67,6 +67,13 @@ describe("Phase 4: Result Page & Post-Payment Experience Integration Tests", () 
 
     expect(data.messages.voiceHi).not.toBeNull();
     expect(data.messages.voiceHi.content).toContain("Rahul Sharma");
+
+    // Task 4.4 & 4.6: Audit Integrity and GST Breakdown
+    expect(data.auditSeq).toBeDefined();
+    expect(data.auditHash).toBeDefined();
+    expect(data.gstBreakdown).toBeDefined();
+    expect(data.gstBreakdown.baseAmountPaise + data.gstBreakdown.gstAmountPaise).toBe(199900);
+    expect(data.gstBreakdown.gstRatePercent).toBe(18);
   });
 
   it("Task 4.3: transitions result status to SETTLED_RECOVERED upon payment completion", async () => {
@@ -83,3 +90,4 @@ describe("Phase 4: Result Page & Post-Payment Experience Integration Tests", () 
     expect(data.settledAtUtc).toBeDefined();
   });
 });
+

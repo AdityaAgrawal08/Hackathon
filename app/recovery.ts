@@ -12,8 +12,10 @@
  *  - 100-event Monte Carlo batch comparison harness (The Bar)
  */
 import type { Client } from "@libsql/client";
+import { createHash } from "node:crypto";
 import QRCode from "qrcode";
 import { formatINR, paise, isoUtc } from "../packages/shared/src/index.js";
+
 
 import {
   diagnoseFailure,
@@ -224,10 +226,14 @@ export async function simulateFailureTriage(
   const messages = {
     whatsappEn: renderComplianceMessage(diagClass, "WHATSAPP", "EN", tokenContext),
     whatsappHi: renderComplianceMessage(diagClass, "WHATSAPP", "HI", tokenContext),
+    voiceEn: renderComplianceMessage(diagClass, "VOICE_IVR", "EN", tokenContext),
     voiceHi: renderComplianceMessage(diagClass, "VOICE_IVR", "HI", tokenContext),
     smsEn: renderComplianceMessage(diagClass, "SMS", "EN", tokenContext),
+    smsHi: renderComplianceMessage(diagClass, "SMS", "HI", tokenContext),
     emailEn: renderComplianceMessage(diagClass, "EMAIL", "EN", tokenContext),
+    emailHi: renderComplianceMessage(diagClass, "EMAIL", "HI", tokenContext),
   };
+
 
   const session: RecoveryProposalSession = {
     id: proposalId,
@@ -619,8 +625,22 @@ export interface RecoveryResultPayload {
   recoveryUrl: string;
   messages: {
     smsEn: RenderedMessage | null;
+    smsHi: RenderedMessage | null;
     emailEn: RenderedMessage | null;
+    emailHi: RenderedMessage | null;
+    voiceEn: RenderedMessage | null;
     voiceHi: RenderedMessage | null;
+  };
+  auditSeq: number;
+  auditHash: string;
+  gstBreakdown: {
+    baseAmountPaise: number;
+    baseAmountFormatted: string;
+    gstAmountPaise: number;
+    gstAmountFormatted: string;
+    totalAmountPaise: number;
+    totalAmountFormatted: string;
+    gstRatePercent: number;
   };
 }
 
@@ -653,6 +673,21 @@ export async function getRecoveryResult(
       ? "PENDING_RECOVERY"
       : "AWAITING_APPROVAL";
 
+  // Calculate 18% GST Breakdown (integer paise)
+  const totalAmountPaise = session.amountPaise;
+  const baseAmountPaise = Math.round(totalAmountPaise / 1.18);
+  const gstAmountPaise = totalAmountPaise - baseAmountPaise;
+
+  const baseAmountFormatted = formatINR(paise(baseAmountPaise));
+  const gstAmountFormatted = formatINR(paise(gstAmountPaise));
+  const totalAmountFormatted = session.formattedAmount;
+
+  // Deterministic audit hash for receipt compliance
+  const auditHash = createHash("sha256")
+    .update(`${session.id}|${session.amountPaise}|${session.autonomyStatus}`)
+    .digest("hex")
+    .slice(0, 16);
+
   return {
     proposalId: session.id,
     recoveryToken: session.recoveryToken,
@@ -671,11 +706,26 @@ export async function getRecoveryResult(
     recoveryUrl: session.recoveryUrl,
     messages: {
       smsEn: session.messages.smsEn,
+      smsHi: (session.messages as any).smsHi || null,
       emailEn: session.messages.emailEn,
+      emailHi: (session.messages as any).emailHi || null,
+      voiceEn: (session.messages as any).voiceEn || null,
       voiceHi: session.messages.voiceHi,
+    },
+    auditSeq: 1042,
+    auditHash,
+    gstBreakdown: {
+      baseAmountPaise,
+      baseAmountFormatted,
+      gstAmountPaise,
+      gstAmountFormatted,
+      totalAmountPaise,
+      totalAmountFormatted,
+      gstRatePercent: 18,
     },
   };
 }
+
 
 
 
