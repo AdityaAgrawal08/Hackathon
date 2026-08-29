@@ -7,7 +7,7 @@
  *  - GET  /pay/:token           -> Smartphone Mobile Checkout Page
  *  - POST /api/payments/charge  -> Dispatches payment attempt with idempotency guard
  *  - POST /api/webhooks/razorpay-> Fast async webhook ingestion (<100ms ACK)
- *  - GET  /api/status/:token    -> Live SSE payment status stream
+ *  - GET  /api/status/:token    -> Live SSE payment status stream with reconnection
  *  - GET  /dashboard            -> Merchant Reconciliation & Audit Console
  *  - GET  /api/admin/intents    -> Admin data for console
  *  - POST /api/admin/reconcile  -> Manual sweep trigger
@@ -33,16 +33,29 @@ import {
   reconcilePaymentIntent,
   sweepStuckIntents,
   ingestDomainWebhook,
+  computeCanonicalPayloadHash,
+  CHECKOUT_SESSION_TTL_MS,
+  DEFAULT_LOCAL_ADMIN_SECRET,
+  DEFAULT_LOCAL_WEBHOOK_SECRET,
+  RATE_LIMIT_CHECKOUT_ORDERS_PER_MIN,
+  RATE_LIMIT_CHARGES_PER_MIN,
+  RATE_LIMIT_WEBHOOKS_PER_MIN,
+  RATE_LIMIT_ADMIN_PER_MIN,
+  MAX_SSE_CONNECTIONS_PER_TOKEN,
 } from "../packages/core/src/index.js";
-
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = parseInt(process.env.PORT || "3000", 10);
 const HOST = process.env.HOST || "0.0.0.0";
-const ADMIN_SECRET = process.env.ADMIN_SECRET_KEY || "arbiter_admin_secret_key_2026";
-const WEBHOOK_SECRET = process.env.RZP_WEBHOOK_SECRET || "whsec_local_test_secret_12345";
 const DEFAULT_MODE: PaymentMode = (process.env.PAYMENT_MODE as PaymentMode) || "LOCAL_SANDBOX";
+
+const ADMIN_SECRET = process.env.ADMIN_SECRET_KEY || DEFAULT_LOCAL_ADMIN_SECRET;
+const WEBHOOK_SECRET = process.env.RZP_WEBHOOK_SECRET || (DEFAULT_MODE === "REAL_SANDBOX" ? "" : DEFAULT_LOCAL_WEBHOOK_SECRET);
+
+if (DEFAULT_MODE === "REAL_SANDBOX" && !WEBHOOK_SECRET) {
+  console.warn("WARNING: RZP_WEBHOOK_SECRET is not configured for REAL_SANDBOX mode.");
+}
 
 // ── Database Initialization ─────────────────────────────────────────
 const dbPath = process.env.ARBITER_DB_PATH || "data/arbiter.sqlite";
@@ -50,7 +63,7 @@ const dbUrl = dbPath.startsWith("file:") ? dbPath : `file:${resolve(dbPath)}`;
 export const dbClient: Client = createClient({ url: dbUrl });
 
 // ── Gateways ────────────────────────────────────────────────────────
-export const localGateway = new LocalDeterministicGateway(dbClient, WEBHOOK_SECRET);
+export const localGateway = new LocalDeterministicGateway(dbClient, WEBHOOK_SECRET || DEFAULT_LOCAL_WEBHOOK_SECRET);
 let liveGateway: RazorpayLiveGateway | null = null;
 try {
   liveGateway = new RazorpayLiveGateway({ webhookSecret: WEBHOOK_SECRET });
@@ -69,10 +82,10 @@ export function getGateway(mode: PaymentMode): PaymentGateway {
 }
 
 // ── Rate Limiters ───────────────────────────────────────────────────
-const orderLimiter = rateLimit({ windowMs: 60 * 1000, limit: 20, standardHeaders: true });
-const chargeLimiter = rateLimit({ windowMs: 60 * 1000, limit: 30, standardHeaders: true });
-const webhookLimiter = rateLimit({ windowMs: 60 * 1000, limit: 200, standardHeaders: true });
-const adminLimiter = rateLimit({ windowMs: 60 * 1000, limit: 30, standardHeaders: true });
+const orderLimiter = rateLimit({ windowMs: 60 * 1000, limit: RATE_LIMIT_CHECKOUT_ORDERS_PER_MIN, standardHeaders: true });
+const chargeLimiter = rateLimit({ windowMs: 60 * 1000, limit: RATE_LIMIT_CHARGES_PER_MIN, standardHeaders: true });
+const webhookLimiter = rateLimit({ windowMs: 60 * 1000, limit: RATE_LIMIT_WEBHOOKS_PER_MIN, standardHeaders: true });
+const adminLimiter = rateLimit({ windowMs: 60 * 1000, limit: RATE_LIMIT_ADMIN_PER_MIN, standardHeaders: true });
 
 // ── Middleware ───────────────────────────────────────────────────────
 // Raw body for webhooks
@@ -80,11 +93,24 @@ app.use("/api/webhooks/razorpay", express.raw({ type: "*/*" }));
 // JSON parser for other endpoints
 app.use(express.json());
 
+// Host Header Validation helper (protects QR URLs from Host header injection)
+function getSanitizedHost(req: Request): string {
+  const host = req.get("host") || `localhost:${PORT}`;
+  const validHostRegex = /^[a-zA-Z0-9.:_-]+$/;
+  if (!validHostRegex.test(host)) {
+    return `localhost:${PORT}`;
+  }
+  return host;
+}
+
 // Admin Auth Middleware
 function requireAdminAuth(req: Request, res: Response, next: NextFunction) {
-  const authHeader = req.headers["x-admin-key"] || req.query.admin_key;
-  if (!authHeader || typeof authHeader !== "string") {
-    // In local dev/test mode without explicit admin key, allow dashboard view
+  const authHeader = (req.headers["x-admin-key"] as string) || (req.query.admin_key as string);
+  if (!authHeader) {
+    // In local dev without key supplied, check if admin key is explicitly requested
+    if (process.env.NODE_ENV === "production" || process.env.ENFORCE_ADMIN_KEY === "true") {
+      return res.status(401).json({ error: "UNAUTHORIZED_ADMIN_ACCESS" });
+    }
     return next();
   }
   const keyBuf = Buffer.from(authHeader, "utf-8");
@@ -108,7 +134,9 @@ function broadcastStatus(token: string, state: Record<string, unknown>) {
   if (!clients) return;
   const msg = `data: ${JSON.stringify(state)}\n\n`;
   for (const c of clients) {
-    c.res.write(msg);
+    try {
+      c.res.write(msg);
+    } catch {}
   }
 }
 
@@ -132,13 +160,13 @@ app.post("/api/orders", orderLimiter, async (req, res) => {
     const gateway = getGateway(paymentMode);
     const nowMs = Date.now();
     const nowIso = isoUtc(nowMs);
-    const expiresIso = isoUtc(nowMs + 900_000); // 15-minute TTL
+    const expiresIso = isoUtc(nowMs + CHECKOUT_SESSION_TTL_MS);
 
     // Create Order with Gateway
     const order = await gateway.createOrder({
       tenantId,
       amountPaise,
-      receipt: `rcpt_${Date.now()}`,
+      receipt: `rcpt_${nowMs}`,
     });
 
     // Create Opaque Token for Checkout Session
@@ -153,7 +181,7 @@ app.post("/api/orders", orderLimiter, async (req, res) => {
     });
 
     // Generate Mobile Checkout URL & Scannable QR Code
-    const hostHeader = req.get("host") || `localhost:${PORT}`;
+    const hostHeader = getSanitizedHost(req);
     const proto = req.protocol === "https" || req.get("x-forwarded-proto") === "https" ? "https" : "http";
     const mobileUrl = `${proto}://${hostHeader}/pay/${token}`;
     const qrCodeDataUrl = await qrcode.toDataURL(mobileUrl, { width: 300, margin: 2 });
@@ -251,10 +279,12 @@ app.post("/api/payments/charge", chargeLimiter, async (req, res) => {
       return res.status(401).json({ error: "TOKEN_EXPIRED" });
     }
 
-    // 2. Persisted Idempotency Verification
-    const payloadHash = createHash("sha256")
-      .update(JSON.stringify({ token, amountPaise: session.amount_paise, scenario }))
-      .digest("hex");
+    // 2. Deterministic Persisted Idempotency Verification (Canonical JSON key order)
+    const payloadHash = computeCanonicalPayloadHash({
+      amountPaise: session.amount_paise,
+      scenario: scenario || "LOCAL_SUCCESS",
+      token,
+    });
 
     const attemptRes = await dbClient.execute({
       sql: `SELECT * FROM payment_attempts WHERE tenant_id = ? AND client_idem_key = ?`,
@@ -289,15 +319,18 @@ app.post("/api/payments/charge", chargeLimiter, async (req, res) => {
     const nowMs = Date.now();
     const nowIso = isoUtc(nowMs);
 
+    const proposalId = `prop_${intentId}`;
+
     await dbClient.batch(
       [
         {
           sql: `INSERT INTO payment_intents
-                  (id, client_idem_key, proposal_id, customer_id, tenant_id, amount_paise, status, client_visible, scenario, created_at_utc)
-                VALUES (?, ?, ?, 'cust_demo', ?, ?, 'PROCESSING', 'PROCESSING', ?, ?)
+                  (id, client_idem_key, proposal_id, customer_id, tenant_id, order_id, checkout_token, amount_paise, status, client_visible, scenario, created_at_utc)
+                VALUES (?, ?, ?, 'cust_demo', ?, ?, ?, ?, 'PROCESSING', 'PROCESSING', ?, ?)
                 ON CONFLICT(id) DO NOTHING`,
-          args: [intentId, clientIdemKey, `prop_${intentId}`, session.tenant_id, session.amount_paise, scenario, nowIso],
+          args: [intentId, clientIdemKey, proposalId, session.tenant_id, session.order_id, token, session.amount_paise, scenario, nowIso],
         },
+
         {
           sql: `INSERT INTO payment_attempts
                   (id, payment_intent_id, tenant_id, client_idem_key, payload_hash, attempt_number, status, scenario, started_at_utc)
@@ -424,6 +457,22 @@ app.post("/api/payments/charge", chargeLimiter, async (req, res) => {
       userMessageHi: msgHi,
     });
 
+    // Schedule active reconciliation check after 2 seconds
+    setTimeout(() => {
+      reconcilePaymentIntent(dbClient, localGateway, intentId, Date.now()).then((rec) => {
+        if (rec.resolved) {
+          broadcastStatus(token, {
+            knowledgeStatus: rec.knowledgeStatus,
+            executionState: rec.knowledgeStatus === "RESOLVED_SUCCESS" ? "SUCCEEDED" : "FAILED",
+            userMessage: userFacingMessage({
+              visible: rec.knowledgeStatus === "RESOLVED_SUCCESS" ? "SUCCEEDED" : "FAILED",
+              amountPaise: session.amount_paise,
+            }),
+          });
+        }
+      }).catch(() => {});
+    }, 2000);
+
     return res.status(202).json({
       knowledgeStatus: "UNRESOLVED_UNKNOWN",
       userMessage: msgEn,
@@ -443,7 +492,7 @@ app.post("/api/webhooks/razorpay", webhookLimiter, async (req, res) => {
     client: dbClient,
     rawBody,
     signature,
-    webhookSecret: WEBHOOK_SECRET,
+    webhookSecret: WEBHOOK_SECRET || DEFAULT_LOCAL_WEBHOOK_SECRET,
   });
 
   return res.status(result.statusCode).json(result);
@@ -460,7 +509,7 @@ app.get("/api/status/:token", async (req, res) => {
     sseClients.set(token, new Set());
   }
   const clientSet = sseClients.get(token)!;
-  if (clientSet.size >= 5) {
+  if (clientSet.size >= MAX_SSE_CONNECTIONS_PER_TOKEN) {
     return res.status(429).end("Too many status connections for this token");
   }
 

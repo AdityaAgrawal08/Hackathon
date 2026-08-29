@@ -83,11 +83,20 @@ function failedMessage(input: UserMessageInput, amount: string, hi: boolean): st
       ? `गेटवे से समय पर जवाब नहीं मिला। हम बैंक से पुष्टि कर रहे हैं।`
       : `The gateway did not respond in time. We are confirming the status with your bank.`;
   }
+  if (code === "RZP_AUTH_EXPIRED") {
+    return hi
+      ? `भुगतान प्रमाणीकरण समय समाप्त हो गया। कृपया पुनः प्रयास करें।`
+      : `Payment authorization expired. Please try again.`;
+  }
+  if (code === "RZP_SERVER_ERROR" || code === "LOCAL_GATEWAY_503") {
+    return hi
+      ? `भुगतान सेवा अभी उपलब्ध नहीं है। कृपया कुछ पलों बाद पुनः प्रयास करें।`
+      : `Payment services are temporarily unavailable. Please try again in a few moments.`;
+  }
   return hi
     ? `भुगतान पूरा नहीं हो सका (${amount})। कृपया बाद में पुनः प्रयास करें।`
     : `We couldn't complete your payment of ${amount}. Please try again later.`;
 }
-
 
 /** Which channel the recovery action would use (for the notification record). */
 export function channelForAction(actionId: string): "SMS" | "WHATSAPP" | "VOICE" | "EMAIL" | "IN_APP" {
@@ -98,7 +107,12 @@ export function channelForAction(actionId: string): "SMS" | "WHATSAPP" | "VOICE"
       return "VOICE";
     case "REMINDER_LINK":
       return "EMAIL";
+    case "RECOVER_VIA_RAIL":
+      return "SMS";
+    case "PARTIAL_COLLECT":
+      return "IN_APP";
     default:
       return "IN_APP";
   }
 }
+

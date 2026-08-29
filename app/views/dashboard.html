@@ -101,6 +101,8 @@
 
   <script>
     async function loadData() {
+      if (document.hidden) return; // Pause polling when tab is inactive
+
       try {
         const res = await fetch('/api/admin/intents');
         if (!res.ok) return;

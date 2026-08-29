@@ -322,23 +322,29 @@ export const paymentIntents = sqliteTable(
   {
     id: text("id").primaryKey(),
     clientIdemKey: text("client_idem_key").notNull().unique(),
-    proposalId: text("proposal_id").notNull(),
+    proposalId: text("proposal_id"),
     customerId: text("customer_id").notNull(),
     tenantId: text("tenant_id").notNull(),
+    orderId: text("order_id"),
+    checkoutToken: text("checkout_token"),
     amountPaise: integer("amount_paise").notNull(),
     status: text("status", { enum: PAYMENT_INTENT_STATES }).notNull().default("PROCESSING"),
     chargeId: text("charge_id"),
-    /** What the CLIENT should see, preserved across idempotent replays.
-     *  Differs from `status` for the lost-response case: status=SUCCEEDED but
-     *  clientVisible=UNKNOWN (the charge applied, response never reached client). */
+    /** What the CLIENT should see, preserved across idempotent replays. */
     clientVisible: text("client_visible", {
       enum: ["SUCCEEDED", "FAILED", "UNKNOWN", "ALREADY_SUBMITTED", "CANCELLED", "PROCESSING"],
     }).notNull().default("UNKNOWN"),
     scenario: text("scenario"),
+    workerClaimId: text("worker_claim_id"),
+    claimedAtUtc: text("claimed_at_utc"),
     createdAtUtc: text("created_at_utc").notNull(),
     resolvedAtUtc: text("resolved_at_utc"),
   },
-  (t) => [index("idx_intent_customer").on(t.customerId)],
+  (t) => [
+    index("idx_intent_customer").on(t.customerId),
+    index("idx_intent_order").on(t.orderId),
+    index("idx_intent_status").on(t.status),
+  ],
 );
 
 /* ── mock ledger (sandbox balance) ──────────────────────────────── */
@@ -401,7 +407,10 @@ export const checkoutSessions = sqliteTable(
     revokedAtUtc: text("revoked_at_utc"),
     createdAtUtc: text("created_at_utc").notNull(),
   },
-  (t) => [index("idx_checkout_order").on(t.orderId)],
+  (t) => [
+    index("idx_checkout_order").on(t.orderId),
+    index("idx_checkout_expires").on(t.expiresAtUtc),
+  ],
 );
 
 /* ── payment attempts (concrete execution attempts) ───────────────── */
@@ -423,8 +432,10 @@ export const paymentAttempts = sqliteTable(
   (t) => [
     uniqueIndex("uq_attempt_tenant_idem").on(t.tenantId, t.clientIdemKey),
     index("idx_attempt_intent").on(t.paymentIntentId),
+    index("idx_attempt_idem").on(t.clientIdemKey),
   ],
 );
+
 
 /* ── provider payments (durable gateway payment projection) ───────── */
 export const providerPayments = sqliteTable(

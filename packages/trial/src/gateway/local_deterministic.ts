@@ -2,9 +2,9 @@
  * LOCAL_SANDBOX: Deterministic Transport & Application Fault-Injection Gateway.
  *
  * Implements a simulated provider authority for local testing.
- * Durably persists simulated orders and payments into SQLite (`provider_payments`)
- * so that crash recovery, status lookups, and reconciliation work identically
- * across process restarts.
+ * Durably persists simulated orders, payments, and attempt counts into SQLite
+ * (`provider_payments`, `payment_attempts`) so that crash recovery, status lookups,
+ * and reconciliation work identically across process restarts.
  */
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import type { Client } from "@libsql/client";
@@ -36,7 +36,6 @@ export class LocalDeterministicGateway implements PaymentGateway {
   readonly mode = "LOCAL_SANDBOX" as const;
   private readonly client: Client;
   private readonly webhookSecret: string;
-  private seenAttempts = new Map<string, number>();
 
   constructor(client: Client, webhookSecret = "whsec_local_test_secret_12345") {
     this.client = client;
@@ -50,12 +49,13 @@ export class LocalDeterministicGateway implements PaymentGateway {
       .digest("hex")
       .slice(0, 14);
     const orderId = `order_local_${hash}`;
+    const currency = input.currency ?? "INR";
 
     return {
       id: orderId,
       tenantId: input.tenantId,
       amountPaise: input.amountPaise,
-      currency: input.currency ?? "INR",
+      currency,
       status: "created",
       paymentMode: "LOCAL_SANDBOX",
       createdAtUtc: isoUtc(t0),
@@ -74,10 +74,14 @@ export class LocalDeterministicGateway implements PaymentGateway {
       .slice(0, 14);
     const paymentId = `local_pay_${hash}`;
     const nowUtc = isoUtc(Date.now());
+    const currency = "INR";
 
-    // 1. Duplicate submission tracking
-    const attemptCount = (this.seenAttempts.get(input.clientIdemKey) ?? 0) + 1;
-    this.seenAttempts.set(input.clientIdemKey, attemptCount);
+    // 1. Persistent duplicate submission tracking from SQLite
+    const priorAttempts = await this.client.execute({
+      sql: `SELECT COUNT(*) as cnt FROM payment_attempts WHERE tenant_id = ? AND client_idem_key = ?`,
+      args: [input.tenantId, input.clientIdemKey],
+    });
+    const attemptCount = (Number((priorAttempts.rows[0] as unknown as { cnt: number })?.cnt) || 0) + 1;
 
     if (scenario === "LOCAL_DUPLICATE_SUBMIT" && attemptCount > 1) {
       return {
@@ -96,9 +100,9 @@ export class LocalDeterministicGateway implements PaymentGateway {
         await this.client.execute({
           sql: `INSERT INTO provider_payments
                   (id, provider_order_id, provider, status, amount_paise, currency, captured_at_utc, created_at_utc)
-                VALUES (?, ?, 'local', 'captured', ?, 'INR', ?, ?)
+                VALUES (?, ?, 'local', 'captured', ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET status = 'captured', captured_at_utc = excluded.captured_at_utc`,
-          args: [paymentId, input.orderId, input.amountPaise, nowUtc, nowUtc],
+          args: [paymentId, input.orderId, input.amountPaise, currency, nowUtc, nowUtc],
         });
         return {
           providerPaymentId: paymentId,
@@ -112,9 +116,9 @@ export class LocalDeterministicGateway implements PaymentGateway {
         await this.client.execute({
           sql: `INSERT INTO provider_payments
                   (id, provider_order_id, provider, status, amount_paise, currency, error_code, error_description, created_at_utc)
-                VALUES (?, ?, 'local', 'failed', ?, 'INR', 'LOCAL_INSUFFICIENT_FUNDS', 'Account balance is insufficient for transaction.', ?)
+                VALUES (?, ?, 'local', 'failed', ?, ?, 'LOCAL_INSUFFICIENT_FUNDS', 'Account balance is insufficient for transaction.', ?)
                 ON CONFLICT(id) DO NOTHING`,
-          args: [paymentId, input.orderId, input.amountPaise, nowUtc],
+          args: [paymentId, input.orderId, input.amountPaise, currency, nowUtc],
         });
         return {
           providerPaymentId: paymentId,
@@ -130,9 +134,9 @@ export class LocalDeterministicGateway implements PaymentGateway {
         await this.client.execute({
           sql: `INSERT INTO provider_payments
                   (id, provider_order_id, provider, status, amount_paise, currency, error_code, error_description, created_at_utc)
-                VALUES (?, ?, 'local', 'failed', ?, 'INR', 'LOCAL_EXPIRED_METHOD', 'Payment instrument has expired.', ?)
+                VALUES (?, ?, 'local', 'failed', ?, ?, 'LOCAL_EXPIRED_METHOD', 'Payment instrument has expired.', ?)
                 ON CONFLICT(id) DO NOTHING`,
-          args: [paymentId, input.orderId, input.amountPaise, nowUtc],
+          args: [paymentId, input.orderId, input.amountPaise, currency, nowUtc],
         });
         return {
           providerPaymentId: paymentId,
@@ -148,9 +152,9 @@ export class LocalDeterministicGateway implements PaymentGateway {
         await this.client.execute({
           sql: `INSERT INTO provider_payments
                   (id, provider_order_id, provider, status, amount_paise, currency, error_code, error_description, created_at_utc)
-                VALUES (?, ?, 'local', 'failed', ?, 'INR', 'LOCAL_INVALID_DETAILS', 'Supplied payment details are invalid.', ?)
+                VALUES (?, ?, 'local', 'failed', ?, ?, 'LOCAL_INVALID_DETAILS', 'Supplied payment details are invalid.', ?)
                 ON CONFLICT(id) DO NOTHING`,
-          args: [paymentId, input.orderId, input.amountPaise, nowUtc],
+          args: [paymentId, input.orderId, input.amountPaise, currency, nowUtc],
         });
         return {
           providerPaymentId: paymentId,
@@ -166,9 +170,9 @@ export class LocalDeterministicGateway implements PaymentGateway {
         await this.client.execute({
           sql: `INSERT INTO provider_payments
                   (id, provider_order_id, provider, status, amount_paise, currency, error_code, error_description, created_at_utc)
-                VALUES (?, ?, 'local', 'failed', ?, 'INR', 'LOCAL_RISK_REJECTED', 'Transaction blocked by risk controls.', ?)
+                VALUES (?, ?, 'local', 'failed', ?, ?, 'LOCAL_RISK_REJECTED', 'Transaction blocked by risk controls.', ?)
                 ON CONFLICT(id) DO NOTHING`,
-          args: [paymentId, input.orderId, input.amountPaise, nowUtc],
+          args: [paymentId, input.orderId, input.amountPaise, currency, nowUtc],
         });
         return {
           providerPaymentId: paymentId,
@@ -198,7 +202,7 @@ export class LocalDeterministicGateway implements PaymentGateway {
           status: "transport_dropped",
           errorCode: "LOCAL_GATEWAY_TIMEOUT",
           errorDescription: "Gateway connection timed out.",
-          latencyMs: 30000,
+          latencyMs: 150,
         };
       }
 
@@ -207,9 +211,9 @@ export class LocalDeterministicGateway implements PaymentGateway {
         await this.client.execute({
           sql: `INSERT INTO provider_payments
                   (id, provider_order_id, provider, status, amount_paise, currency, captured_at_utc, created_at_utc)
-                VALUES (?, ?, 'local', 'captured', ?, 'INR', ?, ?)
+                VALUES (?, ?, 'local', 'captured', ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET status = 'captured', captured_at_utc = excluded.captured_at_utc`,
-          args: [paymentId, input.orderId, input.amountPaise, nowUtc, nowUtc],
+          args: [paymentId, input.orderId, input.amountPaise, currency, nowUtc, nowUtc],
         });
         return {
           providerPaymentId: paymentId,
@@ -257,9 +261,10 @@ export class LocalDeterministicGateway implements PaymentGateway {
 
   verifyWebhookSignature(rawBody: Buffer, signature: string): boolean {
     if (!signature || !this.webhookSecret || rawBody.length === 0) return false;
-    const expected = createHmac("sha256", this.webhookSecret).update(rawBody).digest("hex");
-    if (expected.length !== signature.length) return false;
-    return timingSafeEqual(Buffer.from(expected, "utf-8"), Buffer.from(signature, "utf-8"));
+    const cleanSig = signature.trim().toLowerCase();
+    const expected = createHmac("sha256", this.webhookSecret).update(rawBody).digest("hex").toLowerCase();
+    if (expected.length !== cleanSig.length) return false;
+    return timingSafeEqual(Buffer.from(expected, "utf-8"), Buffer.from(cleanSig, "utf-8"));
   }
 
   generateWebhookPayload(event: {
