@@ -90,10 +90,15 @@ if (DEFAULT_MODE === "REAL_SANDBOX" && !WEBHOOK_SECRET) {
   console.warn("WARNING: RZP_WEBHOOK_SECRET is not configured for REAL_SANDBOX mode.");
 }
 
-// ── Database Initialization ─────────────────────────────────────────
 const dbPath = process.env.ARBITER_DB_PATH || "data/arbiter.sqlite";
-const dbUrl = dbPath.startsWith("file:") ? dbPath : `file:${resolve(dbPath)}`;
-export const dbClient: Client = createClient({ url: dbUrl });
+const dbUrl = (dbPath.startsWith("libsql:") || dbPath.startsWith("http:") || dbPath.startsWith("https:") || dbPath.startsWith("file:"))
+  ? dbPath
+  : `file:${resolve(dbPath)}`;
+export const dbClient: Client = createClient({
+  url: dbUrl,
+  authToken: process.env.ARBITER_DB_TOKEN,
+});
+
 
 // ── Gateways ────────────────────────────────────────────────────────
 export const localGateway = new LocalDeterministicGateway(dbClient, WEBHOOK_SECRET || DEFAULT_LOCAL_WEBHOOK_SECRET);
