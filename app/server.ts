@@ -54,7 +54,19 @@ import {
   MAX_SSE_CONNECTIONS_PER_TOKEN,
 } from "../packages/core/src/index.js";
 
+import {
+  simulateFailureTriage,
+  approveProposal,
+  completeRecovery,
+  runBatchBenchmark,
+  recoverySessions,
+  liveMetrics,
+  PRESETS,
+} from "./recovery.js";
+
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
 const app = express();
 const PORT = parseInt(process.env.PORT || "3000", 10);
 const HOST = process.env.HOST || "0.0.0.0";
@@ -157,11 +169,83 @@ const dashboardHtml = readFileSync(resolve(__dirname, "views/dashboard.html"), "
 
 // ── Routes ──────────────────────────────────────────────────────────
 
-// 1. Desktop Checkout UI
-app.get(["/", "/checkout"], (_req, res) => {
+// 1. Merchant Recovery Command Center UI (Default Home)
+app.get(["/", "/dashboard"], (_req, res) => {
+  res.setHeader("Content-Type", "text/html");
+  res.send(dashboardHtml);
+});
+
+// Standalone Checkout UI (for test/manual checkout)
+app.get("/checkout", (_req, res) => {
   res.setHeader("Content-Type", "text/html");
   res.send(checkoutHtml);
 });
+
+// ── Recovery Engine API Endpoints ────────────────────────────────────
+
+// A. Simulate failure ingestion and execute real-time triage
+app.post("/api/recovery/triage", (req, res) => {
+  try {
+    const { preset = "SALARY_DELAY" } = req.body;
+    const hostHeader = getSanitizedHost(req);
+    const proto = req.protocol === "https" || req.get("x-forwarded-proto") === "https" ? "https" : "http";
+    const baseUrl = `${proto}://${hostHeader}`;
+    const session = simulateFailureTriage(preset, baseUrl);
+    res.json(session);
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// B. Approve proposal in merchant queue
+app.post("/api/recovery/approve", (req, res) => {
+  try {
+    const { proposalId } = req.body;
+    const ok = approveProposal(proposalId);
+    res.json({ success: ok, proposalId });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// C. Complete customer recovery payment
+app.post("/api/recovery/complete", (req, res) => {
+  try {
+    const { proposalId } = req.body;
+    const ok = completeRecovery(proposalId);
+    res.json({ success: ok, proposalId });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// D. Run 100-event Monte Carlo Batch Benchmark (The Bar)
+app.get("/api/recovery/batch-proof", (_req, res) => {
+  try {
+    const result = runBatchBenchmark();
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// E. Get current recovery state
+app.get("/api/recovery/state", (_req, res) => {
+  res.json({
+    sessions: Array.from(recoverySessions.values()).reverse(),
+    metrics: {
+      ...liveMetrics,
+      totalAtRiskFormatted: formatINR(paise(liveMetrics.totalAtRiskPaise)),
+      totalRecoveredFormatted: formatINR(paise(liveMetrics.totalRecoveredPaise)),
+      recoveryRate:
+        liveMetrics.totalAtRiskPaise > 0
+          ? ((liveMetrics.totalRecoveredPaise / liveMetrics.totalAtRiskPaise) * 100).toFixed(1) + "%"
+          : "0.0%",
+    },
+    presets: PRESETS,
+  });
+});
+
 
 // 2. Order & Checkout Session Creation
 app.post("/api/orders", orderLimiter, async (req, res) => {
