@@ -609,51 +609,61 @@ export async function getRecoveryTrace(id: string, dbClient?: Client): Promise<R
   }
 
   if (steps.length === 0) {
+    const triggerPayload = { failureCode: session.failureCode, amountPaise: session.amountPaise, customer: session.customerName };
     steps.push({
       step: "TRIGGER",
       timestampUtc: session.createdAtUtc,
       actor: "PIPELINE",
       summary: `Failure Ingested: ${session.failureCode}`,
-      payload: { failureCode: session.failureCode, amountPaise: session.amountPaise, customer: session.customerName },
-      sha256Hash: createHash("sha256").update(JSON.stringify({ failureCode: session.failureCode })).digest("hex"),
+      payload: triggerPayload,
+      sha256Hash: createHash("sha256").update(JSON.stringify(triggerPayload)).digest("hex"),
     });
+
+    const diagPayload = { rootCause: session.diagnosis.rootCause, class: session.diagnosis.class };
     steps.push({
       step: "DIAGNOSIS",
       timestampUtc: session.createdAtUtc,
       actor: "PIPELINE",
       summary: `Root Cause: ${session.diagnosis.rootCause} (${session.diagnosis.class})`,
-      payload: { rootCause: session.diagnosis.rootCause, class: session.diagnosis.class },
-      sha256Hash: createHash("sha256").update(JSON.stringify(session.diagnosis)).digest("hex"),
+      payload: diagPayload,
+      sha256Hash: createHash("sha256").update(JSON.stringify(diagPayload)).digest("hex"),
     });
+
+    const decidePayload = { action: session.decideOutput.chosen.action, evPaise: session.decideOutput.chosen.evPaise, autonomyStatus: session.autonomyStatus };
     steps.push({
       step: "DECISION",
       timestampUtc: session.createdAtUtc,
       actor: "PIPELINE",
       summary: `Action Selected: ${session.decideOutput.chosen.action} (Status: ${session.autonomyStatus})`,
-      payload: { action: session.decideOutput.chosen.action, evPaise: session.decideOutput.chosen.evPaise, autonomyStatus: session.autonomyStatus },
-      sha256Hash: createHash("sha256").update(JSON.stringify(session.decideOutput.chosen)).digest("hex"),
+      payload: decidePayload,
+      sha256Hash: createHash("sha256").update(JSON.stringify(decidePayload)).digest("hex"),
     });
+
     if (session.dispatchResult) {
+      const dispatchPayload = session.dispatchResult as any;
       steps.push({
         step: "DISPATCH",
         timestampUtc: session.dispatchResult.dispatchedAtUtc,
         actor: "PROVIDER",
         summary: `Outreach Dispatched via ${session.dispatchResult.providerName} (${session.dispatchResult.channel}) - Status: ${session.dispatchResult.status}`,
-        payload: session.dispatchResult as any,
-        sha256Hash: createHash("sha256").update(JSON.stringify(session.dispatchResult)).digest("hex"),
+        payload: dispatchPayload,
+        sha256Hash: createHash("sha256").update(JSON.stringify(dispatchPayload)).digest("hex"),
       });
     }
+
     if (session.autonomyStatus === "EXECUTED" && session.settledAtUtc) {
+      const outcomePayload = { status: "SETTLED_RECOVERED", amountPaise: session.amountPaise };
       steps.push({
         step: "OUTCOME",
         timestampUtc: session.settledAtUtc,
         actor: "CUSTOMER",
         summary: `Payment Recovered & Settled: ${session.formattedAmount}`,
-        payload: { status: "SETTLED_RECOVERED", amountPaise: session.amountPaise },
-        sha256Hash: createHash("sha256").update(JSON.stringify({ status: "SETTLED_RECOVERED" })).digest("hex"),
+        payload: outcomePayload,
+        sha256Hash: createHash("sha256").update(JSON.stringify(outcomePayload)).digest("hex"),
       });
     }
   }
+
 
   return {
     proposalId: session.id,
