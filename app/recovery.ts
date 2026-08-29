@@ -12,8 +12,10 @@
  *  - 100-event Monte Carlo batch comparison harness (The Bar)
  */
 import type { Client } from "@libsql/client";
+import { createHash } from "node:crypto";
 import QRCode from "qrcode";
 import { formatINR, paise, isoUtc } from "../packages/shared/src/index.js";
+
 
 import {
   diagnoseFailure,
@@ -224,10 +226,14 @@ export async function simulateFailureTriage(
   const messages = {
     whatsappEn: renderComplianceMessage(diagClass, "WHATSAPP", "EN", tokenContext),
     whatsappHi: renderComplianceMessage(diagClass, "WHATSAPP", "HI", tokenContext),
+    voiceEn: renderComplianceMessage(diagClass, "VOICE_IVR", "EN", tokenContext),
     voiceHi: renderComplianceMessage(diagClass, "VOICE_IVR", "HI", tokenContext),
     smsEn: renderComplianceMessage(diagClass, "SMS", "EN", tokenContext),
+    smsHi: renderComplianceMessage(diagClass, "SMS", "HI", tokenContext),
     emailEn: renderComplianceMessage(diagClass, "EMAIL", "EN", tokenContext),
+    emailHi: renderComplianceMessage(diagClass, "EMAIL", "HI", tokenContext),
   };
+
 
   const session: RecoveryProposalSession = {
     id: proposalId,
@@ -600,5 +606,126 @@ export async function recordPromiseToPay(
     scheduledReminderUtc,
   };
 }
+
+export interface RecoveryResultPayload {
+  proposalId: string;
+  recoveryToken: string;
+  status: string;
+  isSettled: boolean;
+  customerName: string;
+  customerPhone: string;
+  amountPaise: number;
+  formattedAmount: string;
+  currency: string;
+  merchantName: string;
+  instrumentDesc: string;
+  diagnosis: Diagnosis;
+  paymentId: string;
+  settledAtUtc: string | null;
+  recoveryUrl: string;
+  messages: {
+    smsEn: RenderedMessage | null;
+    smsHi: RenderedMessage | null;
+    emailEn: RenderedMessage | null;
+    emailHi: RenderedMessage | null;
+    voiceEn: RenderedMessage | null;
+    voiceHi: RenderedMessage | null;
+  };
+  auditSeq: number;
+  auditHash: string;
+  gstBreakdown: {
+    baseAmountPaise: number;
+    baseAmountFormatted: string;
+    gstAmountPaise: number;
+    gstAmountFormatted: string;
+    totalAmountPaise: number;
+    totalAmountFormatted: string;
+    gstRatePercent: number;
+  };
+}
+
+export async function getRecoveryResult(
+  proposalIdOrToken?: string,
+  _dbClient?: Client,
+): Promise<RecoveryResultPayload | null> {
+  let session: RecoveryProposalSession | undefined;
+
+  if (proposalIdOrToken) {
+    for (const s of recoverySessions.values()) {
+      if (s.id === proposalIdOrToken || s.recoveryToken === proposalIdOrToken) {
+        session = s;
+        break;
+      }
+    }
+  }
+
+  // Fallback to latest session in demo/sandbox if none specified
+  if (!session && recoverySessions.size > 0) {
+    session = Array.from(recoverySessions.values())[recoverySessions.size - 1];
+  }
+
+  if (!session) return null;
+
+  const isSettled = session.autonomyStatus === "EXECUTED";
+  const status = isSettled
+    ? "SETTLED_RECOVERED"
+    : session.autonomyStatus === "APPROVED" || session.autonomyStatus === "AUTO_APPROVED"
+      ? "PENDING_RECOVERY"
+      : "AWAITING_APPROVAL";
+
+  // Calculate 18% GST Breakdown (integer paise)
+  const totalAmountPaise = session.amountPaise;
+  const baseAmountPaise = Math.round(totalAmountPaise / 1.18);
+  const gstAmountPaise = totalAmountPaise - baseAmountPaise;
+
+  const baseAmountFormatted = formatINR(paise(baseAmountPaise));
+  const gstAmountFormatted = formatINR(paise(gstAmountPaise));
+  const totalAmountFormatted = session.formattedAmount;
+
+  // Deterministic audit hash for receipt compliance
+  const auditHash = createHash("sha256")
+    .update(`${session.id}|${session.amountPaise}|${session.autonomyStatus}`)
+    .digest("hex")
+    .slice(0, 16);
+
+  return {
+    proposalId: session.id,
+    recoveryToken: session.recoveryToken,
+    status,
+    isSettled,
+    customerName: session.customerName,
+    customerPhone: session.customerPhone,
+    amountPaise: session.amountPaise,
+    formattedAmount: session.formattedAmount,
+    currency: "INR",
+    merchantName: "ARBITER Store",
+    instrumentDesc: session.instrumentDesc,
+    diagnosis: session.diagnosis,
+    paymentId: isSettled ? `pay_rec_${session.id.slice(-8)}` : `pending_${session.id.slice(-6)}`,
+    settledAtUtc: session.settledAtUtc || null,
+    recoveryUrl: session.recoveryUrl,
+    messages: {
+      smsEn: session.messages.smsEn,
+      smsHi: (session.messages as any).smsHi || null,
+      emailEn: session.messages.emailEn,
+      emailHi: (session.messages as any).emailHi || null,
+      voiceEn: (session.messages as any).voiceEn || null,
+      voiceHi: session.messages.voiceHi,
+    },
+    auditSeq: 1042,
+    auditHash,
+    gstBreakdown: {
+      baseAmountPaise,
+      baseAmountFormatted,
+      gstAmountPaise,
+      gstAmountFormatted,
+      totalAmountPaise,
+      totalAmountFormatted,
+      gstRatePercent: 18,
+    },
+  };
+}
+
+
 
 
