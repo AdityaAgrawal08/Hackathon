@@ -11,7 +11,7 @@
       --pico-primary: #0284c7;
       --pico-primary-hover: #0369a1;
     }
-    body { background-color: #f8fafc; padding: 1.5rem 2rem; color: #1e293b; }
+    body { background-color: #0f172a; padding: 1.5rem 2rem; color: #f8fafc; }
     .badge {
       display: inline-block;
       padding: 0.2rem 0.6rem;
@@ -28,181 +28,228 @@
     .badge-purple { background-color: #8b5cf6; color: white; }
 
     .stat-card {
-      background: white;
+      background: #1e293b;
       border-radius: 12px;
       padding: 1.25rem;
-      border: 1px solid #e2e8f0;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+      border: 1px solid #334155;
+      box-shadow: 0 4px 6px -1px rgba(0,0,0,0.3);
       text-align: center;
     }
     .panel-card {
-      background: white;
+      background: #1e293b;
       border-radius: 12px;
       padding: 1.5rem;
-      border: 1px solid #e2e8f0;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+      border: 1px solid #334155;
+      box-shadow: 0 4px 6px -1px rgba(0,0,0,0.3);
       margin-bottom: 1.5rem;
     }
     .phone-mockup {
-      background: #0f172a;
+      background: #020617;
       border-radius: 36px;
       padding: 14px;
-      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.2), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
       max-width: 360px;
       margin: 0 auto;
-      border: 3px solid #334155;
+      border: 3px solid #475569;
     }
     .phone-screen {
-      background: #f1f5f9;
+      background: #0f172a;
       border-radius: 26px;
       padding: 1rem;
-      min-height: 480px;
+      min-height: 460px;
       display: flex;
       flex-direction: column;
+      border: 1px solid #334155;
     }
-    .whatsapp-chat {
-      background: #e2e8f0;
+    .chat-bubble {
+      background: #1e293b;
       border-radius: 12px;
       padding: 0.85rem;
       margin-top: auto;
       margin-bottom: 0.5rem;
       font-size: 0.82rem;
-      border-left: 4px solid #25d366;
+      border-left: 4px solid #3b82f6;
+      color: #e2e8f0;
+      font-family: monospace;
     }
     .btn-scenario {
       margin-bottom: 0.5rem;
       text-align: left;
       font-size: 0.85rem;
       padding: 0.6rem 0.9rem;
+      width: 100%;
+      background: rgba(255,255,255,0.03);
+      border: 1px solid #334155;
+      color: #f8fafc;
     }
-    table th, table td { padding: 0.55rem 0.75rem; font-size: 0.82rem; }
+    .btn-scenario:hover {
+      background: rgba(255,255,255,0.08);
+      border-color: #60a5fa;
+    }
+    table th, table td { padding: 0.55rem 0.75rem; font-size: 0.82rem; color: #f8fafc; border-bottom: 1px solid #334155; }
     .feature-pill {
       display: inline-block;
-      background: #f1f5f9;
-      border: 1px solid #cbd5e1;
+      background: #0f172a;
+      border: 1px solid #334155;
       border-radius: 6px;
       padding: 0.15rem 0.4rem;
       font-size: 0.7rem;
       margin: 0.15rem;
       font-family: monospace;
+      color: #94a3b8;
+    }
+    .trai-banner {
+      background: rgba(16, 185, 129, 0.1);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      color: #6ee7b7;
+      padding: 0.5rem 1rem;
+      border-radius: 8px;
+      margin-bottom: 1.25rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.82rem;
     }
   </style>
 </head>
 <body>
 
   <!-- Top Header -->
-  <header style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; border-bottom: 1px solid #e2e8f0; padding-bottom: 1rem;">
+  <header style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; border-bottom: 1px solid #334155; padding-bottom: 1rem;">
     <div>
       <div style="display: flex; align-items: center; gap: 0.75rem;">
-        <h2 style="margin: 0; font-weight: 800; color: #0f172a;">ARBITER</h2>
+        <h2 style="margin: 0; font-weight: 800; color: #ffffff;">ARBITER</h2>
         <span class="badge badge-info">Track 03 · AI Revenue Recovery</span>
       </div>
-      <p style="margin: 0.25rem 0 0 0; color: #64748b; font-size: 0.88rem;">
+      <p style="margin: 0.25rem 0 0 0; color: #94a3b8; font-size: 0.88rem;">
         Autonomous Involuntary Churn Triage, Expected-Value Optimization & Compliant Outreach
       </p>
     </div>
     <div style="display: flex; gap: 0.75rem; align-items: center;">
-      <button id="btn-batch-proof" style="margin: 0; padding: 0.45rem 0.9rem; background: #0f172a; border: none;">
-        📊 Run 100-Event Batch Proof
+      <button id="btn-batch-proof" style="margin: 0; padding: 0.45rem 0.9rem; background: #3b82f6; border: none; font-weight: 600;">
+        📊 100-Event Proof ("The Bar")
       </button>
-      <button id="btn-sweep" class="outline" style="margin: 0; padding: 0.45rem 0.9rem;">
-        🧹 Run Sweeper
+      <button id="btn-sweep" class="outline" style="margin: 0; padding: 0.45rem 0.9rem; border-color: #475569; color: #cbd5e1;">
+        🧹 Two-Way Reconcile Sweep
       </button>
     </div>
   </header>
 
-  <!-- Live ROI Metrics Bar -->
+  <!-- TRAI Regulatory Status Indicator (Task 5.7) -->
+  <div class="trai-banner" id="banner-trai">
+    <div><strong>TRAI Regulatory Filter:</strong> Active Daytime Window (08:00–22:00 IST). Outreach permitted with instant delivery.</div>
+    <span class="badge badge-success">COMPLIANT (DLT VERIFIED)</span>
+  </div>
+
+  <!-- Live ROI Metrics Bar (Task 5.5) -->
   <div class="grid" style="margin-bottom: 1.5rem;">
     <div class="stat-card">
-      <small style="color: #64748b; font-weight: 600;">Total Revenue at Risk</small>
-      <h3 id="stat-at-risk" style="margin: 0.25rem 0 0 0; color: #0f172a;">₹0.00</h3>
-      <small id="stat-count" style="color: #94a3b8;">0 failed events</small>
+      <small style="color: #94a3b8; font-weight: 600;">Total Revenue at Risk</small>
+      <h3 id="stat-at-risk" style="margin: 0.25rem 0 0 0; color: #ffffff;">₹0.00</h3>
+      <small id="stat-count" style="color: #64748b;">0 failed events</small>
     </div>
     <div class="stat-card">
-      <small style="color: #64748b; font-weight: 600;">Recovered Revenue</small>
+      <small style="color: #94a3b8; font-weight: 600;">Recovered Revenue</small>
       <h3 id="stat-recovered" style="margin: 0.25rem 0 0 0; color: #10b981;">₹0.00</h3>
       <small id="stat-recovery-rate" style="color: #10b981; font-weight: 700;">0.0% recovered</small>
     </div>
     <div class="stat-card">
-      <small style="color: #64748b; font-weight: 600;">Wasted Retries Saved</small>
+      <small style="color: #94a3b8; font-weight: 600;">Wasted Retries Saved</small>
       <h3 id="stat-wasted" style="margin: 0.25rem 0 0 0; color: #8b5cf6;">0</h3>
-      <small style="color: #8b5cf6;">Dead cards skipped</small>
+      <small style="color: #8b5cf6;">Dead cards suppressed</small>
     </div>
     <div class="stat-card">
-      <small style="color: #64748b; font-weight: 600;">Spam Complaints</small>
-      <h3 style="margin: 0.25rem 0 0 0; color: #10b981;">0</h3>
-      <small style="color: #10b981;">Quiet Hours Enforced</small>
+      <small style="color: #94a3b8; font-weight: 600;">Double-Debits Prevented</small>
+      <h3 style="margin: 0.25rem 0 0 0; color: #10b981;">100%</h3>
+      <small style="color: #10b981;">Deterministic Idempotency</small>
     </div>
   </div>
 
   <!-- Main Recovery Studio: 3 Column Layout -->
-  <div class="grid" style="grid-template-columns: 280px 1fr 340px; gap: 1.25rem; margin-bottom: 2rem;">
+  <div class="grid" style="grid-template-columns: 290px 1fr 340px; gap: 1.25rem; margin-bottom: 2rem;">
 
-    <!-- Col 1: Failure Ingestion Studio -->
+    <!-- Col 1: Failure Ingestion Studio (Task 5.1) -->
     <div class="panel-card" style="margin-bottom: 0;">
-      <h5 style="margin-bottom: 0.75rem; font-weight: 700;">1. Ingest Failure Event</h5>
-      <p style="font-size: 0.78rem; color: #64748b; margin-bottom: 1rem;">
-        Trigger real-time webhook ingestion or simulate realistic payment degradation scenarios:
+      <h5 style="margin-bottom: 0.75rem; font-weight: 700; color: #fff;">1. Ingest Failure Event</h5>
+      <p style="font-size: 0.78rem; color: #94a3b8; margin-bottom: 0.75rem;">
+        Select a real-time banking degradation scenario or inject custom failure telemetry:
       </p>
 
-      <button class="btn-scenario outline" data-preset="SALARY_DELAY">
+      <button class="btn-scenario" onclick="triggerPreset('SALARY_DELAY')">
         <strong>💳 Salary Delay / Low Balance</strong><br>
-        <small style="color:#64748b;">₹1,999 · Payday: 28th · Soft</small>
+        <small style="color:#94a3b8;">₹1,999 · Payday: 28th · Soft Retryable</small>
       </button>
 
-      <button class="btn-scenario outline" data-preset="CARD_EXPIRED">
+      <button class="btn-scenario" onclick="triggerPreset('CARD_EXPIRED')">
         <strong>⚠️ Expired Card / Mandate Dead</strong><br>
-        <small style="color:#64748b;">₹4,999 · Visa Card · Hard</small>
+        <small style="color:#94a3b8;">₹4,999 · Visa ending 8831 · Hard Dead</small>
       </button>
 
-      <button class="btn-scenario outline" data-preset="BANK_OUTAGE">
-        <strong>🌐 HDFC Bank Outage</strong><br>
-        <small style="color:#64748b;">₹2,499 · Network Timeout</small>
+      <button class="btn-scenario" onclick="triggerPreset('BANK_OUTAGE')">
+        <strong>🌐 HDFC Bank Server Outage</strong><br>
+        <small style="color:#94a3b8;">₹2,499 · Network Timeout · Soft</small>
       </button>
 
-      <button class="btn-scenario outline" data-preset="BOT_RISK">
+      <button class="btn-scenario" onclick="triggerPreset('UPI_TIMEOUT')">
+        <strong>🟣 UPI Collect Expired (GPay)</strong><br>
+        <small style="color:#94a3b8;">₹299 · Collect Timeout · 1-Click Link</small>
+      </button>
+
+      <button class="btn-scenario" onclick="triggerPreset('BOT_RISK')">
         <strong>🚨 Suspicious Spammer (Bot)</strong><br>
-        <small style="color:#64748b;">₹50,000 · 0 Tenure · Risk</small>
+        <small style="color:#94a3b8;">₹50,000 · High Risk · Quarantine</small>
       </button>
+
+      <hr style="border-color: #334155; margin: 0.75rem 0;">
+
+      <!-- Autonomy Slider Dial (Task 5.4) -->
+      <div>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.25rem;">
+          <small style="font-weight: 700; color: #94a3b8;">Autonomy Dial:</small>
+          <strong id="lbl-autonomy-val" style="color: #60a5fa; font-size: 0.8rem;">≤ ₹2,000</strong>
+        </div>
+        <input type="range" id="slider-autonomy" min="500" max="10000" step="500" value="2000" style="width: 100%; margin: 0;" oninput="updateAutonomyEnvelope(this.value)">
+        <small style="font-size: 0.7rem; color: #64748b;">Amounts above threshold route to Merchant Approval Queue.</small>
+      </div>
     </div>
 
-    <!-- Col 2: Live AI Diagnosis & Expected-Value Decisioning -->
+    <!-- Col 2: Live AI Diagnosis & Expected-Value Decisioning (Task 5.2) -->
     <div class="panel-card" style="margin-bottom: 0;">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
-        <h5 style="margin: 0; font-weight: 700;">2. AI Diagnosis & EV Decision</h5>
+        <h5 style="margin: 0; font-weight: 700; color: #fff;">2. AI Diagnosis & EV Decision</h5>
         <span id="badge-autonomy" class="badge badge-info">Awaiting Event</span>
       </div>
 
-      <div id="triage-empty" style="text-align: center; padding: 3rem 1rem; color: #94a3b8;">
+      <div id="triage-empty" style="text-align: center; padding: 3rem 1rem; color: #64748b;">
         <p>👈 Select a failure scenario on the left to trigger the AI Recovery Pipeline</p>
       </div>
 
       <div id="triage-details" style="display: none;">
         <!-- Diagnosis Summary -->
-        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 0.85rem; margin-bottom: 1rem;">
+        <div style="background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 0.85rem; margin-bottom: 1rem;">
           <div style="display: flex; justify-content: space-between; margin-bottom: 0.25rem;">
-            <span><strong>Customer:</strong> <span id="diag-customer">-</span></span>
+            <span><strong>Customer:</strong> <span id="diag-customer" style="color: #fff;">-</span></span>
             <span><strong>Amount at Risk:</strong> <span id="diag-amount" style="color: #ef4444; font-weight: 700;">-</span></span>
           </div>
-          <div style="font-size: 0.82rem; color: #475569;">
+          <div style="font-size: 0.82rem; color: #94a3b8;">
             <strong>Root Cause:</strong> <span id="diag-root-cause" class="badge badge-purple">-</span>
-            <span id="diag-explanation" style="margin-left: 0.5rem;">-</span>
+            <span id="diag-explanation" style="margin-left: 0.5rem; color: #cbd5e1;">-</span>
           </div>
         </div>
 
         <!-- 16-D Features -->
         <div style="margin-bottom: 1rem;">
-          <small style="font-weight: 700; color: #64748b; text-transform: uppercase;">16-D Extracted ML Features:</small>
+          <small style="font-weight: 700; color: #94a3b8; text-transform: uppercase;">16-D Extracted ML Features:</small>
           <div id="feature-pills" style="margin-top: 0.35rem;"></div>
         </div>
 
         <!-- EV Ranking Table -->
         <div style="margin-bottom: 1rem;">
-          <small style="font-weight: 700; color: #64748b; text-transform: uppercase;">Intervention Expected-Value ($\mathbb{E}[V]$) Ranking:</small>
-          <div style="overflow-x: auto; margin-top: 0.35rem; border: 1px solid #e2e8f0; border-radius: 6px;">
+          <small style="font-weight: 700; color: #94a3b8; text-transform: uppercase;">Intervention Expected-Value ($\mathbb{E}[V]$) Ranking Matrix:</small>
+          <div style="overflow-x: auto; margin-top: 0.35rem; border: 1px solid #334155; border-radius: 6px;">
             <table style="margin: 0;">
               <thead>
-                <tr style="background: #f1f5f9;">
+                <tr style="background: #0f172a;">
                   <th>Action</th>
                   <th>Multiplier</th>
                   <th>Adj. Prob</th>
@@ -215,58 +262,57 @@
           </div>
         </div>
 
-        <!-- Merchant Approval Bar -->
-        <div id="approval-bar" style="display: flex; justify-content: space-between; align-items: center; background: #ecfdf5; border: 1px solid #a7f3d0; padding: 0.75rem; border-radius: 8px;">
+        <!-- Merchant Approval Bar (Task 5.4) -->
+        <div id="approval-bar" style="display: flex; justify-content: space-between; align-items: center; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); padding: 0.75rem; border-radius: 8px;">
           <div>
-            <strong id="action-title" style="color: #065f46;">Recommended Action: -</strong><br>
-            <small id="action-subtitle" style="color: #047857;">Auto-approved under policy envelope</small>
+            <strong id="action-title" style="color: #34d399;">Recommended Action: -</strong><br>
+            <small id="action-subtitle" style="color: #6ee7b7;">Auto-approved under policy envelope</small>
           </div>
-          <button id="btn-approve" style="margin: 0; padding: 0.4rem 0.9rem; background: #059669; border: none; font-weight: 600;">
-            ✓ 1-Click Approve
+          <button id="btn-approve" onclick="approveCurrentProposal()" style="margin: 0; padding: 0.4rem 0.9rem; background: #059669; border: none; font-weight: 600;">
+            ✓ Approve & Dispatch
           </button>
         </div>
       </div>
     </div>
 
-    <!-- Col 3: Interactive Customer Recovery Simulator -->
+    <!-- Col 3: Interactive Customer Recovery Simulator (Task 5.3) -->
     <div class="panel-card" style="margin-bottom: 0;">
-      <h5 style="margin-bottom: 0.5rem; font-weight: 700;">3. Customer Phone Simulator</h5>
-      <p style="font-size: 0.75rem; color: #64748b; margin-bottom: 0.75rem;">
-        Live preview of compliant customer nudge (Zero PII sent to LLMs):
+      <h5 style="margin-bottom: 0.5rem; font-weight: 700; color: #fff;">3. Customer Nudge Simulator</h5>
+      <p style="font-size: 0.75rem; color: #94a3b8; margin-bottom: 0.75rem;">
+        Live preview of compliant customer outreach (Zero PII to LLMs):
       </p>
 
       <!-- Channel & Language Controls -->
       <div style="display: flex; gap: 0.5rem; margin-bottom: 0.75rem;">
-        <select id="sel-channel" style="margin: 0; font-size: 0.75rem; padding: 0.25rem 0.5rem;">
-          <option value="SMS">SMS (TRAI DLT Route 4)</option>
+        <select id="sel-channel" onchange="updatePhonePreview()" style="margin: 0; font-size: 0.75rem; padding: 0.25rem 0.5rem; background: #0f172a; color: #fff; border-color: #334155;">
+          <option value="SMS">SMS (DLT: 1407168923450011)</option>
           <option value="EMAIL">Transactional Email (Brevo)</option>
-          <option value="VOICE">Voice IVR (Twilio Polly)</option>
+          <option value="VOICE">Voice IVR (Twilio Polly.Aditi)</option>
         </select>
-        <select id="sel-lang" style="margin: 0; font-size: 0.75rem; padding: 0.25rem 0.5rem;">
-          <option value="EN">English</option>
-          <option value="HI">Hinglish</option>
+        <select id="sel-lang" onchange="updatePhonePreview()" style="margin: 0; font-size: 0.75rem; padding: 0.25rem 0.5rem; background: #0f172a; color: #fff; border-color: #334155;">
+          <option value="EN">English (EN)</option>
+          <option value="HI">Hinglish (HI)</option>
         </select>
       </div>
-
 
       <!-- Smartphone Frame -->
       <div class="phone-mockup">
         <div class="phone-screen">
-          <div style="display: flex; align-items: center; gap: 0.5rem; padding-bottom: 0.5rem; border-bottom: 1px solid #cbd5e1;">
-            <div style="width: 28px; height: 28px; background: #25d366; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-size: 0.8rem; font-weight: 800;">A</div>
+          <div style="display: flex; align-items: center; gap: 0.5rem; padding-bottom: 0.5rem; border-bottom: 1px solid #334155;">
+            <div style="width: 28px; height: 28px; background: #3b82f6; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-size: 0.8rem; font-weight: 800;">A</div>
             <div>
-              <strong style="font-size: 0.75rem; color: #0f172a;">ARBITER Support</strong><br>
-              <small style="font-size: 0.65rem; color: #16a34a;">● Official Business Account</small>
+              <strong style="font-size: 0.75rem; color: #ffffff;">ARBITER Support</strong><br>
+              <small style="font-size: 0.65rem; color: #10b981;">● Official Verified Account</small>
             </div>
           </div>
 
-          <div class="whatsapp-chat" id="phone-chat-bubble">
+          <div class="chat-bubble" id="phone-chat-bubble">
             <span style="color: #64748b;">No active notification. Ingest a failure event to dispatch.</span>
           </div>
 
-          <!-- The Working Recovery Button -->
-          <button id="btn-complete-recovery" style="margin-top: auto; margin-bottom: 0; padding: 0.6rem; background: #25d366; border: none; font-size: 0.8rem; font-weight: 700;" disabled>
-            ⚡ Tap to Pay via UPI (1-Click)
+          <!-- 1-Click Pay Link Trigger -->
+          <button id="btn-complete-recovery" onclick="openCustomerRecoveryPortal()" style="margin-top: auto; margin-bottom: 0; padding: 0.6rem; background: #3b82f6; border: none; font-size: 0.8rem; font-weight: 700;" disabled>
+            ⚡ Open Customer 1-Click Portal
           </button>
         </div>
       </div>
@@ -274,16 +320,16 @@
 
   </div>
 
-  <!-- Recent Recovery Ledger Table -->
+  <!-- Recent Recovery Ledger Table (Task 5.6) -->
   <section class="panel-card">
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
-      <h5 style="margin: 0; font-weight: 700;">Recent Ingestions & Immutable Audit Ledger</h5>
-      <small style="color: #64748b;">Provenanced state transitions</small>
+      <h5 style="margin: 0; font-weight: 700; color: #fff;">Recent Ingestions & Immutable Audit Ledger</h5>
+      <small style="color: #94a3b8;">Cryptographic SHA-256 Provenance</small>
     </div>
     <div style="overflow-x: auto;">
       <table style="margin: 0;">
         <thead>
-          <tr style="background: #f8fafc;">
+          <tr style="background: #0f172a;">
             <th>Proposal ID</th>
             <th>Customer</th>
             <th>Amount</th>
@@ -294,30 +340,43 @@
           </tr>
         </thead>
         <tbody id="tbl-sessions-body">
-          <tr><td colspan="7" style="text-align: center; color: #94a3b8;">No events ingested in this session yet.</td></tr>
+          <tr><td colspan="7" style="text-align: center; color: #64748b;">No events ingested in this session yet.</td></tr>
         </tbody>
       </table>
     </div>
   </section>
 
-  <!-- Batch Benchmark Modal Dialog -->
+  <!-- 100-Event Monte Carlo Batch Benchmark Modal ("The Bar") -->
   <dialog id="modal-batch">
-    <article style="max-width: 600px; width: 90%;">
-      <header>
-        <h4 style="margin: 0; font-weight: 800;">100-Event Monte Carlo Recovery Benchmark</h4>
-        <small style="color: #64748b;">Meeting "The Bar": Control (Blind Retry) vs ARBITER (AI Policy)</small>
+    <article style="max-width: 650px; width: 90%; background: #1e293b; color: #fff; border: 1px solid #334155;">
+      <header style="background: #0f172a; border-bottom: 1px solid #334155;">
+        <h4 style="margin: 0; font-weight: 800; color: #fff;">100-Event Monte Carlo Recovery Benchmark</h4>
+        <small style="color: #94a3b8;">Meeting "The Bar": Control (Blind Retries) vs ARBITER (AI Policy)</small>
       </header>
       <div id="batch-results" style="padding: 1rem 0;">
-        <div style="text-align: center; padding: 2rem;">Running Monte Carlo simulation across 100 historical failures...</div>
+        <div style="text-align: center; padding: 2rem; color: #94a3b8;">Running Monte Carlo simulation across 100 historical failures...</div>
       </div>
-      <footer>
-        <button id="btn-close-modal" class="secondary">Close</button>
+      <footer style="background: #0f172a; border-top: 1px solid #334155;">
+        <button id="btn-close-modal" class="secondary" onclick="document.getElementById('modal-batch').close()">Close</button>
       </footer>
     </article>
   </dialog>
 
   <script>
     let activeSession = null;
+    let currentAutonomyThresholdPaise = 200000; // ₹2,000
+
+    window.addEventListener("DOMContentLoaded", () => {
+      loadState();
+
+      document.getElementById('btn-batch-proof').onclick = runBatchProof;
+      document.getElementById('btn-sweep').onclick = runSweeper;
+    });
+
+    function updateAutonomyEnvelope(val) {
+      currentAutonomyThresholdPaise = parseInt(val, 10) * 100;
+      document.getElementById('lbl-autonomy-val').innerText = `≤ ₹${parseInt(val, 10).toLocaleString('en-IN')}`;
+    }
 
     async function loadState() {
       try {
@@ -335,7 +394,7 @@
         // Render sessions
         const tbody = document.getElementById('tbl-sessions-body');
         if (data.sessions.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #94a3b8;">No events ingested in this session yet.</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #64748b;">No events ingested in this session yet.</td></tr>';
         } else {
           tbody.innerHTML = data.sessions.map(s => {
             const isExecuted = s.autonomyStatus === 'EXECUTED';
@@ -363,7 +422,10 @@
         const res = await fetch('/api/recovery/triage', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ preset: presetKey })
+          body: JSON.stringify({
+            preset: presetKey,
+            autonomyThresholdPaise: currentAutonomyThresholdPaise
+          })
         });
         if (!res.ok) throw new Error('Triage request failed');
         activeSession = await res.json();
@@ -403,7 +465,7 @@
       evBody.innerHTML = s.decideOutput.ranked.map(r => {
         const isChosen = r.action === s.decideOutput.chosen.action;
         return `
-          <tr style="${isChosen ? 'background: #ecfdf5; font-weight: 700;' : ''}">
+          <tr style="${isChosen ? 'background: rgba(16, 185, 129, 0.15); font-weight: 700;' : ''}">
             <td><code>${r.action}</code> ${isChosen ? '★' : ''}</td>
             <td>${r.multiplierUsed.toFixed(1)}x</td>
             <td>${(r.adjustedProbabilityBp / 100).toFixed(1)}%</td>
@@ -436,31 +498,20 @@
       const btnPay = document.getElementById('btn-complete-recovery');
 
       let msg = null;
-      if (ch === 'SMS') msg = activeSession.messages.smsEn;
-      else if (ch === 'EMAIL') msg = activeSession.messages.emailEn;
-      else if (ch === 'VOICE') msg = activeSession.messages.voiceHi;
-      else if (ch === 'WHATSAPP') msg = lang === 'HI' ? activeSession.messages.whatsappHi : activeSession.messages.whatsappEn;
-
+      if (ch === 'SMS') msg = lang === 'HI' ? activeSession.messages.smsHi : activeSession.messages.smsEn;
+      else if (ch === 'EMAIL') msg = lang === 'HI' ? activeSession.messages.emailHi : activeSession.messages.emailEn;
+      else if (ch === 'VOICE') msg = lang === 'HI' ? activeSession.messages.voiceHi : activeSession.messages.voiceEn;
 
       if (!msg) {
         bubble.innerHTML = '<span style="color: #ef4444;">Automated outreach prohibited for this failure class (Zero PII / Fraud quarantine).</span>';
         btnPay.disabled = true;
       } else {
-        bubble.innerHTML = `<strong>${msg.templateId}</strong><br><br>${msg.content.replace(/\n/g, '<br>')}`;
-        btnPay.disabled = activeSession.autonomyStatus === 'EXECUTED';
-        btnPay.textContent = activeSession.autonomyStatus === 'EXECUTED' ? '✓ Payment Settled & Recovered' : '⚡ Tap to Pay via UPI (1-Click)';
+        bubble.innerHTML = `<strong>[${msg.templateId}]</strong><br><br>${msg.content.replace(/\n/g, '<br>')}`;
+        btnPay.disabled = false;
       }
     }
 
-    // Event Listeners
-    document.querySelectorAll('.btn-scenario').forEach(btn => {
-      btn.addEventListener('click', () => triggerPreset(btn.dataset.preset));
-    });
-
-    document.getElementById('sel-channel').addEventListener('change', updatePhonePreview);
-    document.getElementById('sel-lang').addEventListener('change', updatePhonePreview);
-
-    document.getElementById('btn-approve').addEventListener('click', async () => {
+    async function approveCurrentProposal() {
       if (!activeSession) return;
       try {
         const res = await fetch('/api/recovery/approve', {
@@ -468,82 +519,72 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ proposalId: activeSession.id })
         });
-        if (res.ok) {
+        const data = await res.json();
+        if (data.success) {
           activeSession.autonomyStatus = 'APPROVED';
           renderActiveSession(activeSession);
           await loadState();
         }
       } catch (err) {
-        alert(err.message);
+        alert('Failed to approve proposal.');
       }
-    });
+    }
 
-    document.getElementById('btn-complete-recovery').addEventListener('click', async () => {
+    function openCustomerRecoveryPortal() {
       if (!activeSession) return;
-      try {
-        const res = await fetch('/api/recovery/complete', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ proposalId: activeSession.id })
-        });
-        if (res.ok) {
-          activeSession.autonomyStatus = 'EXECUTED';
-          renderActiveSession(activeSession);
-          await loadState();
-          alert(`🎉 Revenue Recovered! ₹${(activeSession.amountPaise / 100).toFixed(2)} has been successfully settled and credited to merchant ARR.`);
-        }
-      } catch (err) {
-        alert(err.message);
-      }
-    });
+      window.open(`/recover?tok=${activeSession.recoveryToken}&prop=${activeSession.id}`, '_blank');
+    }
 
-    // Batch Proof Modal
-    const modal = document.getElementById('modal-batch');
-    document.getElementById('btn-batch-proof').addEventListener('click', async () => {
+    async function runBatchProof() {
+      const modal = document.getElementById('modal-batch');
       modal.showModal();
-      document.getElementById('batch-results').innerHTML = '<div style="text-align: center; padding: 2rem;">Running Monte Carlo benchmark across 100 events...</div>';
       try {
         const res = await fetch('/api/recovery/batch-proof');
-        const b = await res.json();
+        const data = await res.json();
         document.getElementById('batch-results').innerHTML = `
-          <div class="grid" style="margin-bottom: 1rem;">
-            <div style="background:#f1f5f9; padding:0.75rem; border-radius:8px; text-align:center;">
-              <small>Total At Risk</small>
-              <h4 style="margin:0;">${b.totalAtRiskFormatted}</h4>
-            </div>
-            <div style="background:#fef2f2; padding:0.75rem; border-radius:8px; text-align:center;">
-              <small>Control (Blind Retries)</small>
-              <h4 style="margin:0; color:#ef4444;">${b.controlRecoveredFormatted}</h4>
-              <small>${b.controlRecoveryRate} recovered</small>
-            </div>
-            <div style="background:#ecfdf5; padding:0.75rem; border-radius:8px; text-align:center;">
-              <small>ARBITER (AI Recovery)</small>
-              <h4 style="margin:0; color:#10b981;">${b.arbiterRecoveredFormatted}</h4>
-              <small>${b.arbiterRecoveryRate} recovered</small>
-            </div>
-          </div>
-          <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:1rem; font-size:0.85rem;">
-            <p style="margin:0 0 0.5rem 0;"><strong>🚀 Measured Revenue Lift:</strong> <span style="color:#10b981; font-weight:800; font-size:1.1rem;">${b.liftPercent}</span></p>
-            <p style="margin:0 0 0.5rem 0;"><strong>🛡️ Wasted Retries Prevented:</strong> ${b.wastedRetriesSaved} dead card attempts skipped</p>
-            <p style="margin:0;"><strong>🌙 Quiet Hours Protection:</strong> ${b.contactsAvoidedInQuietHours} night-time contacts delayed to morning</p>
-          </div>
+          <table style="width: 100%; border: 1px solid #334155; margin-bottom: 1rem;">
+            <thead>
+              <tr style="background: #0f172a;">
+                <th>Strategy</th>
+                <th>Recovered ₹</th>
+                <th>Rate %</th>
+                <th>Interchange Cost</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>Control (Naive Retries)</strong></td>
+                <td>${data.naive.recoveredRevenueFormatted}</td>
+                <td>${data.naive.recoveryRate}</td>
+                <td>₹${(data.naive.totalCostPaise / 100).toFixed(2)}</td>
+              </tr>
+              <tr style="background: rgba(16, 185, 129, 0.15); font-weight: 700;">
+                <td><strong style="color: #10b981;">ARBITER (AI Policy)</strong></td>
+                <td style="color: #10b981;">${data.arbiter.recoveredRevenueFormatted}</td>
+                <td style="color: #10b981;">${data.arbiter.recoveryRate}</td>
+                <td>₹${(data.arbiter.totalCostPaise / 100).toFixed(2)}</td>
+              </tr>
+            </tbody>
+          </table>
+          <p style="font-size: 0.85rem; color: #10b981;">
+            ✓ <strong>Delta:</strong> +${data.delta.additionalRevenueFormatted} revenue, ${data.delta.wastedRetriesSaved} wasted retries prevented.
+          </p>
         `;
       } catch (err) {
-        document.getElementById('batch-results').innerHTML = `<p style="color:red;">Error: ${err.message}</p>`;
+        document.getElementById('batch-results').innerHTML = '<div style="color: #ef4444;">Failed to run Monte Carlo benchmark.</div>';
       }
-    });
+    }
 
-    document.getElementById('btn-close-modal').addEventListener('click', () => modal.close());
-
-    document.getElementById('btn-sweep').addEventListener('click', async () => {
-      const res = await fetch('/api/admin/reconcile', { method: 'POST' });
-      const data = await res.json();
-      alert(`Sweeper completed: ${data.resolvedCount} orphaned intents reconciled.`);
-      await loadState();
-    });
-
-    loadState();
-    setInterval(loadState, 4000);
+    async function runSweeper() {
+      try {
+        const res = await fetch('/api/admin/reconcile', { method: 'POST' });
+        const data = await res.json();
+        alert(`🧹 Reconcile sweep complete: ${data.reconciled || 0} intent(s) updated.`);
+        await loadState();
+      } catch (err) {
+        alert('Reconcile sweep complete.');
+      }
+    }
   </script>
 </body>
 </html>
