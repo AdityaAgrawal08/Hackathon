@@ -200,7 +200,12 @@
         <small style="color:#94a3b8;">₹50,000 · High Risk · Quarantine</small>
       </button>
 
+      <button class="btn-scenario" style="border: 1px dashed #60a5fa; text-align: center;" onclick="document.getElementById('modal-custom').showModal()">
+        <strong>⚙️ Custom Failure Telemetry Injector</strong>
+      </button>
+
       <hr style="border-color: #334155; margin: 0.75rem 0;">
+
 
       <!-- Autonomy Slider Dial (Task 5.4) -->
       <div>
@@ -362,9 +367,78 @@
     </article>
   </dialog>
 
+  <!-- Custom Ingestion Modal Dialog (Task 5.1) -->
+  <dialog id="modal-custom">
+    <article style="max-width: 540px; width: 90%; background: #1e293b; color: #fff; border: 1px solid #334155;">
+      <header style="background: #0f172a; border-bottom: 1px solid #334155;">
+        <h4 style="margin: 0; font-weight: 800; color: #fff;">Inject Custom Failure Telemetry</h4>
+        <small style="color: #94a3b8;">Simulate raw Razorpay error payload with custom attributes</small>
+      </header>
+      <div style="padding: 1rem 0;">
+        <label style="font-size: 0.8rem; color: #94a3b8;">Razorpay Error Code:
+          <input type="text" id="cust-err-code" value="BAD_REQUEST_PAYMENT_ACCOUNT_INSUFFICIENT_BALANCE" style="background: #0f172a; color: #fff; border-color: #334155; margin-top: 0.25rem;">
+        </label>
+        <div class="grid" style="grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-top: 0.5rem;">
+          <label style="font-size: 0.8rem; color: #94a3b8;">Customer Name:
+            <input type="text" id="cust-name" value="Ananya Deshmukh" style="background: #0f172a; color: #fff; border-color: #334155; margin-top: 0.25rem;">
+          </label>
+          <label style="font-size: 0.8rem; color: #94a3b8;">Amount (₹):
+            <input type="number" id="cust-amount" value="3499" style="background: #0f172a; color: #fff; border-color: #334155; margin-top: 0.25rem;">
+          </label>
+        </div>
+        <div class="grid" style="grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-top: 0.5rem;">
+          <label style="font-size: 0.8rem; color: #94a3b8;">Customer Phone:
+            <input type="text" id="cust-phone" value="+91 99888 77665" style="background: #0f172a; color: #fff; border-color: #334155; margin-top: 0.25rem;">
+          </label>
+          <label style="font-size: 0.8rem; color: #94a3b8;">Instrument Desc:
+            <input type="text" id="cust-instrument" value="ICICI Netbanking" style="background: #0f172a; color: #fff; border-color: #334155; margin-top: 0.25rem;">
+          </label>
+        </div>
+      </div>
+      <footer style="background: #0f172a; border-top: 1px solid #334155; display: flex; justify-content: flex-end; gap: 0.5rem;">
+        <button class="secondary" onclick="document.getElementById('modal-custom').close()" style="margin: 0;">Cancel</button>
+        <button onclick="injectCustomFailure()" style="margin: 0; background: #3b82f6; border: none; font-weight: 600;">⚡ Ingest & Triage</button>
+      </footer>
+    </article>
+  </dialog>
+
   <script>
     let activeSession = null;
     let currentAutonomyThresholdPaise = 200000; // ₹2,000
+
+    async function injectCustomFailure() {
+      const code = document.getElementById('cust-err-code').value;
+      const name = document.getElementById('cust-name').value;
+      const amount = parseFloat(document.getElementById('cust-amount').value || '1999');
+      const phone = document.getElementById('cust-phone').value;
+      const instrument = document.getElementById('cust-instrument').value;
+
+      document.getElementById('modal-custom').close();
+
+      try {
+        const res = await fetch('/api/recovery/triage', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            customPreset: {
+              customerName: name,
+              customerPhone: phone,
+              amountPaise: Math.round(amount * 100),
+              failureCode: code,
+              instrumentDesc: instrument,
+            },
+            autonomyThresholdPaise: currentAutonomyThresholdPaise,
+          })
+        });
+        if (!res.ok) throw new Error('Custom triage failed');
+        activeSession = await res.json();
+        renderActiveSession(activeSession);
+        await loadState();
+      } catch (e) {
+        alert('Failed to inject custom failure: ' + e.message);
+      }
+    }
+
 
     window.addEventListener("DOMContentLoaded", () => {
       loadState();
