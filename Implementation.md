@@ -695,3 +695,56 @@ Ordered by win-probability impact. Each item lists effort (S/M/L) and target mod
 - **4.7** Records a customer's promise-to-pay and learns the kept-rate — goodwill no single PSP models.
 - **4.8** Proposes a partial first installment on a large B2B invoice via a deterministic Smart Collect identifier — a single PSP only asks full-or-nothing.
 
+## 18. Payment-Trial Sandbox (mock, no real money / network)
+
+> Validates the **recovery-collection payment workflow** end-to-end against 20
+> production-like failure/recovery scenarios in a fully sandboxed, in-memory
+> SQLite database. The "provider" is `MockRazorpayProvider` — a deterministic
+> script keyed by scenario id, **no network, no real gateway, no real money**.
+
+### What it proves (the brief's "realistic payment-trial environment")
+- **Double-charge safety** — the central hazard ("provider charged but the
+  response was lost") is exercised by `success_lost_response` and the
+  `duplicate_request` / `multiple_submits` / `idempotency_repeat` / `concurrent_attempts`
+  scenarios. A retry (or concurrent request) with the same client idempotency
+  key **always** resolves to the *same* charge — never a second one.
+- **Idempotency registry** — `payment_intents(client_idem_key UNIQUE)` +
+  `executePaymentIntent` / `reconcileIntent`. Checked *before* any proposal-state
+  assertion, so a retry arriving after the proposal moved to `EXECUTING` still
+  short-circuits.
+- **Lost-response UX** — when the provider charged but the response never
+  reached the client (`delivered=false`), the intent is `SUCCEEDED` server-side
+  (balance debited once) but `clientVisible=UNKNOWN`; the retry is idempotent and
+  the customer is told to wait for confirmation, never "success" prematurely.
+- **Uncertain outcomes never terminate early** — timeouts/unavailable/network-down/
+  server-error/client-disconnect leave the intent `UNKNOWN` and the proposal
+  `EXECUTING`; a later `reconcileIntent` (provider webhook) settles it exactly
+  once (idempotent debit).
+- **Safe user messages** — every client-visible message is derived only from a
+  safe `errorCode` + failure class; no stack traces, raw codes, or internals leak.
+- **Audit + notifications** — each attempt writes an `audit_log` row and a
+  channel-appropriate `notifications` row.
+
+### Package layout (`packages/trial`)
+| File | Role |
+|------|------|
+| `src/provider.ts` | `MockRazorpayProvider` + `PROVIDER_SCRIPT` (per-scenario deterministic outcomes; stateful for duplicate replays) |
+| `src/scenarios.ts` | `SCENARIOS` — 20 scenarios (id/title/failureClass/action/pattern) |
+| `src/orchestrator.ts` | `runTrial(client, scenario, provider, nowMs)` → `TrialReport` (request, provider response, backend decision, final state, DB, user message, notification, idempotency, retry) |
+| `src/userMessage.ts` | `userFacingMessage` (en/hi, safe) + `channelForAction` |
+| `src/run.ts` | `pnpm trial` CLI — prints the per-scenario table + detail |
+| `tests/payment_trial.test.ts` | 7 tests, 20 scenarios — no double charge, idempotent, lost-response UNKNOWN, safe messages, notifications, concurrent |
+
+### Run it
+```bash
+pnpm trial          # live sandbox report (no real money/network)
+pnpm verify         # typecheck + full suite (now 320 tests, +7 trial)
+```
+
+### Core fix delivered by the sandbox
+The sandbox surfaced (and we fixed) the correct ordering of the double-charge
+guard: idempotency lookup must happen **before** the proposal-state assertion,
+and a `client_visible` column preserves the lost-response "UNKNOWN" across
+idempotent replays. See `packages/core/src/executor/payment_intent.ts`.
+
+

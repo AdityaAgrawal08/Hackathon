@@ -1,0 +1,25 @@
+{
+  "name": "@arbiter/trial",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./provider": "./src/provider.ts",
+    "./scenarios": "./src/scenarios.ts",
+    "./orchestrator": "./src/orchestrator.ts",
+    "./userMessage": "./src/userMessage.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@arbiter/core": "workspace:*",
+    "@arbiter/shared": "workspace:*",
+    "@libsql/client": "^0.15.0",
+    "zod": "^4.1.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0"
+  }
+}
