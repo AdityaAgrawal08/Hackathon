@@ -53,11 +53,15 @@ export interface GatewayChargeInput {
   amountPaise: number;
   scenario?: string; // Explicit fault profile for LOCAL_SANDBOX (e.g. 'LOCAL_INSUFFICIENT_FUNDS')
   instrument?: {
-    type: "test_profile" | "card" | "upi" | "netbanking";
+    type?: "test_profile" | "card" | "upi" | "netbanking";
     testProfile?: string;
     token?: string;
     vpa?: string;
+    signature?: string;
+    errorCode?: string;
+    errorDescription?: string;
   };
+
 }
 
 export interface GatewayChargeResult {
