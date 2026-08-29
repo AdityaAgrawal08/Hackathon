@@ -26,6 +26,14 @@ import {
   renderComplianceMessage,
   type RenderedMessage,
   type FailureClassId,
+  OutreachRouter,
+  MSG91SmsProvider,
+  BrevoEmailProvider,
+  TwilioVoiceProvider,
+  GupshupWhatsAppProvider,
+  type OutreachChannel,
+  type OutreachPayload,
+  type ProviderDispatchResult,
 } from "../packages/core/src/index.js";
 import {
   computeFeatures,
@@ -34,6 +42,14 @@ import {
   type ComputedFeatures,
   type ScoreResult,
 } from "../packages/ml/src/index.js";
+
+// Global Outreach Router with registered providers (Task 6.3)
+export const defaultOutreachRouter = new OutreachRouter();
+defaultOutreachRouter.registerProvider(new MSG91SmsProvider());
+defaultOutreachRouter.registerProvider(new BrevoEmailProvider());
+defaultOutreachRouter.registerProvider(new TwilioVoiceProvider());
+defaultOutreachRouter.registerProvider(new GupshupWhatsAppProvider());
+
 
 export interface SimulationPreset {
   id: string;
@@ -136,15 +152,20 @@ export interface RecoveryProposalSession {
   messages: {
     whatsappEn: RenderedMessage | null;
     whatsappHi: RenderedMessage | null;
+    voiceEn: RenderedMessage | null;
     voiceHi: RenderedMessage | null;
     smsEn: RenderedMessage | null;
+    smsHi: RenderedMessage | null;
     emailEn: RenderedMessage | null;
+    emailHi: RenderedMessage | null;
   };
+  dispatchResult?: ProviderDispatchResult;
   recoveryToken: string;
   recoveryUrl: string;
   createdAtUtc: string;
   settledAtUtc?: string;
 }
+
 
 // In-memory active recovery store
 export const recoverySessions = new Map<string, RecoveryProposalSession>();
@@ -205,7 +226,9 @@ export async function simulateFailureTriage(
             ? "RISK_FLAGGED"
             : "UNKNOWN";
 
-  const diagnosis = diagnoseFailure(preset.failureCode, diagClass);
+  const rawDiag = diagnoseFailure(preset.failureCode, diagClass);
+  const diagnosis = { ...rawDiag, class: diagClass };
+
 
   // 2. Task 1.2: 16-Dimensional ML Feature Extraction
   const features = computeFeatures({
@@ -301,61 +324,116 @@ export async function simulateFailureTriage(
     liveMetrics.wastedAttemptsSaved += 3;
   }
 
-  // 7. Task 6.4: Append-Only Audit Logging to SQLite
+  // 7. Task 6.3: Autonomous Multi-Channel Provider Dispatch
+  if (isAutoApproved && diagClass !== "RISK_FLAGGED") {
+    const channel: OutreachChannel =
+      decideOutput.chosen.action === "RECOVER_EMAIL"
+        ? "EMAIL"
+        : decideOutput.chosen.action === "RECOVER_VOICE_HI"
+        ? "VOICE"
+        : decideOutput.chosen.action === "RECOVER_WHATSAPP"
+        ? "WHATSAPP"
+        : "SMS";
+
+    const outreachPayload: OutreachPayload = {
+      proposalId,
+      failureClass: diagClass,
+      action: decideOutput.chosen.action,
+      recipient: {
+        customerName: preset.customerName,
+        phone: preset.customerPhone,
+        email: `${preset.customerName.toLowerCase().replace(/[^a-z0-9]/g, "")}@example.com`,
+      },
+      amountPaise: preset.amountPaise,
+      paymentLinkUrl: recoveryUrl,
+      language: "EN",
+      rawErrorReason: preset.failureCode,
+    };
+
+    try {
+      session.dispatchResult = await defaultOutreachRouter.dispatch(channel, outreachPayload, nowMs);
+    } catch {}
+  }
+
+  // 8. Task 6.4: Append-Only Audit Logging to SQLite
   if (dbClient) {
     try {
-      await dbClient.batch(
-        [
-          {
-            sql: `INSERT OR IGNORE INTO audit_log
-                    (ts_utc, tenant_id, event_id, actor, entry_type, payload_json)
-                  VALUES (?, ?, ?, ?, ?, ?)`,
-            args: [
-              nowUtc,
-              "demo",
-              eventId,
-              "PIPELINE",
-              "TRIGGER",
-              JSON.stringify({ modelVersion: "logreg@1.0.0", policyVersion: "policy-v1", failureCode: preset.failureCode, amountPaise: preset.amountPaise, customer: preset.customerName }),
-            ],
-          },
-          {
-            sql: `INSERT OR IGNORE INTO audit_log
-                    (ts_utc, tenant_id, event_id, actor, entry_type, payload_json)
-                  VALUES (?, ?, ?, ?, ?, ?)`,
-            args: [
-              nowUtc,
-              "demo",
-              eventId,
-              "PIPELINE",
-              "DIAGNOSIS",
-              JSON.stringify({ modelVersion: "logreg@1.0.0", policyVersion: "policy-v1", rootCause: diagnosis.rootCause, explanation: diagnosis.explanation, class: diagClass }),
-            ],
-          },
-          {
-            sql: `INSERT OR IGNORE INTO audit_log
-                    (ts_utc, tenant_id, event_id, actor, entry_type, payload_json)
-                  VALUES (?, ?, ?, ?, ?, ?)`,
-            args: [
-              nowUtc,
-              "demo",
-              eventId,
-              "PIPELINE",
-              "DECISION",
-              JSON.stringify({
-                modelVersion: "logreg@1.0.0",
-                policyVersion: "policy-v1",
-                proposalId,
-                chosenAction: decideOutput.chosen.action,
-                evPaise: decideOutput.chosen.evPaise,
-                probability,
-                autonomyStatus,
-              }),
-            ],
-          },
-        ],
-        "write",
-      );
+      const batchEntries: Array<{ sql: string; args: any[] }> = [
+        {
+          sql: `INSERT OR IGNORE INTO audit_log
+                  (ts_utc, tenant_id, event_id, actor, entry_type, payload_json)
+                VALUES (?, ?, ?, ?, ?, ?)`,
+          args: [
+            nowUtc,
+            "demo",
+            proposalId,
+            "PIPELINE",
+            "TRIGGER",
+            JSON.stringify({ modelVersion: "logreg@1.0.0", policyVersion: "policy-v1", failureCode: preset.failureCode, amountPaise: preset.amountPaise, customer: preset.customerName }),
+          ],
+        },
+        {
+          sql: `INSERT OR IGNORE INTO audit_log
+                  (ts_utc, tenant_id, event_id, actor, entry_type, payload_json)
+                VALUES (?, ?, ?, ?, ?, ?)`,
+          args: [
+            nowUtc,
+            "demo",
+            proposalId,
+            "PIPELINE",
+            "DIAGNOSIS",
+            JSON.stringify({ modelVersion: "logreg@1.0.0", policyVersion: "policy-v1", rootCause: diagnosis.rootCause, explanation: diagnosis.explanation, class: diagClass }),
+          ],
+        },
+        {
+          sql: `INSERT OR IGNORE INTO audit_log
+                  (ts_utc, tenant_id, event_id, actor, entry_type, payload_json)
+                VALUES (?, ?, ?, ?, ?, ?)`,
+          args: [
+            nowUtc,
+            "demo",
+            proposalId,
+            "PIPELINE",
+            "DECISION",
+            JSON.stringify({
+              modelVersion: "logreg@1.0.0",
+              policyVersion: "policy-v1",
+              proposalId,
+              chosenAction: decideOutput.chosen.action,
+              evPaise: decideOutput.chosen.evPaise,
+              probability,
+              autonomyStatus,
+            }),
+          ],
+        },
+      ];
+
+
+      if (session.dispatchResult) {
+        batchEntries.push({
+          sql: `INSERT OR IGNORE INTO audit_log
+                  (ts_utc, tenant_id, event_id, actor, entry_type, payload_json)
+                VALUES (?, ?, ?, ?, ?, ?)`,
+          args: [
+            nowUtc,
+            "demo",
+            proposalId,
+            "PROVIDER",
+            "DISPATCH",
+            JSON.stringify({
+              modelVersion: "logreg@1.0.0",
+              policyVersion: "policy-v1",
+              proposalId,
+              channel: session.dispatchResult.channel,
+              provider: session.dispatchResult.providerName,
+              status: session.dispatchResult.status,
+              externalMessageId: session.dispatchResult.externalMessageId,
+            }),
+          ],
+        });
+      }
+
+      await dbClient.batch(batchEntries, "write");
     } catch {
       // Non-blocking for in-memory runs
     }
@@ -364,25 +442,82 @@ export async function simulateFailureTriage(
   return session;
 }
 
-export async function approveProposal(proposalId: string, dbClient?: Client): Promise<boolean> {
+export async function approveProposal(proposalId: string, dbClient?: Client, nowMs: number = Date.now()): Promise<boolean> {
   const session = recoverySessions.get(proposalId);
   if (!session) return false;
   if (session.autonomyStatus === "AWAITING_APPROVAL") {
     session.autonomyStatus = "APPROVED";
+    const nowUtc = isoUtc(nowMs);
+
+    const channel: OutreachChannel =
+      session.decideOutput.chosen.action === "RECOVER_EMAIL"
+        ? "EMAIL"
+        : session.decideOutput.chosen.action === "RECOVER_VOICE_HI"
+        ? "VOICE"
+        : session.decideOutput.chosen.action === "RECOVER_WHATSAPP"
+        ? "WHATSAPP"
+        : "SMS";
+
+    const outreachPayload: OutreachPayload = {
+      proposalId: session.id,
+      failureClass: session.diagnosis.class,
+      action: session.decideOutput.chosen.action,
+      recipient: {
+        customerName: session.customerName,
+        phone: session.customerPhone,
+        email: `${session.customerName.toLowerCase().replace(/[^a-z0-9]/g, "")}@example.com`,
+      },
+      amountPaise: session.amountPaise,
+      paymentLinkUrl: session.recoveryUrl,
+      language: "EN",
+      rawErrorReason: session.failureCode,
+    };
+
+    try {
+      session.dispatchResult = await defaultOutreachRouter.dispatch(channel, outreachPayload, nowMs);
+    } catch {}
+
     if (dbClient) {
       try {
-        await dbClient.execute({
-          sql: `INSERT INTO audit_log (ts_utc, tenant_id, event_id, actor, entry_type, payload_json)
-                VALUES (?, ?, ?, ?, ?, ?)`,
-          args: [
-            isoUtc(Date.now()),
-            "demo",
-            proposalId,
-            "MERCHANT",
-            "APPROVAL",
-            JSON.stringify({ modelVersion: "logreg@1.0.0", policyVersion: "policy-v1", proposalId, action: "APPROVED" }),
-          ],
-        });
+        const batchEntries: Array<{ sql: string; args: any[] }> = [
+          {
+            sql: `INSERT INTO audit_log (ts_utc, tenant_id, event_id, actor, entry_type, payload_json)
+                  VALUES (?, ?, ?, ?, ?, ?)`,
+            args: [
+              nowUtc,
+              "demo",
+              proposalId,
+              "MERCHANT",
+              "APPROVAL",
+              JSON.stringify({ modelVersion: "logreg@1.0.0", policyVersion: "policy-v1", proposalId, action: "APPROVED" }),
+            ],
+          },
+        ];
+
+        if (session.dispatchResult) {
+          batchEntries.push({
+            sql: `INSERT OR IGNORE INTO audit_log (ts_utc, tenant_id, event_id, actor, entry_type, payload_json)
+                  VALUES (?, ?, ?, ?, ?, ?)`,
+            args: [
+              nowUtc,
+              "demo",
+              proposalId,
+              "PROVIDER",
+              "DISPATCH",
+              JSON.stringify({
+                modelVersion: "logreg@1.0.0",
+                policyVersion: "policy-v1",
+                proposalId,
+                channel: session.dispatchResult.channel,
+                provider: session.dispatchResult.providerName,
+                status: session.dispatchResult.status,
+                externalMessageId: session.dispatchResult.externalMessageId,
+              }),
+            ],
+          });
+        }
+
+        await dbClient.batch(batchEntries, "write");
       } catch {}
     }
     return true;
@@ -420,7 +555,131 @@ export async function completeRecovery(proposalId: string, dbClient?: Client): P
   return false;
 }
 
+export interface RecoveryTraceStep {
+  step: "TRIGGER" | "DIAGNOSIS" | "DECISION" | "DISPATCH" | "APPROVAL" | "OUTCOME";
+  timestampUtc: string;
+  actor: string;
+  summary: string;
+  payload: Record<string, unknown>;
+  sha256Hash: string;
+}
+
+export interface RecoveryTrace {
+  proposalId: string;
+  recoveryToken: string;
+  customerName: string;
+  amountPaise: number;
+  formattedAmount: string;
+  failureClass: string;
+  autonomyStatus: string;
+  isRecovered: boolean;
+  steps: RecoveryTraceStep[];
+}
+
+export async function getRecoveryTrace(id: string, dbClient?: Client): Promise<RecoveryTrace | null> {
+  const session =
+    recoverySessions.get(id) ||
+    Array.from(recoverySessions.values()).find((s) => s.recoveryToken === id);
+  if (!session) return null;
+
+  const steps: RecoveryTraceStep[] = [];
+
+  if (dbClient) {
+    try {
+      const res = await dbClient.execute({
+        sql: `SELECT ts_utc, actor, entry_type, payload_json FROM audit_log WHERE event_id = ? ORDER BY ts_utc ASC`,
+        args: [session.id],
+      });
+      for (const row of res.rows) {
+        const payload =
+          typeof row.payload_json === "string"
+            ? JSON.parse(row.payload_json)
+            : (row.payload_json as Record<string, unknown>);
+        const sha256 = createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+        steps.push({
+          step: row.entry_type as any,
+          timestampUtc: String(row.ts_utc),
+          actor: String(row.actor),
+          summary: `${row.actor} -> ${row.entry_type}`,
+          payload,
+          sha256Hash: sha256,
+        });
+      }
+    } catch {}
+  }
+
+  if (steps.length === 0) {
+    const triggerPayload = { failureCode: session.failureCode, amountPaise: session.amountPaise, customer: session.customerName };
+    steps.push({
+      step: "TRIGGER",
+      timestampUtc: session.createdAtUtc,
+      actor: "PIPELINE",
+      summary: `Failure Ingested: ${session.failureCode}`,
+      payload: triggerPayload,
+      sha256Hash: createHash("sha256").update(JSON.stringify(triggerPayload)).digest("hex"),
+    });
+
+    const diagPayload = { rootCause: session.diagnosis.rootCause, class: session.diagnosis.class };
+    steps.push({
+      step: "DIAGNOSIS",
+      timestampUtc: session.createdAtUtc,
+      actor: "PIPELINE",
+      summary: `Root Cause: ${session.diagnosis.rootCause} (${session.diagnosis.class})`,
+      payload: diagPayload,
+      sha256Hash: createHash("sha256").update(JSON.stringify(diagPayload)).digest("hex"),
+    });
+
+    const decidePayload = { action: session.decideOutput.chosen.action, evPaise: session.decideOutput.chosen.evPaise, autonomyStatus: session.autonomyStatus };
+    steps.push({
+      step: "DECISION",
+      timestampUtc: session.createdAtUtc,
+      actor: "PIPELINE",
+      summary: `Action Selected: ${session.decideOutput.chosen.action} (Status: ${session.autonomyStatus})`,
+      payload: decidePayload,
+      sha256Hash: createHash("sha256").update(JSON.stringify(decidePayload)).digest("hex"),
+    });
+
+    if (session.dispatchResult) {
+      const dispatchPayload = session.dispatchResult as any;
+      steps.push({
+        step: "DISPATCH",
+        timestampUtc: session.dispatchResult.dispatchedAtUtc,
+        actor: "PROVIDER",
+        summary: `Outreach Dispatched via ${session.dispatchResult.providerName} (${session.dispatchResult.channel}) - Status: ${session.dispatchResult.status}`,
+        payload: dispatchPayload,
+        sha256Hash: createHash("sha256").update(JSON.stringify(dispatchPayload)).digest("hex"),
+      });
+    }
+
+    if (session.autonomyStatus === "EXECUTED" && session.settledAtUtc) {
+      const outcomePayload = { status: "SETTLED_RECOVERED", amountPaise: session.amountPaise };
+      steps.push({
+        step: "OUTCOME",
+        timestampUtc: session.settledAtUtc,
+        actor: "CUSTOMER",
+        summary: `Payment Recovered & Settled: ${session.formattedAmount}`,
+        payload: outcomePayload,
+        sha256Hash: createHash("sha256").update(JSON.stringify(outcomePayload)).digest("hex"),
+      });
+    }
+  }
+
+
+  return {
+    proposalId: session.id,
+    recoveryToken: session.recoveryToken,
+    customerName: session.customerName,
+    amountPaise: session.amountPaise,
+    formattedAmount: session.formattedAmount,
+    failureClass: session.diagnosis.class,
+    autonomyStatus: session.autonomyStatus,
+    isRecovered: session.autonomyStatus === "EXECUTED",
+    steps,
+  };
+}
+
 export function runBatchBenchmark() {
+
   const BATCH_SIZE = 100;
   let totalAtRisk = 0;
   let controlRecovered = 0;
