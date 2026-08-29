@@ -236,6 +236,33 @@ export const auditLog = sqliteTable(
   (t) => [index("idx_audit_event").on(t.eventId), index("idx_audit_type").on(t.entryType)],
 );
 
+/* ── promise-to-pay behavioral loop (§4.7) ───────────────────────── */
+/** Merchant-scoped promise-to-pay tracking; feeds `promise_kept_rate` feature. */
+export const promiseToPay = sqliteTable(
+  "promise_to_pay",
+  {
+    id: text("id").primaryKey(),
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => tenants.id),
+    customerId: text("customer_id")
+      .notNull()
+      .references(() => customers.id),
+    proposalId: text("proposal_id").notNull(), // originating proposal (no FK: may be an edit)
+    eventId: text("event_id")
+      .notNull()
+      .references(() => paymentEvents.id),
+    amountPaise: integer("amount_paise").notNull(),
+    promisedAtUtc: text("promised_at_utc").notNull(),
+    status: text("status", { enum: ["PENDING", "KEPT", "BROKEN"] })
+      .notNull()
+      .default("PENDING"),
+    resolvedAtUtc: text("resolved_at_utc"),
+    createdAtUtc: text("created_at_utc").notNull(),
+  },
+  (t) => [index("idx_promise_customer").on(t.customerId)],
+);
+
 /* ── learning loop ──────────────────────────────────────────────── */
 
 export const driftChecks = sqliteTable("drift_checks", {

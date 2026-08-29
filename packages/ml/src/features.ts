@@ -52,6 +52,8 @@ export interface FeatureCustomerContext {
   priorSuccessCount?: number | null;
   joinedAtUtc?: string | null;
   optedOut?: boolean | null;
+  /** §4.7 — fraction of prior promises-to-pay this customer kept (0..1). */
+  promiseKeptRate?: number | null;
 }
 
 function clamp01(x: number): number {
@@ -105,6 +107,7 @@ export interface ComputedFeatures {
     failureClass: FailureClassV1;
     ltvPaise: number;
     churnRiskBp: number;
+    promiseKeptRate: number;
   };
 }
 
@@ -182,6 +185,13 @@ export function computeFeatures(input: FeatureInput): ComputedFeatures {
     }
   }
   const cust = input.customer ?? null;
+
+  // §4.7 — behavioral signal: fraction of prior promises-to-pay the customer kept.
+  // Surfaced in `raw` (available to the learning loop / narrative). Kept out of the
+  // frozen 13-d model vector so the contract + incumbent weights stay intact.
+  const promiseKeptRate = clamp01(
+    Number.isFinite(cust?.promiseKeptRate ?? NaN) ? (cust?.promiseKeptRate as number) : 0,
+  );
 
   // ── class onehot (code-derived, fail-closed)
   const cls: FailureClassV1 = classifyByCode(input.failureCode, {
@@ -261,6 +271,7 @@ export function computeFeatures(input: FeatureInput): ComputedFeatures {
       failureClass: cls,
       ltvPaise: ltv.ltvPaise,
       churnRiskBp: ltv.churnRiskBp,
+      promiseKeptRate,
     },
   };
 }
