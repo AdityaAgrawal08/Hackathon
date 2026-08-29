@@ -129,6 +129,7 @@ function evaluateAction(
         Number.isInteger(input.inferredPaydayDay) &&
         input.inferredPaydayDay >= 1 &&
         input.inferredPaydayDay <= 31),
+    actionId: action,
   };
   const violations = evaluateConstraints(input.policy, ctx);
 
