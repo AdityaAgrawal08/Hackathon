@@ -198,7 +198,9 @@ export async function simulateFailureTriage(
   if (typeof presetKeyOrCustom === "string") {
     preset = PRESETS[presetKeyOrCustom] || PRESETS.SALARY_DELAY!;
   } else {
-    const safeAmount = Math.max(100, Math.min(10000000000, Math.round(Math.abs(Number(presetKeyOrCustom.amountPaise) || 199900))));
+    const num = Number(presetKeyOrCustom.amountPaise);
+    const raw = Number.isFinite(num) ? num : 199900;
+    const safeAmount = Math.max(100, Math.min(10000000000, Math.round(raw)));
     const safeFailures = Math.max(0, Math.min(50, Math.round(Number(presetKeyOrCustom.pastFailures) || 0)));
     const safeSuccesses = Math.max(0, Math.min(100, Math.round(Number(presetKeyOrCustom.pastSuccesses) || 5)));
     const safeTenure = Math.max(0, Math.min(120, Math.round(Number(presetKeyOrCustom.tenureMonths) || 12)));
@@ -218,6 +220,7 @@ export async function simulateFailureTriage(
       pastSuccesses: safeSuccesses,
       pastFailures: safeFailures,
     };
+
 
   }
 
@@ -603,6 +606,8 @@ export async function completeRecovery(proposalId: string, dbClient?: Client): P
   return false;
 }
 
+
+
 export interface RecoveryTraceStep {
   step: "TRIGGER" | "DIAGNOSIS" | "DECISION" | "DISPATCH" | "APPROVAL" | "OUTCOME";
   timestampUtc: string;
@@ -966,6 +971,8 @@ export async function recordPromiseToPay(
 ): Promise<{ success: boolean; proposalId: string; promisedDay: number; scheduledReminderUtc: string }> {
   // Strict day-of-month validation (1 to 31, default 28)
   const validDay = Number.isInteger(promisedDay) && promisedDay >= 1 && promisedDay <= 31 ? promisedDay : 28;
+
+
   const session = recoverySessions.get(proposalId);
   const nowMs = Date.now();
   const scheduledReminderUtc = isoUtc(nowMs + 86400000 * 2); // Scheduled for upcoming payday morning
