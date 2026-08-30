@@ -7,7 +7,7 @@
 import type { Client } from "@libsql/client";
 import { createHash } from "node:crypto";
 import { isoUtc, paise, formatINR } from "../packages/shared/src/index.js";
-import { classifyByCode, computeFeatures, scoreWithArtifact, DEFAULT_16D_MODEL } from "../packages/ml/src/index.js";
+import { classifyByCode, computeFeatures, scoreWithArtifact, DEFAULT_16D_MODEL, assessCredibility } from "../packages/ml/src/index.js";
 import { decide, defaultPolicy, type DecideOutput, type FailureClassId } from "../packages/core/src/decide/index.js";
 import { OutreachRouter, type OutreachChannel, type OutreachPayload, type ProviderDispatchResult } from "../packages/core/src/messaging/index.js";
 
@@ -190,23 +190,32 @@ export async function processFailedPayment(
     churnRiskBp: (customer?.total_failures ?? 0) > 2 ? 4000 : 1000,
   });
 
-  // 6. Suspicious activity detection
-  const suspicionReasons: string[] = [];
-  if (customer) {
-    if (customer.total_attempts === 0) {
-      suspicionReasons.push("First transaction from this customer");
-    }
-    if (customer.total_amount_paise > 5000000 && customer.total_successes === 0) {
-      suspicionReasons.push("High total attempted amount with zero successes");
-    }
-  }
-  if (failureClass === "RISK_FLAGGED") {
-    suspicionReasons.push("Razorpay flagged this transaction as high-risk");
-  }
-  if (failureClass === "UNKNOWN" && input.amountPaise > 1000000) {
-    suspicionReasons.push("Unknown failure on high-value transaction (> ₹10,000)");
-  }
-  const isSuspicious = suspicionReasons.length > 0;
+  // 6. Credibility assessment (ML + rules)
+  const credPriorAmounts = customer
+    ? (await client.execute({
+        sql: "SELECT amount_paise FROM live_payment_events WHERE customer_profile_id = ? ORDER BY created_at_utc DESC LIMIT 10",
+        args: [input.customerProfileId],
+      })).rows.map(r => Number(r.amount_paise))
+    : [];
+  const credResult = assessCredibility({
+    customerProfile: customer ? {
+      totalAttempts: customer.total_attempts,
+      totalSuccesses: customer.total_successes,
+      totalFailures: customer.total_failures,
+      totalAmountPaise: customer.total_amount_paise,
+      flaggedAsSuspicious: !!customer.flagged_as_suspicious,
+      riskScoreBp: customer.risk_score_bp,
+      createdAtUtc: customer.created_at_utc,
+    } : null,
+    failureClass,
+    amountPaise: input.amountPaise,
+    mlProbability: probability,
+    mlAttributions: scoreResult.attributions ?? [],
+    priorFailureAmountsPaise: credPriorAmounts,
+    occurredAtUtc: nowUtc,
+  });
+  const suspicionReasons = credResult.reasons;
+  const isSuspicious = credResult.isSuspicious;
 
   // 7. Log to live_payment_events
   const eventId = `evt_${nowMs}_${createHash("sha256").update(`${input.razorpayPaymentId}${nowMs}`).digest("hex").slice(0, 8)}`;
@@ -330,6 +339,8 @@ export async function processFailedPayment(
     action: decideOutput.chosen.action,
     isSuspicious,
     suspicionReasons,
+    credibilityScore: credResult.score,
+    riskLevel: credResult.riskLevel,
     outreachDispatched: !isSuspicious && dispatchResults.length > 0,
     dispatchResults,
     scheduledOutreach,

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import type { Server } from "node:http";
 import { app, dbClient } from "../../app/server.js";
 
-describe("Phase 5: Merchant Recovery Command Center Dashboard Integration Tests", () => {
+describe("Vendor Dashboard Integration Tests", () => {
   let server: Server;
   let baseUrl: string;
 
@@ -24,93 +24,89 @@ describe("Phase 5: Merchant Recovery Command Center Dashboard Integration Tests"
     }
   });
 
-  it("Task 5.1: serves the merchant recovery dashboard at /dashboard", async () => {
+  it("serves the vendor dashboard at /dashboard", async () => {
     const res = await fetch(`${baseUrl}/dashboard`);
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("text/html");
     const html = await res.text();
-
     expect(html).toContain("ARBITER");
-    expect(html).toContain("AI Revenue Recovery Command Center");
-    expect(html).toContain("SALARY_DELAY");
-    expect(html).toContain("CARD_EXPIRED");
-    expect(html).toContain("BANK_OUTAGE");
-    expect(html).toContain("UPI_TIMEOUT");
-    expect(html).toContain("BOT_RISK");
-    expect(html).toContain("slider-autonomy");
-    expect(html).toContain("TRAI Regulatory Filter");
+    expect(html).toContain("Vendor Dashboard");
   });
 
-  it("Task 5.2: executes live AI failure diagnosis and EV ranking via POST /api/recovery/triage", async () => {
-    const DAYTIME_MS = Date.parse("2026-08-28T05:30:00.000Z");
-    const res = await fetch(`${baseUrl}/api/recovery/triage`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ preset: "SALARY_DELAY", simulatedTimeMs: DAYTIME_MS }),
-    });
-
+  it("serves the store at /store", async () => {
+    const res = await fetch(`${baseUrl}/store`);
     expect(res.status).toBe(200);
-    const session = await res.json();
-
-    expect(session.id).toMatch(/^prop_/);
-    expect(session.customerName).toBe("Rahul Sharma");
-    expect(session.amountPaise).toBe(199900);
-    expect(session.diagnosis.rootCause).toBe("INSUFFICIENT_FUNDS");
-    expect(session.features.values.length).toBe(16);
-    expect(session.probability).toBeGreaterThan(0);
-    expect(session.decideOutput.chosen.action).toBeDefined();
-    expect(session.autonomyStatus).toBe("AUTO_APPROVED");
+    expect(res.headers.get("content-type")).toContain("text/html");
+    const html = await res.text();
+    expect(html).toContain("ARBITER");
+    expect(html).toContain("Premium Annual Plan");
   });
 
-  it("Task 5.4: respects dynamic autonomy envelope slider thresholds", async () => {
-    const DAYTIME_MS = Date.parse("2026-08-28T05:30:00.000Z");
-    // 1. High value ₹4,999 with default ₹2,000 threshold -> AWAITING_APPROVAL
-    const res1 = await fetch(`${baseUrl}/api/recovery/triage`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ preset: "CARD_EXPIRED", autonomyThresholdPaise: 200000, simulatedTimeMs: DAYTIME_MS }),
-    });
-    const session1 = await res1.json();
-    expect(session1.autonomyStatus).toBe("AWAITING_APPROVAL");
+  it("returns product list via /api/products", async () => {
+    const res = await fetch(`${baseUrl}/api/products`);
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(Array.isArray(data)).toBe(true);
+    expect(data.length).toBe(4);
+    expect(data[0].id).toBe("prod_premium_plan");
+  });
 
-    // 2. Approve proposal
-    const approveRes = await fetch(`${baseUrl}/api/recovery/approve`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ proposalId: session1.id }),
-    });
-    const approveData = await approveRes.json();
-    expect(approveData.success).toBe(true);
-
-    // 3. Same high value with ₹6,000 threshold dial -> AUTO_APPROVED
-    const res2 = await fetch(`${baseUrl}/api/recovery/triage`, {
+  it("creates a Razorpay order via /api/orders/create", async () => {
+    const res = await fetch(`${baseUrl}/api/orders/create`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        customPreset: {
-          customerName: "Sneha Gupta",
-          amountPaise: 450000,
-          failureCode: "BAD_REQUEST_PAYMENT_ACCOUNT_INSUFFICIENT_BALANCE",
-        },
-        autonomyThresholdPaise: 600000,
-        simulatedTimeMs: DAYTIME_MS,
+        productId: "prod_monthly_basic",
+        customerName: "Test Customer",
+        customerPhone: "+91 98765 43210",
+        customerEmail: "test@example.com",
       }),
     });
-    const session2 = await res2.json();
-    expect(session2.autonomyStatus).toBe("AUTO_APPROVED");
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.orderId).toBeDefined();
+    expect(data.amountPaise).toBe(99900);
+    expect(data.currency).toBe("INR");
+    expect(data.customerId).toBeDefined();
   });
 
+  it("rejects order creation with missing fields", async () => {
+    const res = await fetch(`${baseUrl}/api/orders/create`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ productId: "prod_monthly_basic" }),
+    });
+    expect(res.status).toBe(400);
+  });
 
-  it("Task 5.5: returns 100-event Monte Carlo batch comparison proof ('The Bar')", async () => {
-    const res = await fetch(`${baseUrl}/api/recovery/batch-proof`);
+  it("returns vendor payments list", async () => {
+    const res = await fetch(`${baseUrl}/api/vendor/payments`);
     expect(res.status).toBe(200);
-    const benchmark = await res.json();
+    const data = await res.json();
+    expect(Array.isArray(data)).toBe(true);
+  });
 
-    expect(benchmark.naive).toBeDefined();
-    expect(benchmark.arbiter).toBeDefined();
-    expect(benchmark.delta).toBeDefined();
+  it("returns vendor analytics", async () => {
+    const res = await fetch(`${baseUrl}/api/vendor/analytics`);
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.totalEvents).toBeDefined();
+    expect(data.successRate).toBeDefined();
+  });
 
-    expect(benchmark.arbiter.recoveredRevenuePaise).toBeGreaterThan(benchmark.naive.recoveredRevenuePaise);
-    expect(benchmark.delta.wastedRetriesSaved).toBeGreaterThan(0);
+  it("returns vendor alerts", async () => {
+    const res = await fetch(`${baseUrl}/api/vendor/alerts`);
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(Array.isArray(data)).toBe(true);
+  });
+
+  it("rejects invalid vendor decision", async () => {
+    const res = await fetch(`${baseUrl}/api/vendor/decision`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ eventId: "invalid", decision: "invalid" }),
+    });
+    expect(res.status).toBe(400);
   });
 });

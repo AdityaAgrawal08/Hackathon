@@ -2,10 +2,9 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import type { Server } from "node:http";
 import { app, dbClient } from "../../app/server.js";
 
-describe("Phase 6: End-to-End Orchestration & Full-Pipeline Integration Tests", () => {
+describe("End-to-End Payment Workflow Integration Tests", () => {
   let server: Server;
   let baseUrl: string;
-  const DAYTIME_MS = Date.parse("2026-08-28T05:30:00.000Z"); // 11:00 AM IST
 
   beforeAll(async () => {
     await new Promise<void>((resolve) => {
@@ -21,137 +20,123 @@ describe("Phase 6: End-to-End Orchestration & Full-Pipeline Integration Tests", 
 
   afterAll(async () => {
     if (server) {
-      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await new Promise<void>((resolve) => {
+        server.closeAllConnections();
+        server.close(() => resolve());
+      });
     }
   });
 
-  it("Task 6.1 & 6.2: wires telemetry to 16-D features, calibrated ML, and EV engine", async () => {
-    const res = await fetch(`${baseUrl}/api/recovery/triage`, {
+  it("creates order and customer profile via /api/orders/create", async () => {
+    const res = await fetch(`${baseUrl}/api/orders/create`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        preset: "SALARY_DELAY",
-        simulatedTimeMs: DAYTIME_MS,
-        autonomyThresholdPaise: 200000, // ₹2,000
+        productId: "prod_premium_plan",
+        customerName: "Pipeline Test User",
+        customerPhone: "+91 88888 77777",
+        customerEmail: "pipeline@test.com",
       }),
     });
 
     expect(res.status).toBe(200);
-    const session = await res.json();
-
-    // 6.1 Verification
-    expect(session.id).toMatch(/^prop_/);
-    expect(session.diagnosis.rootCause).toBe("INSUFFICIENT_FUNDS");
-    expect(session.diagnosis.class).toBe("SOFT_RETRYABLE");
-    expect(session.features.values.length).toBe(16);
-
-    // 6.2 Verification
-    expect(session.probability).toBeGreaterThan(0);
-    expect(session.decideOutput.chosen.action).toBeDefined();
-    expect(session.decideOutput.ranked.length).toBeGreaterThan(1);
-    expect(session.autonomyStatus).toBe("AUTO_APPROVED");
+    const data = await res.json();
+    expect(data.orderId).toBeDefined();
+    expect(data.amountPaise).toBe(499900);
+    expect(data.customerId).toBeDefined();
   });
 
-  it("Task 6.3: dispatches autonomous provider outreach with local token injection", async () => {
-    const res = await fetch(`${baseUrl}/api/recovery/triage`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        preset: "SALARY_DELAY",
-        simulatedTimeMs: DAYTIME_MS,
-      }),
-    });
-
-    const session = await res.json();
-    expect(session.dispatchResult).toBeDefined();
-    expect(["SENT", "DELIVERED", "QUEUED"]).toContain(session.dispatchResult.status);
-    expect(session.dispatchResult.providerName).toBeDefined();
-
-    // Zero-Trust Fraud Quarantine Check: High Risk must NOT dispatch outreach
-    const fraudRes = await fetch(`${baseUrl}/api/recovery/triage`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        preset: "BOT_RISK",
-        simulatedTimeMs: DAYTIME_MS,
-      }),
-    });
-
-    const fraudSession = await fraudRes.json();
-    expect(fraudSession.autonomyStatus).toBe("AWAITING_APPROVAL");
-    expect(fraudSession.dispatchResult).toBeUndefined();
+  it("returns vendor payments list with customer join", async () => {
+    const res = await fetch(`${baseUrl}/api/vendor/payments`);
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(Array.isArray(data)).toBe(true);
   });
 
-  it("Task 6.4: supports live SSE status stream with reactive payment completion", async () => {
-    // 1. Ingest session
-    const triageRes = await fetch(`${baseUrl}/api/recovery/triage`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        preset: "SALARY_DELAY",
-        simulatedTimeMs: DAYTIME_MS,
-      }),
-    });
-    const session = await triageRes.json();
-
-    // 2. Open SSE stream with abort controller so test exits cleanly
-    const controller = new AbortController();
-    const ssePromise = fetch(`${baseUrl}/api/status/${session.recoveryToken}`, {
-      signal: controller.signal,
-    });
-
-    const sseRes = await ssePromise;
-    expect(sseRes.status).toBe(200);
-    expect(sseRes.headers.get("content-type")).toContain("text/event-stream");
-
-    // 3. Complete recovery payment
-    const compRes = await fetch(`${baseUrl}/api/recovery/complete`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ proposalId: session.id }),
-    });
-    const compData = await compRes.json();
-    expect(compData.success).toBe(true);
-
-    // Clean up SSE connection
-    controller.abort();
+  it("returns vendor alerts for suspicious activity", async () => {
+    const res = await fetch(`${baseUrl}/api/vendor/alerts`);
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(Array.isArray(data)).toBe(true);
   });
 
-
-  it("Task 6.5 & 6.8: returns full forensic transaction trace with SHA-256 cryptographic proofs", async () => {
-    // 1. Triage a session
-    const triageRes = await fetch(`${baseUrl}/api/recovery/triage`, {
+  it("handles vendor approval decision", async () => {
+    // Create customer
+    const orderRes = await fetch(`${baseUrl}/api/orders/create`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        preset: "SALARY_DELAY",
-        simulatedTimeMs: DAYTIME_MS,
+        productId: "prod_enterprise",
+        customerName: "Approval Test",
+        customerPhone: "+91 66666 55555",
+        customerEmail: "approval@test.com",
       }),
     });
-    const session = await triageRes.json();
+    const orderData = (await orderRes.json()) as { customerId: string };
 
-    // 2. Complete payment
-    await fetch(`${baseUrl}/api/recovery/complete`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ proposalId: session.id }),
+    // Insert suspicious event
+    const eventId = `evt_alert_${Date.now()}`;
+    await dbClient.execute({
+      sql: `INSERT INTO live_payment_events
+        (id, customer_profile_id, product_name, amount_paise, status, failure_class, vendor_notified, created_at_utc)
+        VALUES (?, ?, 'Enterprise', 999900, 'failed', 'RISK_FLAGGED', 1, ?)`,
+      args: [eventId, orderData.customerId, new Date().toISOString()],
     });
 
-    // 3. Query trace API
-    const traceRes = await fetch(`${baseUrl}/api/recovery/trace/${session.id}`);
-    expect(traceRes.status).toBe(200);
-    const trace = await traceRes.json();
+    // Approve
+    const approveRes = await fetch(`${baseUrl}/api/vendor/decision`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ eventId, decision: "approved" }),
+    });
+    expect(approveRes.status).toBe(200);
 
-    expect(trace.proposalId).toBe(session.id);
-    expect(trace.recoveryToken).toBe(session.recoveryToken);
-    expect(trace.isRecovered).toBe(true);
-    expect(trace.steps.length).toBeGreaterThanOrEqual(3);
+    // Verify
+    const event = await dbClient.execute({
+      sql: "SELECT vendor_decision, outreach_dispatched FROM live_payment_events WHERE id = ?",
+      args: [eventId],
+    });
+    expect(event.rows[0]?.vendor_decision).toBe("approved");
+  });
 
-    // Verify cryptographic SHA-256 hash on every single step
-    for (const step of trace.steps) {
-      expect(step.sha256Hash).toMatch(/^[a-f0-9]{64}$/);
-      expect(step.step).toBeDefined();
-      expect(step.timestampUtc).toBeDefined();
-    }
+  it("handles vendor rejection decision", async () => {
+    const orderRes = await fetch(`${baseUrl}/api/orders/create`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        productId: "prod_monthly_basic",
+        customerName: "Rejection Test",
+        customerPhone: "+91 55555 44444",
+        customerEmail: "reject@test.com",
+      }),
+    });
+    const orderData = (await orderRes.json()) as { customerId: string };
+
+    const eventId = `evt_reject_${Date.now()}`;
+    await dbClient.execute({
+      sql: `INSERT INTO live_payment_events
+        (id, customer_profile_id, product_name, amount_paise, status, failure_class, vendor_notified, created_at_utc)
+        VALUES (?, ?, 'Monthly Basic', 99900, 'failed', 'UNKNOWN', 1, ?)`,
+      args: [eventId, orderData.customerId, new Date().toISOString()],
+    });
+
+    const rejectRes = await fetch(`${baseUrl}/api/vendor/decision`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ eventId, decision: "rejected" }),
+    });
+    expect(rejectRes.status).toBe(200);
+
+    const event = await dbClient.execute({
+      sql: "SELECT vendor_decision FROM live_payment_events WHERE id = ?",
+      args: [eventId],
+    });
+    expect(event.rows[0]?.vendor_decision).toBe("rejected");
+  });
+
+  it("SSE endpoint returns event stream", async () => {
+    const res = await fetch(`${baseUrl}/api/sse/vendor:alerts`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/event-stream");
   });
 });

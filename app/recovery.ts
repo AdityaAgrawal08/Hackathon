@@ -24,6 +24,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 
 import {
+  classifyRazorpayError,
   diagnoseFailure,
   type Diagnosis,
   decide,
@@ -756,39 +757,73 @@ export async function getRecoveryTrace(id: string, dbClient?: Client): Promise<R
   };
 }
 
-export function runBatchBenchmark() {
-  // Load real dataset fixture for deterministic 100-event benchmark
+export async function runBatchBenchmark(dbClient?: Client) {
+  // Try to load real payment events from the database
   let eventsList: any[] = [];
   let customersMap = new Map<string, any>();
 
-  try {
-    const demoFixturePath = resolve(__dirname, "../packages/seed/src/fixtures/demo.json");
-    if (existsSync(demoFixturePath)) {
-      const demoData = JSON.parse(readFileSync(demoFixturePath, "utf8"));
-      if (demoData.customers) {
-        for (const c of demoData.customers) customersMap.set(c.id, c);
+  if (dbClient) {
+    try {
+      const rows = await dbClient.execute({
+        sql: `SELECT lpe.*, cp.name as customer_name, cp.phone as customer_phone,
+                     cp.total_attempts, cp.total_successes, cp.total_failures,
+                     cp.total_amount_paise, cp.risk_score_bp, cp.created_at_utc as customer_created_at
+              FROM live_payment_events lpe
+              LEFT JOIN customer_profiles cp ON cp.id = lpe.customer_profile_id
+              WHERE lpe.status = 'failed'
+              ORDER BY lpe.created_at_utc DESC
+              LIMIT 100`,
+        args: [],
+      });
+      if (rows.rows.length > 0) {
+        eventsList = rows.rows;
+        for (const r of rows.rows) {
+          const cpId = String(r.customer_profile_id);
+          if (!customersMap.has(cpId)) {
+            customersMap.set(cpId, {
+              paydayTrueDay: 28,
+              priorSuccessCount: Number(r.total_successes) || 0,
+              channelResponsiveness: 0.85,
+            });
+          }
+        }
       }
-      if (demoData.events) {
-        eventsList = demoData.events.slice(0, 100);
-      }
-    }
-  } catch {}
+    } catch {}
+  }
 
-  // Fallback to deterministic static corpus if file is unavailable
+  // Fallback to deterministic static corpus if no real data
   if (eventsList.length === 0) {
-    eventsList = Array.from({ length: 100 }, (_, i) => ({
-      id: `evt_bench_${i}`,
-      customerId: `cust_${i % 20}`,
-      amountPaise: ((i * 37) % 4500 + 500) * 100, // Deterministic ₹500 - ₹5,000
-      failureCode:
-        i % 5 === 0
-          ? "CARD_EXPIRED"
-          : i % 5 === 1
-          ? "GATEWAY_TIMEOUT"
-          : i % 5 === 2
-          ? "RISK_BLOCKED"
-          : "INSUFFICIENT_FUNDS",
-    }));
+    // Load fixture if available
+    try {
+      const demoFixturePath = resolve(__dirname, "../packages/seed/src/fixtures/demo.json");
+      if (existsSync(demoFixturePath)) {
+        const demoData = JSON.parse(readFileSync(demoFixturePath, "utf8"));
+        if (demoData.customers) {
+          for (const c of demoData.customers) customersMap.set(c.id, c);
+        }
+        if (demoData.events) {
+          eventsList = demoData.events.slice(0, 100);
+        }
+      }
+    } catch {}
+
+    // Final fallback: deterministic synthetic corpus
+    if (eventsList.length === 0) {
+      eventsList = Array.from({ length: 100 }, (_, i) => ({
+        id: `evt_bench_${i}`,
+        customer_profile_id: `cust_${i % 20}`,
+        amount_paise: ((i * 37) % 4500 + 500) * 100,
+        failure_code:
+          i % 5 === 0
+            ? "CARD_EXPIRED"
+            : i % 5 === 1
+            ? "GATEWAY_TIMEOUT"
+            : i % 5 === 2
+            ? "RISK_BLOCKED"
+            : "INSUFFICIENT_FUNDS",
+        customer_name: `Customer ${i % 20}`,
+      }));
+    }
   }
 
   const BATCH_SIZE = eventsList.length;
@@ -800,29 +835,29 @@ export function runBatchBenchmark() {
   let controlCostPaise = 0;
   let arbiterCostPaise = 0;
 
-  const nowMs = 1735689600000; // Fixed deterministic reference timestamp (10:00 AM IST)
+  const nowMs = 1735689600000; // Fixed deterministic reference timestamp
 
   for (let i = 0; i < BATCH_SIZE; i++) {
     const evt = eventsList[i];
-    const amount = evt.amountPaise || 199900;
+    const amount = Number(evt.amount_paise || evt.amountPaise || 199900);
+    const failureCode = String(evt.failure_code || evt.failureCode || "INSUFFICIENT_FUNDS");
+    const cpId = String(evt.customer_profile_id || evt.customerId || `cust_${i % 20}`);
     totalAtRisk += amount;
 
-    const customer = customersMap.get(evt.customerId) || {
+    const customer = customersMap.get(cpId) || {
       paydayTrueDay: 28,
       priorSuccessCount: 2,
       channelResponsiveness: 0.85,
     };
 
     const failureClass: FailureClassId =
-      (evt.failureClassHint as FailureClassId) ||
-      classifyRazorpayError(evt.failureCode || "INSUFFICIENT_FUNDS");
-    const diag = diagnoseFailure(evt.failureCode || "INSUFFICIENT_FUNDS", failureClass);
+      classifyRazorpayError(failureCode);
     const paydayDay = customer.paydayTrueDay || 28;
     const ltvPaise = (customer.priorSuccessCount || 1) * 50000;
 
     // Run actual ARBITER 16-D Feature & ML Scorer pipeline
     const features = computeFeatures({
-      failureCode: evt.failureCode || "INSUFFICIENT_FUNDS",
+      failureCode,
       amountPaise: amount,
       occurredAtUtc: isoUtc(nowMs),
       priorFailureAmountsPaise: [amount],
@@ -856,15 +891,12 @@ export function runBatchBenchmark() {
 
     // 1. Evaluate Control Strategy (Blind Naive Immediate Retries)
     if (failureClass === "HARD_METHOD_DEAD" || failureClass === "RISK_FLAGGED") {
-      // Control blindly charges dead/stolen card 3 times -> 100% failure, ₹45 wasted fee
       controlCostPaise += 3 * 1500;
       wastedRetriesSaved += 3;
     } else if (failureClass === "SOFT_RETRYABLE") {
-      // Blind immediate retry without timing salary window -> ~22% empirical recovery
       controlRecovered += Math.round(amount * 0.22);
-      controlCostPaise += 1500; // Single retry fee
+      controlCostPaise += 1500;
     } else if (failureClass === "NETWORK_TIMEOUT") {
-      // Immediate retry against down bank -> ~32% recovery
       controlRecovered += Math.round(amount * 0.32);
       controlCostPaise += 1500;
     } else {
@@ -874,28 +906,23 @@ export function runBatchBenchmark() {
 
     // 2. Evaluate ARBITER Strategy (AI Policy Execution)
     if (failureClass === "HARD_METHOD_DEAD") {
-      // Dead card retries suppressed -> 1-Click Alternate Link dispatched
       const expectedRecoveryRate = Math.min(0.85, Math.max(0.60, prob * (chosen.multiplierUsed || 1.4)));
       arbiterRecovered += Math.round(amount * expectedRecoveryRate);
-      arbiterCostPaise += 25; // SMS / Email notification cost (₹0.25)
+      arbiterCostPaise += 25;
     } else if (failureClass === "SOFT_RETRYABLE") {
-      // Payday-timed smart schedule or WhatsApp nudge
       const expectedRecoveryRate = Math.min(0.92, Math.max(0.72, prob * (chosen.multiplierUsed || 1.6)));
       arbiterRecovered += Math.round(amount * expectedRecoveryRate);
       arbiterCostPaise += 25;
     } else if (failureClass === "NETWORK_TIMEOUT") {
-      // Failover to secondary rail (Optimizer UPI Intent)
       const expectedRecoveryRate = Math.min(0.95, Math.max(0.80, prob * (chosen.multiplierUsed || 1.8)));
       arbiterRecovered += Math.round(amount * expectedRecoveryRate);
-      arbiterCostPaise += 0; // Direct rail switch
+      arbiterCostPaise += 0;
     } else if (failureClass === "RISK_FLAGGED") {
-      // Zero outreach, quarantined to human review
       arbiterCostPaise += 0;
     } else {
       arbiterRecovered += Math.round(amount * 0.45);
       arbiterCostPaise += 25;
     }
-
 
     // TRAI Compliance
     if (i % 4 === 0) {
@@ -908,8 +935,11 @@ export function runBatchBenchmark() {
       ? Math.round(((arbiterRecovered - controlRecovered) / controlRecovered) * 100)
       : 0;
 
+  const source = eventsList[0]?.id?.startsWith("evt_bench_") || eventsList[0]?.id?.startsWith("evt_") ? "deterministic_corpus" : "live_events";
+
   return {
     batchSize: BATCH_SIZE,
+    source,
     totalAtRiskPaise: totalAtRisk,
     totalAtRiskFormatted: formatINR(paise(totalAtRisk)),
     controlRecoveredPaise: controlRecovered,

@@ -119,7 +119,9 @@
           <div class="stat-card"><div class="stat-label">At Risk</div><div class="stat-value yellow">${formatINR(data.atRiskPaise)}</div></div>
           <div class="stat-card"><div class="stat-label">Suspicious</div><div class="stat-value red">${data.suspiciousCount}</div></div>
         `;
-      } catch {}
+      } catch (e) {
+        document.getElementById('stats').innerHTML = '<div class="stat-card"><div class="stat-label">Error</div><div class="stat-value red">Unable to load analytics</div></div>';
+      }
     }
 
     async function loadPayments() {
@@ -141,7 +143,10 @@
             <td>${p.ml_probability ? (p.ml_probability * 100).toFixed(1) + '%' : '—'}</td>
           </tr>
         `).join('');
-      } catch {}
+      } catch (e) {
+        document.getElementById('no-payments').style.display = 'block';
+        document.getElementById('no-payments').textContent = 'Unable to load payment data';
+      }
     }
 
     async function loadAlerts() {
@@ -172,7 +177,10 @@
             </div>
           </div>
         `).join('');
-      } catch {}
+      } catch (e) {
+        document.getElementById('alerts-section').style.display = 'block';
+        document.getElementById('alerts-container').innerHTML = '<p style="color:#94a3b8">Unable to load alerts</p>';
+      }
     }
 
     async function decide(eventId, decision) {
@@ -186,7 +194,9 @@
         loadAlerts();
         loadAnalytics();
         loadPayments();
-      } catch {}
+      } catch (e) {
+        console.error('Decision failed:', e);
+      }
     }
 
     // SSE for real-time updates
