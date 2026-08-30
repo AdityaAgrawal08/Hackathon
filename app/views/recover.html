@@ -13,43 +13,100 @@
     .icon { font-size: 48px; margin-bottom: 16px; }
     .title { font-size: 20px; font-weight: 600; margin-bottom: 8px; color: #f8fafc; }
     .subtitle { font-size: 14px; color: #94a3b8; margin-bottom: 24px; line-height: 1.5; }
+    .error-box { background: #450a0a; border: 1px solid #7f1d1d; border-radius: 12px; padding: 16px; margin-bottom: 24px; text-align: left; }
+    .error-label { font-size: 11px; color: #fca5a5; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+    .error-value { font-size: 13px; color: #fecaca; line-height: 1.4; }
+    .error-code { font-family: monospace; font-size: 11px; color: #f87171; background: #1c1917; padding: 2px 6px; border-radius: 4px; display: inline-block; margin-top: 6px; }
     .amount-box { background: #0f172a; border: 1px solid #334155; border-radius: 12px; padding: 20px; margin-bottom: 24px; }
     .amount-label { font-size: 13px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; }
     .amount-value { font-size: 32px; font-weight: 700; color: #22c55e; margin-top: 4px; }
-    .pay-btn { width: 100%; padding: 14px; background: #2563eb; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; transition: background 0.2s; margin-bottom: 16px; }
+    .pay-btn { width: 100%; padding: 14px; background: #2563eb; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; transition: background 0.2s; margin-bottom: 12px; }
     .pay-btn:hover { background: #1d4ed8; }
+    .pay-btn:disabled { background: #475569; cursor: not-allowed; }
     .salary-btn { width: 100%; padding: 14px; background: #f59e0b; color: #0f172a; border: none; border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; transition: background 0.2s; margin-bottom: 16px; }
     .salary-btn:hover { background: #d97706; }
-    .banner-offline { background: #854d0e; color: #fef3c7; padding: 12px; border-radius: 8px; margin-bottom: 16px; font-size: 13px; display: none; }
-    .pay-btn:disabled { background: #475569; cursor: not-allowed; }
-    .status { padding: 12px; border-radius: 8px; font-size: 14px; display: none; }
+    .salary-btn:disabled { background: #475569; color: #94a3b8; cursor: not-allowed; }
+    .status { display: none; padding: 12px; border-radius: 8px; font-size: 14px; margin-bottom: 16px; }
     .status-success { background: #052e16; border: 1px solid #14532d; color: #86efac; display: block; }
     .status-error { background: #450a0a; border: 1px solid #7f1d1d; color: #fca5a5; display: block; }
     .footer { margin-top: 24px; font-size: 12px; color: #64748b; }
+    .success-view { display: none; }
+    .success-view .icon { color: #22c55e; }
+    .success-view .title { color: #22c55e; }
+    .banner-offline { background: #854d0e; color: #fef3c7; padding: 12px; border-radius: 8px; margin-bottom: 16px; font-size: 13px; display: none; }
   </style>
 </head>
 <body>
-  <div class="card">
+  <div class="card" id="payment-card">
     <div class="banner-offline" id="banner-offline">You appear to be offline. Payment link will be sent via SMS.</div>
     <div class="logo">ARBITER</div>
-    <div class="icon">⚠</div>
-    <div class="title">Payment Recovery Portal — Payment Incomplete</div>
-    <div class="subtitle" id="message">Your previous payment could not be processed. Please complete it now to avoid service interruption.</div>
-    <div class="amount-box">
-      <div class="amount-label">Amount Due</div>
-      <div class="amount-value" id="amount">—</div>
+
+    <!-- Failure View (default) -->
+    <div id="failure-view">
+      <div class="icon">⚠</div>
+      <div class="title">Payment Recovery Portal</div>
+      <div class="subtitle" id="message">Your previous payment could not be processed. Please complete it now to avoid service interruption.</div>
+
+      <div class="error-box" id="error-box">
+        <div class="error-label">What went wrong</div>
+        <div class="error-value" id="error-reason">Analyzing failure...</div>
+        <div class="error-code" id="error-code"></div>
+      </div>
+
+      <div class="amount-box">
+        <div class="amount-label">Amount Due</div>
+        <div class="amount-value" id="amount">—</div>
+      </div>
+      <button class="pay-btn" id="pay-btn" onclick="openCheckout()">Pay Now</button>
+      <button class="salary-btn" id="salary-btn" onclick="remindSalaryDay()">Remind Me on Salary Day</button>
+      <div class="status" id="status"></div>
     </div>
-    <button class="pay-btn" id="pay-btn" onclick="openCheckout()">Pay Now</button>
-    <button class="salary-btn" id="salary-btn" onclick="remindSalaryDay()">Remind Me on Salary Day</button>
-    <div class="status" id="status"></div>
+
+    <!-- Success View -->
+    <div class="success-view" id="success-view">
+      <div class="icon">✓</div>
+      <div class="title">Payment Successful!</div>
+      <div class="subtitle">Your payment has been processed successfully. Thank you!</div>
+      <div class="amount-box">
+        <div class="amount-label">Amount Paid</div>
+        <div class="amount-value" id="paid-amount">—</div>
+      </div>
+      <button class="pay-btn" onclick="window.location.href='/'">Back to Store</button>
+    </div>
+
     <div class="footer">Secure payment powered by Razorpay</div>
   </div>
 
   <script>
     const eventId = window.location.pathname.split('/').pop();
-    const proposalId = new URLSearchParams(window.location.search).get('prop') || eventId;
+    const params = new URLSearchParams(window.location.search);
+    const proposalId = params.get('prop') || eventId;
     let orderData = null;
     let customerData = null;
+
+    // Display failure reason from URL params (passed from store page)
+    const failureReason = params.get('reason');
+    const failureClass = params.get('class');
+    const failureCode = params.get('code');
+
+    if (failureReason) {
+      document.getElementById('error-reason').textContent = decodeURIComponent(failureReason);
+    }
+    if (failureCode) {
+      document.getElementById('error-code').textContent = decodeURIComponent(failureCode);
+    }
+    // Show class-specific messaging
+    if (failureClass) {
+      const classMessages = {
+        'SOFT_RETRYABLE': 'This appears to be a temporary issue. Try again now or we\'ll remind you on payday.',
+        'HARD_METHOD_DEAD': 'Your payment method may be expired or invalid. Consider using a different method.',
+        'NETWORK_TIMEOUT': 'A network timeout occurred. This is usually temporary — try again.',
+        'RISK_FLAGGED': 'This transaction was flagged for review. Please contact support if needed.',
+        'UNKNOWN': 'An unexpected error occurred. Please try again or contact support.',
+      };
+      const msg = classMessages[decodeURIComponent(failureClass)] || classMessages['UNKNOWN'];
+      document.getElementById('message').textContent = msg;
+    }
 
     async function loadOrder() {
       try {
@@ -65,12 +122,12 @@
                 break;
               }
             } catch {}
-            // If not found, try looking up by orderId (webhook may not have fired yet)
+            // If not found, try looking up by orderId
             try {
               const orderRes = await fetch('/api/payments/by-order/' + realEventId);
               if (orderRes.ok) {
-                const orderData = await orderRes.json();
-                realEventId = orderData.eventId;
+                const od = await orderRes.json();
+                realEventId = od.eventId;
                 const propRes2 = await fetch('/api/recovery/result/' + realEventId);
                 if (propRes2.ok) {
                   customerData = await propRes2.json();
@@ -87,7 +144,7 @@
           }
         }
 
-        // Create a real Razorpay order
+        // Create a real Razorpay order for recovery payment
         const res = await fetch('/api/orders/create', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -111,7 +168,7 @@
       if (!orderData?.orderId) return;
       const btn = document.getElementById('pay-btn');
       btn.disabled = true;
-      btn.textContent = 'Opening payment...';
+      btn.textContent = 'Processing...';
 
       const options = {
         key: orderData.keyId,
@@ -134,15 +191,16 @@
             });
             const verifyData = await verifyRes.json();
             if (verifyData.success) {
-              document.getElementById('status').className = 'status status-success';
-              document.getElementById('status').textContent = 'Payment successful! Thank you.';
-              btn.textContent = 'Paid';
+              // Show success view
+              document.getElementById('failure-view').style.display = 'none';
+              document.getElementById('success-view').style.display = 'block';
+              document.getElementById('paid-amount').textContent = '₹' + (orderData.amountPaise / 100).toLocaleString('en-IN');
             } else {
               document.getElementById('status').className = 'status status-error';
-              document.getElementById('status').textContent = 'Verification pending. We will confirm shortly.';
+              document.getElementById('status').textContent = 'Payment verification pending. We will confirm shortly.';
             }
           } catch {
-            document.getElementById('status').className = 'status status-error';
+            document.getElementById('status').className = 'status status-success';
             document.getElementById('status').textContent = 'Payment received. Confirmation pending.';
           }
         },

@@ -64,6 +64,28 @@ outreachRouter.registerProvider(new MSG91SmsProvider());
 
 const webhookLimiter = rateLimit({ windowMs: 60_000, limit: RATE_LIMIT_WEBHOOKS_PER_MIN, standardHeaders: true });
 
+// Round-robin error injection for demo (cycles through all 5 failure classes)
+const DEMO_ERROR_CODES = [
+  "BAD_REQUEST_PAYMENT_ACCOUNT_INSUFFICIENT_BALANCE",  // SOFT_RETRYABLE
+  "CARD_EXPIRED",                                       // HARD_METHOD_DEAD
+  "GATEWAY_TIMEOUT",                                    // NETWORK_TIMEOUT
+  "SUSPECTED_FRAUD",                                    // RISK_FLAGGED
+  "BAD_REQUEST_PAYMENT_UPI_COLLECT_EXPIRED",            // SOFT_RETRYABLE
+  "MANDATE_REVOKED",                                    // HARD_METHOD_DEAD
+  "ISSUER_TIMEOUT",                                     // NETWORK_TIMEOUT
+  "RISK_BLOCKED",                                       // RISK_FLAGGED
+  "INSUFFICIENT_FUNDS",                                 // SOFT_RETRYABLE
+  "BAD_REQUEST_PAYMENT_CARD_INVALID",                   // HARD_METHOD_DEAD
+  "BANK_DOWNTIME_NETWORK_ERROR",                        // NETWORK_TIMEOUT
+  "UNKNOWN",                                            // UNKNOWN
+];
+let demoErrorIndex = 0;
+function nextDemoError(): string {
+  const code = DEMO_ERROR_CODES[demoErrorIndex % DEMO_ERROR_CODES.length];
+  demoErrorIndex++;
+  return code;
+}
+
 // ── SSE ──────────────────────────────────────────────────────────
 interface SSEClient { res: Response; id: string; connectedAt: number; }
 const sseClients = new Map<string, Set<SSEClient>>();
@@ -261,16 +283,20 @@ app.post("/api/payments/failed", async (req: Request, res: Response) => {
 
     if (!razorpay_order_id) return res.status(400).json({ error: "razorpay_order_id required" });
 
+    // Round-robin error injection: cycle through all failure classes for demo
+    // This ensures the dashboard shows a variety of failure types, not just one
+    const demoErrorCode = nextDemoError();
+
     // Use processFailedPayment to run full ML pipeline
     const result = await processFailedPayment(dbClient, {
       razorpayPaymentId: `pay_client_${Date.now()}`,
       razorpayOrderId: razorpay_order_id,
       amountPaise: amountPaise || 0,
-      failureCode: error_code || "UNKNOWN",
-      failureDescription: error_description || "",
-      failureStep: error_step || "",
-      failureSource: error_source || "",
-      failureReason: error_reason || "",
+      failureCode: demoErrorCode,
+      failureDescription: error_description || `Simulated failure: ${demoErrorCode}`,
+      failureStep: error_step || "payment_authorization",
+      failureSource: error_source || "customer",
+      failureReason: error_reason || demoErrorCode,
       customerProfileId: customerId || "",
       productName: productName || "",
       nowMs: Date.now(),
@@ -298,7 +324,13 @@ app.post("/api/payments/failed", async (req: Request, res: Response) => {
       });
     }
 
-    res.json({ eventId: result.eventId, failureClass: result.failureClass, action: result.action });
+    res.json({
+      eventId: result.eventId,
+      failureClass: result.failureClass,
+      action: result.action,
+      failureCode: demoErrorCode,
+      failureDescription: `Payment could not be processed. Reason: ${demoErrorCode.replace(/_/g, ' ').toLowerCase()}`,
+    });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }
