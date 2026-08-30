@@ -407,22 +407,39 @@ app.get("/api/recovery/batch-proof", (_req, res) => {
 
 });
 
-// E. Get current recovery state
-app.get("/api/recovery/state", (_req, res) => {
+// E. Get current recovery state (persisted in SQLite ledger)
+app.get("/api/recovery/state", async (_req, res) => {
+  let dbRecoveredPaise = liveMetrics.totalRecoveredPaise;
+  try {
+    const r = await dbClient.execute({
+      sql: `SELECT count(*) as count, coalesce(sum(json_extract(payload_json, '$.amountPaise')), 0) as total
+            FROM audit_log
+            WHERE entry_type = 'OUTCOME' AND json_extract(payload_json, '$.status') = 'SETTLED_RECOVERED'`,
+      args: [],
+    });
+    if (r.rows.length > 0 && Number(r.rows[0].total) > 0) {
+      dbRecoveredPaise = Math.max(dbRecoveredPaise, Number(r.rows[0].total));
+    }
+  } catch {}
+
+  const recoveryRate =
+    liveMetrics.totalAtRiskPaise > 0
+      ? ((dbRecoveredPaise / liveMetrics.totalAtRiskPaise) * 100).toFixed(1) + "%"
+      : "0.0%";
+
   res.json({
     sessions: Array.from(recoverySessions.values()).reverse(),
     metrics: {
       ...liveMetrics,
+      totalRecoveredPaise: dbRecoveredPaise,
       totalAtRiskFormatted: formatINR(paise(liveMetrics.totalAtRiskPaise)),
-      totalRecoveredFormatted: formatINR(paise(liveMetrics.totalRecoveredPaise)),
-      recoveryRate:
-        liveMetrics.totalAtRiskPaise > 0
-          ? ((liveMetrics.totalRecoveredPaise / liveMetrics.totalAtRiskPaise) * 100).toFixed(1) + "%"
-          : "0.0%",
+      totalRecoveredFormatted: formatINR(paise(dbRecoveredPaise)),
+      recoveryRate,
     },
     presets: PRESETS,
   });
 });
+
 
 // ── Provider DLR & IVR Webhook Endpoints (Task 2.8) ──────────────────
 
@@ -944,8 +961,44 @@ app.post("/api/webhooks/razorpay", webhookLimiter, async (req, res) => {
     webhookSecret: WEBHOOK_SECRET || DEFAULT_LOCAL_WEBHOOK_SECRET,
   });
 
+  if (result.statusCode === 200) {
+    try {
+      const rawStr = Buffer.isBuffer(rawBody) ? rawBody.toString("utf8") : String(rawBody);
+      const parsed = JSON.parse(rawStr);
+      const pay = parsed.payload?.payment?.entity;
+      const orderId = pay?.order_id || parsed.payload?.order?.entity?.id;
+      const propId = pay?.notes?.proposal_id || pay?.notes?.proposalId;
+
+      // Find matching session
+      let targetSession = propId ? recoverySessions.get(propId) : undefined;
+      if (!targetSession && orderId) {
+        for (const s of recoverySessions.values()) {
+          if (s.id === orderId || (s as any).orderId === orderId) {
+            targetSession = s;
+            break;
+          }
+        }
+      }
+
+      if (targetSession) {
+        await completeRecovery(targetSession.id, dbClient);
+        broadcastStatus(targetSession.recoveryToken, {
+          type: "PAYMENT_RECOVERED",
+          proposalId: targetSession.id,
+          status: "SETTLED_RECOVERED",
+        });
+        broadcastStatus("global", {
+          type: "PAYMENT_RECOVERED",
+          proposalId: targetSession.id,
+          status: "SETTLED_RECOVERED",
+        });
+      }
+    } catch {}
+  }
+
   return res.status(result.statusCode).json(result);
 });
+
 
 // 6. Live SSE Payment Status Endpoint
 app.get("/api/status/:token", async (req, res) => {

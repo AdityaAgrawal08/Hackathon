@@ -78,11 +78,10 @@ export class MSG91SmsProvider implements OutreachProvider {
       template_id: this.config.flowId || template.flowId,
       sender: this.config.senderId,
       short_url: "0",
-      mobiles: cleanPhone,
-      dlt_te_id: template.dltId,
       recipients: [recipientObj],
       ...recipientObj,
     };
+
 
 
     // Simulated / dry-run mode when authKey is not configured
