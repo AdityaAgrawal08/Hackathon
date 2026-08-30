@@ -31,11 +31,13 @@ export class BrevoEmailProvider implements OutreachProvider {
 
   constructor(private config: BrevoConfig = {}) {
     const rawKey = config.apiKey || process.env.BREVO_API_KEY;
-    this.config.apiKey = (rawKey && !rawKey.includes("xxxxxx")) ? rawKey : undefined;
+    const isTest = process.env.NODE_ENV === "test" || process.env.VITEST === "true";
+    this.config.apiKey = (rawKey && !rawKey.includes("xxxxxx") && !isTest) ? rawKey : undefined;
     this.config.senderEmail = config.senderEmail || process.env.BREVO_SENDER_EMAIL || "billing@arbiter.in";
     this.config.senderName = config.senderName || process.env.BREVO_SENDER_NAME || "ARBITER Recovery";
     this.config.webhookSecret = config.webhookSecret || process.env.BREVO_WEBHOOK_SECRET;
   }
+
 
 
 

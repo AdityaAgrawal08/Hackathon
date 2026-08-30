@@ -14,7 +14,7 @@ import { createHash } from "node:crypto";
 import { formatINR, paise } from "@arbiter/shared";
 
 export const PROMPT_VERSION = "narrative-v1";
-export const NARRATIVE_MODEL = process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-20250514";
+export const NARRATIVE_MODEL = process.env.GROQ_MODEL ?? "llama3-8b-8192";
 
 export interface CaseBriefInput {
   eventId: string;
@@ -27,11 +27,12 @@ export interface CaseBriefInput {
 
 export interface NarrativeResult {
   text: string;
-  source: "claude" | "fallback";
+  source: "groq" | "fallback";
   /** True if the validator removed or softened absolute claims. */
   flagged: boolean;
   promptVersion: string;
 }
+
 
 /** Absolute-claim patterns — compliance copy pass (P2-B9). */
 const CLAIM_PATTERNS: RegExp[] = [
@@ -123,7 +124,7 @@ interface FetchLike {
 const cache = new Map<string, NarrativeResult>();
 const CACHE_MAX = 512;
 
-async function callClaude(
+async function callGroq(
   input: CaseBriefInput,
   apiKey: string,
   fetchImpl: FetchLike,
@@ -132,32 +133,32 @@ async function callClaude(
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const res = await fetchImpl("https://api.anthropic.com/v1/messages", {
+    const res = await fetchImpl("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       signal: ctrl.signal,
       headers: {
         "content-type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
+        "authorization": `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
         model: NARRATIVE_MODEL,
         max_tokens: 120,
         temperature: 0, // determinism contract §3.3
-        system:
-          "You write terse, compliant recovery case briefs for payment merchants. " +
-          "You never make promises about outcomes and never invent numbers.",
-        messages: [{ role: "user", content: buildPrompt(input) }],
+        messages: [
+          {
+            role: "system",
+            content:
+              "You write terse, compliant recovery case briefs for payment merchants. " +
+              "You never make promises about outcomes and never invent numbers.",
+          },
+          { role: "user", content: buildPrompt(input) },
+        ],
       }),
     });
-    if (!res.ok) throw new Error(`claude http ${res.status}`);
-    const body = (await res.json()) as { content?: Array<{ type: string; text?: string }> };
-    const text = (body.content ?? [])
-      .filter((b) => b.type === "text")
-      .map((b) => b.text ?? "")
-      .join("")
-      .trim();
-    if (!text) throw new Error("claude empty response");
+    if (!res.ok) throw new Error(`groq http ${res.status}`);
+    const body = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+    const text = (body.choices?.[0]?.message?.content ?? "").trim();
+    if (!text) throw new Error("groq empty response");
     return text;
   } finally {
     clearTimeout(timer);
@@ -165,14 +166,14 @@ async function callClaude(
 }
 
 export interface NarrateOptions {
-  apiKey?: string; // default env ANTHROPIC_API_KEY
+  apiKey?: string; // default env GROQ_API_KEY
   fetchImpl?: FetchLike; // injectable for tests
   timeoutMs?: number; // default 8000 — narrative never stalls the pipeline
   noCache?: boolean;
 }
 
 /**
- * Produce the case brief. Order: cache → Claude(temp 0) → validator → store;
+ * Produce the case brief. Order: cache → Groq(temp 0) → validator → store;
  * any failure ⇒ deterministic fallback. Total function: never throws.
  */
 export async function narrateCase(
@@ -186,12 +187,12 @@ export async function narrateCase(
   }
 
   let result: NarrativeResult;
-  const apiKey = opts.apiKey ?? process.env.ANTHROPIC_API_KEY;
+  const apiKey = opts.apiKey ?? process.env.GROQ_API_KEY;
   if (!apiKey) {
     result = { text: fallbackNarrative(input), source: "fallback", flagged: false, promptVersion: PROMPT_VERSION };
   } else {
     try {
-      const raw = await callClaude(
+      const raw = await callGroq(
         input,
         apiKey,
         opts.fetchImpl ?? (fetch as unknown as FetchLike),
@@ -200,7 +201,7 @@ export async function narrateCase(
       const v = validateNarrative(raw);
       result = {
         text: v.text || fallbackNarrative(input),
-        source: "claude",
+        source: "groq",
         flagged: v.flagged,
         promptVersion: PROMPT_VERSION,
       };
@@ -218,3 +219,4 @@ export async function narrateCase(
 export function clearNarrativeCache(): void {
   cache.clear();
 }
+

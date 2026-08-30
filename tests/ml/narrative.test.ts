@@ -26,12 +26,13 @@ const CASE = {
 };
 
 function withNoApiKey(fn: () => Promise<void>): Promise<void> {
-  const saved = process.env.ANTHROPIC_API_KEY;
-  delete process.env.ANTHROPIC_API_KEY;
+  const saved = process.env.GROQ_API_KEY;
+  delete process.env.GROQ_API_KEY;
   return fn().finally(() => {
-    if (saved !== undefined) process.env.ANTHROPIC_API_KEY = saved;
+    if (saved !== undefined) process.env.GROQ_API_KEY = saved;
   });
 }
+
 
 afterEach(() => clearNarrativeCache());
 
@@ -96,7 +97,7 @@ describe("narrateCase", () => {
     });
   });
 
-  it("validates Claude output and flags claim-y prose", async () => {
+  it("validates Groq output and flags claim-y prose", async () => {
     const calls: Array<{ url: string; init: { body: string } }> = [];
     const fakeFetch = async (url: string, init: { body: string }) => {
       calls.push({ url, init });
@@ -104,12 +105,18 @@ describe("narrateCase", () => {
         ok: true,
         status: 200,
         json: async () => ({
-          content: [{ type: "text", text: "Soft decline, 42.3% estimate. Guaranteed to succeed." }],
+          choices: [
+            {
+              message: {
+                content: "Soft decline, 42.3% estimate. Guaranteed to succeed.",
+              },
+            },
+          ],
         }),
       };
     };
     const r = await narrateCase(CASE, { apiKey: "k-test", fetchImpl: fakeFetch as never });
-    expect(r.source).toBe("claude");
+    expect(r.source).toBe("groq");
     expect(r.flagged).toBe(true);
     expect(r.text).not.toContain("Guaranteed");
     expect(r.text).toContain("42.3%");
@@ -117,10 +124,10 @@ describe("narrateCase", () => {
     // temp-0 pinned prompt
     const body = JSON.parse(calls[0]!.init.body) as { temperature: number; model: string };
     expect(body.temperature).toBe(0);
-    expect(calls[0]!.url).toContain("/v1/messages");
+    expect(calls[0]!.url).toContain("/v1/chat/completions");
   }, 15000);
 
-  it("falls back silently when Claude errors — pipeline never crashes (P2-B10)", async () => {
+  it("falls back silently when Groq errors — pipeline never crashes (P2-B10)", async () => {
     const failing = async () => {
       throw new Error("boom");
     };
@@ -130,7 +137,7 @@ describe("narrateCase", () => {
   });
 
   it("falls back on empty/HTTP-error responses too", async () => {
-    const empty = async () => ({ ok: true, status: 200, json: async () => ({ content: [] }) });
+    const empty = async () => ({ ok: true, status: 200, json: async () => ({ choices: [] }) });
     expect((await narrateCase(CASE, { apiKey: "k", fetchImpl: empty as never })).source).toBe("fallback");
 
     const http500 = async () => ({ ok: false, status: 500, json: async () => ({}) });
@@ -141,7 +148,19 @@ describe("narrateCase", () => {
     let calls = 0;
     const impl = async () => {
       calls++;
-      return { ok: true, status: 200, json: async () => ({ content: [{ type: "text", text: "Clean sentence." }] }) };
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [
+            {
+              message: {
+                content: "Clean sentence.",
+              },
+            },
+          ],
+        }),
+      };
     };
     const first = await narrateCase(CASE, { apiKey: "k", fetchImpl: impl as never, noCache: false });
     const second = await narrateCase(CASE, { apiKey: "k", fetchImpl: impl as never, noCache: false });
@@ -153,3 +172,4 @@ describe("narrateCase", () => {
     expect(calls).toBe(2);
   });
 });
+

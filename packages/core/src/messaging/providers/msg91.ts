@@ -46,11 +46,13 @@ export class MSG91SmsProvider implements OutreachProvider {
 
   constructor(private config: MSG91Config = {}) {
     const rawKey = config.authKey || process.env.MSG91_AUTH_KEY;
-    this.config.authKey = (rawKey && !rawKey.includes("xxxxxx")) ? rawKey : undefined;
+    const isTest = process.env.NODE_ENV === "test" || process.env.VITEST === "true";
+    this.config.authKey = (rawKey && !rawKey.includes("xxxxxx") && !isTest) ? rawKey : undefined;
     this.config.senderId = config.senderId || process.env.MSG91_SENDER_ID || "ARBITR";
     this.config.dltTemplateId = config.dltTemplateId || process.env.MSG91_DLT_TEMPLATE_ID || "1407168923450011";
     this.config.flowId = config.flowId || process.env.MSG91_FLOW_ID;
   }
+
 
 
 
