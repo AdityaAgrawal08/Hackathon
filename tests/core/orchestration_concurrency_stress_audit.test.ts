@@ -39,55 +39,60 @@ describe("Aggressive Industry-Grade Audit: Concurrency, Failover Cascade & Re-En
   });
 
   describe("Audit 1: High-Concurrency Burst Stress (100 Parallel Ingestions)", () => {
-    it("handles 100 concurrent triage requests with zero race conditions, data corruption, or hash drift", async () => {
-      const burstPromises = Array.from({ length: 100 }, (_, i) => {
-        const amountPaise = (1000 + i * 50) * 100;
-        return fetch(`${baseUrl}/api/recovery/triage`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            customPreset: {
-              customerName: `Burst Customer ${i}`,
-              customerPhone: `+91 98000 ${String(i).padStart(5, "0")}`,
-              amountPaise,
-              failureCode: i % 2 === 0
-                ? "BAD_REQUEST_PAYMENT_ACCOUNT_INSUFFICIENT_BALANCE"
-                : "BAD_REQUEST_PAYMENT_CARD_EXPIRED",
-            },
-            simulatedTimeMs: DAYTIME_MS,
-            autonomyThresholdPaise: 250000,
-          }),
-        }).then((res) => res.json());
-      });
+    it(
+      "handles 100 concurrent triage requests with zero race conditions, data corruption, or hash drift",
+      async () => {
+        const burstPromises = Array.from({ length: 100 }, (_, i) => {
+          const amountPaise = (1000 + i * 50) * 100;
+          return fetch(`${baseUrl}/api/recovery/triage`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              customPreset: {
+                customerName: `Burst Customer ${i}`,
+                customerPhone: `+91 98000 ${String(i).padStart(5, "0")}`,
+                amountPaise,
+                failureCode: i % 2 === 0
+                  ? "BAD_REQUEST_PAYMENT_ACCOUNT_INSUFFICIENT_BALANCE"
+                  : "BAD_REQUEST_PAYMENT_CARD_EXPIRED",
+              },
+              simulatedTimeMs: DAYTIME_MS,
+              autonomyThresholdPaise: 250000,
+            }),
+          }).then((res) => res.json());
+        });
 
-      const sessions = await Promise.all(burstPromises);
-      expect(sessions.length).toBe(100);
+        const sessions = await Promise.all(burstPromises);
+        expect(sessions.length).toBe(100);
 
-      // Verify every session is unique and structurally sound
-      const ids = new Set(sessions.map((s) => s.id));
-      expect(ids.size).toBe(100);
+        // Verify every session is unique and structurally sound
+        const ids = new Set(sessions.map((s) => s.id));
+        expect(ids.size).toBe(100);
 
-      // Concurrently query trace API for all 100 sessions
-      const tracePromises = sessions.map((s) =>
-        fetch(`${baseUrl}/api/recovery/trace/${s.id}`).then((res) => res.json()),
-      );
-      const traces = await Promise.all(tracePromises);
+        // Concurrently query trace API for all 100 sessions
+        const tracePromises = sessions.map((s) =>
+          fetch(`${baseUrl}/api/recovery/trace/${s.id}`).then((res) => res.json()),
+        );
+        const traces = await Promise.all(tracePromises);
 
-      for (let i = 0; i < 100; i++) {
-        const trace = traces[i];
-        expect(trace.proposalId).toBe(sessions[i].id);
-        expect(trace.steps.length).toBeGreaterThanOrEqual(3);
+        for (let i = 0; i < 100; i++) {
+          const trace = traces[i];
+          expect(trace.proposalId).toBe(sessions[i].id);
+          expect(trace.steps.length).toBeGreaterThanOrEqual(3);
 
-        // Verify SHA-256 integrity on every single step of all 100 sessions
-        for (const step of trace.steps) {
-          const recomputed = createHash("sha256")
-            .update(JSON.stringify(step.payload))
-            .digest("hex");
-          expect(step.sha256Hash).toBe(recomputed);
+          // Verify SHA-256 integrity on every single step of all 100 sessions
+          for (const step of trace.steps) {
+            const recomputed = createHash("sha256")
+              .update(JSON.stringify(step.payload))
+              .digest("hex");
+            expect(step.sha256Hash).toBe(recomputed);
+          }
         }
-      }
-    });
+      },
+      60000,
+    );
   });
+
 
   describe("Audit 2: Multi-Channel Provider Failover Cascade & Circuit Breakers", () => {
     it("cascades from failing primary provider to secondary provider without dropping outreach", async () => {

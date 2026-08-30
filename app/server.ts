@@ -184,6 +184,7 @@ const mobilePayHtml = readFileSync(resolve(__dirname, "views/mobile_pay.html"), 
 const dashboardHtml = readFileSync(resolve(__dirname, "views/dashboard.html"), "utf8");
 const recoverHtml = readFileSync(resolve(__dirname, "views/recover.html"), "utf8");
 const resultHtml = readFileSync(resolve(__dirname, "views/result.html"), "utf8");
+const storeHtml = readFileSync(resolve(__dirname, "views/store.html"), "utf8");
 
 // ── Routes ──────────────────────────────────────────────────────────
 
@@ -193,13 +194,19 @@ app.get(["/", "/dashboard"], (_req, res) => {
   res.send(dashboardHtml);
 });
 
-// 2. Customer 1-Click Recovery Portal (Task 3.1 & 3.3)
+// 2. Interactive Storefront & Fault Simulator
+app.get("/store", (_req, res) => {
+  res.setHeader("Content-Type", "text/html");
+  res.send(storeHtml);
+});
+
+// 3. Customer 1-Click Recovery Portal (Task 3.1 & 3.3)
 app.get("/recover", (_req, res) => {
   res.setHeader("Content-Type", "text/html");
   res.send(recoverHtml);
 });
 
-// 3. Post-Payment Outcome & Receipt Center (Task 4.1 - 4.4)
+// 4. Post-Payment Outcome & Receipt Center (Task 4.1 - 4.4)
 app.get("/result", (_req, res) => {
   res.setHeader("Content-Type", "text/html");
   res.send(resultHtml);
@@ -214,7 +221,59 @@ app.get("/checkout", (_req, res) => {
 
 // ── Recovery Engine API Endpoints ────────────────────────────────────
 
-// A. Simulate failure ingestion and execute real-time triage (Task 5.1 & 5.4)
+// A. Storefront Order Simulation & Fault Ingestion
+app.post("/api/orders/simulate", async (req, res) => {
+  try {
+    const {
+      customerName,
+      customerPhone,
+      customerEmail,
+      amountPaise = 199900,
+      failureCode = "BAD_REQUEST_PAYMENT_ACCOUNT_INSUFFICIENT_BALANCE",
+      instrumentDesc = "HDFC Bank",
+      tcAgreed,
+      outreachPermitted = true,
+      autonomyThresholdPaise = 200000,
+    } = req.body || {};
+
+    if (!tcAgreed) {
+      return res.status(400).json({ error: "TERMS_AND_CONDITIONS_REQUIRED" });
+    }
+
+    if (!customerName || !customerPhone) {
+      return res.status(400).json({ error: "CUSTOMER_NAME_AND_PHONE_REQUIRED" });
+    }
+
+    const hostHeader = getSanitizedHost(req);
+    const proto = req.protocol === "https" || req.get("x-forwarded-proto") === "https" ? "https" : "http";
+    const baseUrl = `${proto}://${hostHeader}`;
+
+    const session = await simulateFailureTriage(
+      {
+        customerName: String(customerName).trim(),
+        customerPhone: String(customerPhone).trim(),
+        customerEmail: customerEmail ? String(customerEmail).trim() : undefined,
+        amountPaise: Number(amountPaise),
+        failureCode: String(failureCode),
+        instrumentDesc: String(instrumentDesc),
+        outreachPermitted: Boolean(outreachPermitted),
+      },
+      baseUrl,
+      dbClient,
+      undefined,
+      autonomyThresholdPaise,
+    );
+
+    // Real-time broadcast to dashboard via SSE
+    broadcastStatus("global", { type: "FAILURE_INGESTED", session });
+
+    res.json({ success: true, session });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// B. Simulate failure ingestion and execute real-time triage (Task 5.1 & 5.4)
 app.post("/api/recovery/triage", async (req, res) => {
   try {
     const { preset = "SALARY_DELAY", customPreset, autonomyThresholdPaise = 200000, simulatedTimeMs } = req.body || {};
@@ -231,8 +290,9 @@ app.post("/api/recovery/triage", async (req, res) => {
 });
 
 
-// B. Initiate dedicated recovery order & dynamic QR (Task 3.2)
+// C. Initiate dedicated recovery order & dynamic QR (Task 3.2)
 app.post("/api/recovery/initiate", async (req, res) => {
+
   try {
     const { proposalId, token, preferredMethod = "upi" } = req.body || {};
     const order = await initiateRecoveryOrder(proposalId || token, preferredMethod, dbClient);
@@ -294,8 +354,9 @@ app.post("/api/recovery/complete", async (req, res) => {
       broadcastStatus(session.recoveryToken, { type: "PAYMENT_RECOVERED", proposalId, status: "SETTLED_RECOVERED" });
       broadcastStatus("global", { type: "PAYMENT_RECOVERED", proposalId, status: "SETTLED_RECOVERED" });
     }
-    res.json({ success: ok, proposalId });
+    res.json({ success: ok, proposalId, status: "SETTLED_RECOVERED" });
   } catch (err) {
+
     res.status(500).json({ error: (err as Error).message });
   }
 });

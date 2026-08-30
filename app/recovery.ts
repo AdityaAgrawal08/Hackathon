@@ -57,6 +57,7 @@ export interface SimulationPreset {
   customerName: string;
   customerPhone: string;
   customerEmail?: string;
+  outreachPermitted?: boolean;
   amountPaise: number;
   failureCode: string;
   instrumentDesc: string;
@@ -65,6 +66,7 @@ export interface SimulationPreset {
   pastSuccesses: number;
   pastFailures: number;
 }
+
 
 
 export const PRESETS: Record<string, SimulationPreset> = {
@@ -142,10 +144,12 @@ export interface RecoveryProposalSession {
   customerName: string;
   customerPhone: string;
   customerEmail?: string;
+  outreachPermitted?: boolean;
   amountPaise: number;
   formattedAmount: string;
   failureCode: string;
   instrumentDesc: string;
+
 
   diagnosis: Diagnosis;
   features: ComputedFeatures;
@@ -204,15 +208,17 @@ export async function simulateFailureTriage(
       name: presetKeyOrCustom.name || "Custom Injected Failure",
       customerName: String(presetKeyOrCustom.customerName || "Customer"),
       customerPhone: String(presetKeyOrCustom.customerPhone || "+91 98765 43210"),
+      customerEmail: presetKeyOrCustom.customerEmail ? String(presetKeyOrCustom.customerEmail) : undefined,
+      outreachPermitted: presetKeyOrCustom.outreachPermitted !== false,
       amountPaise: safeAmount,
       failureCode: String(presetKeyOrCustom.failureCode || "BAD_REQUEST_PAYMENT_ACCOUNT_INSUFFICIENT_BALANCE"),
-
       instrumentDesc: String(presetKeyOrCustom.instrumentDesc || "UPI / Card"),
       paydayDay: presetKeyOrCustom.paydayDay ?? 28,
       tenureMonths: safeTenure,
       pastSuccesses: safeSuccesses,
       pastFailures: safeFailures,
     };
+
   }
 
 
@@ -311,6 +317,7 @@ export async function simulateFailureTriage(
     customerName: preset.customerName,
     customerPhone: preset.customerPhone,
     customerEmail: preset.customerEmail,
+    outreachPermitted: preset.outreachPermitted !== false,
     amountPaise: preset.amountPaise,
     formattedAmount: formatINR(paise(preset.amountPaise)),
     failureCode: preset.failureCode,
@@ -337,37 +344,50 @@ export async function simulateFailureTriage(
     liveMetrics.wastedAttemptsSaved += 3;
   }
 
-  // 7. Task 6.3: Autonomous Multi-Channel Provider Dispatch
+  // 7. Task 6.3: Autonomous Multi-Channel Provider Dispatch (User Consent Gated)
+  const isConsentGranted = preset.outreachPermitted !== false;
   if (isAutoApproved && diagClass !== "RISK_FLAGGED") {
-    const channel: OutreachChannel =
-      decideOutput.chosen.action === "RECOVER_EMAIL"
-        ? "EMAIL"
-        : decideOutput.chosen.action === "RECOVER_VOICE_HI"
-        ? "VOICE"
-        : decideOutput.chosen.action === "RECOVER_WHATSAPP"
-        ? "WHATSAPP"
-        : "SMS";
+    if (isConsentGranted) {
+      const channel: OutreachChannel =
+        decideOutput.chosen.action === "RECOVER_EMAIL"
+          ? "EMAIL"
+          : decideOutput.chosen.action === "RECOVER_VOICE_HI"
+          ? "VOICE"
+          : decideOutput.chosen.action === "RECOVER_WHATSAPP"
+          ? "WHATSAPP"
+          : "SMS";
 
-    const outreachPayload: OutreachPayload = {
-      proposalId,
-      failureClass: diagClass,
-      action: decideOutput.chosen.action,
-      recipient: {
-        customerName: preset.customerName,
-        phone: preset.customerPhone,
-        email: preset.customerEmail || `${preset.customerName.toLowerCase().replace(/[^a-z0-9]/g, "")}@example.com`,
-      },
+      const outreachPayload: OutreachPayload = {
+        proposalId,
+        failureClass: diagClass,
+        action: decideOutput.chosen.action,
+        recipient: {
+          customerName: preset.customerName,
+          phone: preset.customerPhone,
+          email: preset.customerEmail || `${preset.customerName.toLowerCase().replace(/[^a-z0-9]/g, "")}@example.com`,
+        },
 
-      amountPaise: preset.amountPaise,
-      paymentLinkUrl: recoveryUrl,
-      language: "EN",
-      rawErrorReason: preset.failureCode,
-    };
+        amountPaise: preset.amountPaise,
+        paymentLinkUrl: recoveryUrl,
+        language: "EN",
+        rawErrorReason: preset.failureCode,
+      };
 
-    try {
-      session.dispatchResult = await defaultOutreachRouter.dispatch(channel, outreachPayload, nowMs);
-    } catch {}
+      try {
+        session.dispatchResult = await defaultOutreachRouter.dispatch(channel, outreachPayload, nowMs);
+      } catch {}
+    } else {
+      session.dispatchResult = {
+        providerName: "suppressed",
+        channel: "SMS",
+        status: "FAILED",
+        dispatchedAtUtc: isoUtc(nowMs),
+        costPaise: 0,
+        rawResponse: { reason: "OUTREACH_SUPPRESSED_NO_CONSENT" },
+      };
+    }
   }
+
 
   // 8. Task 6.4: Append-Only Audit Logging to SQLite
   if (dbClient) {
@@ -463,33 +483,47 @@ export async function approveProposal(proposalId: string, dbClient?: Client, now
     session.autonomyStatus = "APPROVED";
     const nowUtc = isoUtc(nowMs);
 
-    const channel: OutreachChannel =
-      session.decideOutput.chosen.action === "RECOVER_EMAIL"
-        ? "EMAIL"
-        : session.decideOutput.chosen.action === "RECOVER_VOICE_HI"
-        ? "VOICE"
-        : session.decideOutput.chosen.action === "RECOVER_WHATSAPP"
-        ? "WHATSAPP"
-        : "SMS";
+    const isConsentGranted = session.outreachPermitted !== false;
 
-    const outreachPayload: OutreachPayload = {
-      proposalId: session.id,
-      failureClass: session.diagnosis.class,
-      action: session.decideOutput.chosen.action,
-      recipient: {
-        customerName: session.customerName,
-        phone: session.customerPhone,
-        email: `${session.customerName.toLowerCase().replace(/[^a-z0-9]/g, "")}@example.com`,
-      },
-      amountPaise: session.amountPaise,
-      paymentLinkUrl: session.recoveryUrl,
-      language: "EN",
-      rawErrorReason: session.failureCode,
-    };
+    if (isConsentGranted) {
+      const channel: OutreachChannel =
+        session.decideOutput.chosen.action === "RECOVER_EMAIL"
+          ? "EMAIL"
+          : session.decideOutput.chosen.action === "RECOVER_VOICE_HI"
+          ? "VOICE"
+          : session.decideOutput.chosen.action === "RECOVER_WHATSAPP"
+          ? "WHATSAPP"
+          : "SMS";
 
-    try {
-      session.dispatchResult = await defaultOutreachRouter.dispatch(channel, outreachPayload, nowMs);
-    } catch {}
+      const outreachPayload: OutreachPayload = {
+        proposalId: session.id,
+        failureClass: session.diagnosis.class,
+        action: session.decideOutput.chosen.action,
+        recipient: {
+          customerName: session.customerName,
+          phone: session.customerPhone,
+          email: session.customerEmail || `${session.customerName.toLowerCase().replace(/[^a-z0-9]/g, "")}@example.com`,
+        },
+        amountPaise: session.amountPaise,
+        paymentLinkUrl: session.recoveryUrl,
+        language: "EN",
+        rawErrorReason: session.failureCode,
+      };
+
+      try {
+        session.dispatchResult = await defaultOutreachRouter.dispatch(channel, outreachPayload, nowMs);
+      } catch {}
+    } else {
+      session.dispatchResult = {
+        providerName: "suppressed",
+        channel: "SMS",
+        status: "FAILED",
+        dispatchedAtUtc: isoUtc(nowMs),
+        costPaise: 0,
+        rawResponse: { reason: "OUTREACH_SUPPRESSED_NO_CONSENT" },
+      };
+    }
+
 
     if (dbClient) {
       try {
