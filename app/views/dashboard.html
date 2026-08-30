@@ -450,15 +450,47 @@
 
     window.addEventListener("DOMContentLoaded", () => {
       loadState();
+      initSSE();
+      // Automatic backup polling every 3 seconds so the vendor never has to reload
+      setInterval(loadState, 3000);
 
       document.getElementById('btn-batch-proof').onclick = runBatchProof;
       document.getElementById('btn-sweep').onclick = runSweeper;
     });
 
+    function initSSE() {
+      try {
+        const sse = new EventSource('/api/status/global');
+        sse.onmessage = (e) => {
+          try {
+            const data = JSON.parse(e.data);
+            if (data.type === 'FAILURE_INGESTED' && data.session) {
+              activeSession = data.session;
+              renderActiveSession(activeSession);
+            } else if (data.type === 'PROPOSAL_APPROVED' || data.type === 'PAYMENT_RECOVERED') {
+              if (activeSession && activeSession.id === data.proposalId) {
+                activeSession.autonomyStatus = data.status || (data.type === 'PROPOSAL_APPROVED' ? 'APPROVED' : 'EXECUTED');
+                renderActiveSession(activeSession);
+              }
+            }
+            loadState();
+          } catch (err) {}
+        };
+        sse.onerror = () => {
+          sse.close();
+          setTimeout(initSSE, 5000);
+        };
+      } catch (e) {
+        console.warn('SSE not supported or failed to connect:', e);
+      }
+    }
+
     function updateAutonomyEnvelope(val) {
       currentAutonomyThresholdPaise = parseInt(val, 10) * 100;
       document.getElementById('lbl-autonomy-val').innerText = `≤ ₹${parseInt(val, 10).toLocaleString('en-IN')}`;
     }
+
+    let loadedSessions = [];
 
     async function loadState() {
       try {
@@ -473,29 +505,53 @@
         document.getElementById('stat-recovery-rate').textContent = `${data.metrics.recoveryRate} recovered`;
         document.getElementById('stat-wasted').textContent = data.metrics.wastedAttemptsSaved;
 
-        // Render sessions
+        loadedSessions = data.sessions || [];
+
+        // Render sessions table
         const tbody = document.getElementById('tbl-sessions-body');
-        if (data.sessions.length === 0) {
+        if (loadedSessions.length === 0) {
           tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #64748b;">No events ingested in this session yet.</td></tr>';
         } else {
-          tbody.innerHTML = data.sessions.map(s => {
+          tbody.innerHTML = loadedSessions.map(s => {
             const isExecuted = s.autonomyStatus === 'EXECUTED';
             const badgeCls = isExecuted ? 'badge-success' : s.autonomyStatus === 'AUTO_APPROVED' ? 'badge-info' : 'badge-warning';
+            const isSelected = activeSession && activeSession.id === s.id;
             return `
-              <tr>
+              <tr onclick="selectSessionById('${s.id}')" style="cursor: pointer; ${isSelected ? 'background: rgba(59, 130, 246, 0.15);' : ''}">
                 <td><code>${s.id}</code></td>
                 <td><strong>${s.customerName}</strong></td>
                 <td>${s.formattedAmount}</td>
-                <td><span class="badge badge-purple">${s.diagnosis.rootCause}</span></td>
-                <td><code>${s.decideOutput.chosen.action}</code></td>
+                <td><span class="badge badge-purple">${s.diagnosis ? s.diagnosis.rootCause : 'DEGRADATION'}</span></td>
+                <td><code>${s.decideOutput ? s.decideOutput.chosen.action : 'RECOVER'}</code></td>
                 <td><span class="badge ${badgeCls}">${s.autonomyStatus}</span></td>
-                <td><small>${s.createdAtUtc.replace('T', ' ').slice(0, 19)}</small></td>
+                <td><small>${(s.createdAtUtc || '').replace('T', ' ').slice(0, 19)}</small></td>
               </tr>
             `;
           }).join('');
         }
+
+        // If no active session is selected but sessions exist, display the latest one
+        if (!activeSession && loadedSessions.length > 0) {
+          activeSession = loadedSessions[0];
+          renderActiveSession(activeSession);
+        } else if (activeSession) {
+          const updated = loadedSessions.find(s => s.id === activeSession.id);
+          if (updated && updated.autonomyStatus !== activeSession.autonomyStatus) {
+            activeSession = updated;
+            renderActiveSession(activeSession);
+          }
+        }
       } catch (err) {
         console.error('Error loading state:', err);
+      }
+    }
+
+    function selectSessionById(id) {
+      const s = loadedSessions.find(item => item.id === id);
+      if (s) {
+        activeSession = s;
+        renderActiveSession(s);
+        loadState();
       }
     }
 
@@ -519,11 +575,12 @@
     }
 
     function renderActiveSession(s) {
+      if (!s || !s.diagnosis) return;
       document.getElementById('triage-empty').style.display = 'none';
       document.getElementById('triage-details').style.display = 'block';
 
       // Summary
-      document.getElementById('diag-customer').textContent = `${s.customerName} (${s.customerPhone})`;
+      document.getElementById('diag-customer').textContent = `${s.customerName} (${s.customerPhone || 'N/A'})`;
       document.getElementById('diag-amount').textContent = s.formattedAmount;
       document.getElementById('diag-root-cause').textContent = s.diagnosis.rootCause;
       document.getElementById('diag-explanation').textContent = s.diagnosis.explanation;
@@ -537,25 +594,31 @@
 
       // Features
       const featContainer = document.getElementById('feature-pills');
-      featContainer.innerHTML = s.features.names.map((n, i) => {
-        const val = s.features.values[i];
-        return `<span class="feature-pill"><strong>${n}:</strong> ${typeof val === 'number' ? val.toFixed(2) : val}</span>`;
-      }).join('');
+      if (s.features && s.features.names) {
+        featContainer.innerHTML = s.features.names.map((n, i) => {
+          const val = s.features.values[i];
+          return `<span class="feature-pill"><strong>${n}:</strong> ${typeof val === 'number' ? val.toFixed(2) : val}</span>`;
+        }).join('');
+      }
 
       // EV Table
       const evBody = document.getElementById('tbl-ev-body');
-      evBody.innerHTML = s.decideOutput.ranked.map(r => {
-        const isChosen = r.action === s.decideOutput.chosen.action;
-        return `
-          <tr style="${isChosen ? 'background: rgba(16, 185, 129, 0.15); font-weight: 700;' : ''}">
-            <td><code>${r.action}</code> ${isChosen ? '★' : ''}</td>
-            <td>${r.multiplierUsed.toFixed(1)}x</td>
-            <td>${(r.adjustedProbabilityBp / 100).toFixed(1)}%</td>
-            <td>₹${(r.evPaise ? 1.5 : 0).toFixed(2)}</td>
-            <td style="color: ${r.evPaise > 0 ? '#10b981' : '#ef4444'};">₹${(r.evPaise / 100).toFixed(2)}</td>
-          </tr>
-        `;
-      }).join('');
+      if (s.decideOutput && s.decideOutput.ranked) {
+        evBody.innerHTML = s.decideOutput.ranked.map(r => {
+          const isChosen = r.action === s.decideOutput.chosen.action;
+          const channelCost = typeof r.costPaise === 'number' ? (r.costPaise / 100).toFixed(2) : '0.15';
+          return `
+            <tr style="${isChosen ? 'background: rgba(16, 185, 129, 0.15); font-weight: 700;' : ''}">
+              <td><code>${r.action}</code> ${isChosen ? '★' : ''}</td>
+              <td>${(r.multiplierUsed || 1.0).toFixed(1)}x</td>
+              <td>${((r.adjustedProbabilityBp || 0) / 100).toFixed(1)}%</td>
+              <td>₹${channelCost}</td>
+              <td style="color: ${r.evPaise > 0 ? '#10b981' : '#ef4444'};">₹${((r.evPaise || 0) / 100).toFixed(2)}</td>
+            </tr>
+          `;
+        }).join('');
+      }
+
 
       // Approval Bar
       document.getElementById('action-title').textContent = `Recommended Action: ${s.decideOutput.chosen.action}`;

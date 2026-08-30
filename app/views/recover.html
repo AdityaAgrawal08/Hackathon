@@ -290,12 +290,18 @@
     evtSource.onmessage = function (event) {
       try {
         const payload = JSON.parse(event.data);
-        if (payload.executionState === "SUCCEEDED" || payload.knowledgeStatus === "RESOLVED_SUCCESS") {
-          showSuccess(payload.providerPaymentId || "pay_rec_live");
+        if (
+          payload.executionState === "SUCCEEDED" ||
+          payload.knowledgeStatus === "RESOLVED_SUCCESS" ||
+          payload.type === "PAYMENT_RECOVERED" ||
+          payload.status === "SETTLED_RECOVERED"
+        ) {
+          showSuccess(payload.providerPaymentId || payload.proposalId || "pay_rec_live");
           evtSource.close();
         }
       } catch (e) {}
     };
+
   }
 
   function showSuccess(txnId) {
