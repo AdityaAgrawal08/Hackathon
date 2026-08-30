@@ -34,6 +34,7 @@ import {
   type FailureClassId,
   OutreachRouter,
   MSG91SmsProvider,
+  MSG91EmailProvider,
   BrevoEmailProvider,
   TwilioVoiceProvider,
   GupshupWhatsAppProvider,
@@ -53,8 +54,10 @@ import {
 export const defaultOutreachRouter = new OutreachRouter();
 defaultOutreachRouter.registerProvider(new MSG91SmsProvider());
 defaultOutreachRouter.registerProvider(new BrevoEmailProvider());
+defaultOutreachRouter.registerProvider(new MSG91EmailProvider());
 defaultOutreachRouter.registerProvider(new TwilioVoiceProvider());
 defaultOutreachRouter.registerProvider(new GupshupWhatsAppProvider());
+
 
 
 export interface SimulationPreset {

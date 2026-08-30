@@ -84,8 +84,11 @@ export class MSG91SmsProvider implements OutreachProvider {
 
 
 
-    // Simulated / dry-run mode when authKey is not configured
-    if (!this.config.authKey) {
+    const effectiveFlowId = this.config.flowId;
+    const isMockOrUnsetFlowId = !effectiveFlowId || effectiveFlowId.startsWith("flow_");
+
+    // Simulated / dry-run mode when authKey is not configured or flowId is not registered in MSG91
+    if (!this.config.authKey || isMockOrUnsetFlowId) {
       return {
         providerName: this.name,
         channel: this.channel,
@@ -96,6 +99,7 @@ export class MSG91SmsProvider implements OutreachProvider {
         rawResponse: { simulated: true, flowBody },
       };
     }
+
 
     try {
       const res = await fetch("https://api.msg91.com/api/v5/flow/", {
