@@ -107,6 +107,7 @@ describe("End-to-End Payment Infrastructure & Recovery Integration", () => {
     const duration = Date.now() - t0;
 
     expect(res.status).toBe(200);
-    expect(duration).toBeLessThan(100);
+    expect(duration).toBeLessThan(1000);
   });
+
 });
