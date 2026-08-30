@@ -250,6 +250,7 @@ app.post("/api/orders/simulate", async (req, res) => {
 
     const session = await simulateFailureTriage(
       {
+        id: `store_${Date.now()}`,
         customerName: String(customerName).trim(),
         customerPhone: String(customerPhone).trim(),
         customerEmail: customerEmail ? String(customerEmail).trim() : undefined,
@@ -263,6 +264,8 @@ app.post("/api/orders/simulate", async (req, res) => {
       undefined,
       autonomyThresholdPaise,
     );
+
+
 
     // Real-time broadcast to dashboard via SSE
     broadcastStatus("global", { type: "FAILURE_INGESTED", session });
@@ -338,15 +341,17 @@ app.post("/api/recovery/complete", async (req, res) => {
     const { proposalId, razorpay_payment_id, razorpay_order_id, razorpay_signature } = req.body || {};
 
     // Cryptographic Signature Verification (Requirement 4.9)
-    if (razorpay_signature && process.env.RZP_KEY_SECRET) {
+    const keySecret = process.env.RZP_KEY_SECRET || process.env.RZP_TEST_KEY_SECRET;
+    if (razorpay_signature && keySecret) {
       const payload = `${razorpay_order_id}|${razorpay_payment_id}`;
-      const expected = createHmac("sha256", process.env.RZP_KEY_SECRET).update(payload).digest("hex");
+      const expected = createHmac("sha256", keySecret).update(payload).digest("hex");
       const sigBuf = Buffer.from(razorpay_signature, "utf-8");
       const expBuf = Buffer.from(expected, "utf-8");
       if (sigBuf.length !== expBuf.length || !timingSafeEqual(sigBuf, expBuf)) {
         return res.status(400).json({ error: "INVALID_RAZORPAY_SIGNATURE" });
       }
     }
+
 
     const ok = await completeRecovery(proposalId, dbClient);
     const session = recoverySessions.get(proposalId);
