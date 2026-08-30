@@ -103,37 +103,60 @@ const EXPLANATION_BY_ROOT_CAUSE: Record<RootCause, string> = {
 /** Deterministic, fail-closed error code classifier. */
 export function classifyRazorpayError(failureCode: string): FailureClassId {
   const up = failureCode.trim().toUpperCase();
-  if (
-    up.includes("INSUFFICIENT") ||
-    up.includes("BALANCE") ||
-    up.includes("COLLECT_EXPIRED") ||
-    up.includes("OTP")
-  ) {
-    return "SOFT_RETRYABLE";
-  }
-  if (
-    up.includes("EXPIRED") ||
-    up.includes("REVOKED") ||
-    up.includes("INVALID") ||
-    up.includes("VPA")
-  ) {
-    return "HARD_METHOD_DEAD";
-  }
-  if (
-    up.includes("BANK") ||
-    up.includes("TIMEOUT") ||
-    up.includes("NETWORK") ||
-    up.includes("GATEWAY")
-  ) {
-    return "NETWORK_TIMEOUT";
-  }
-  if (
-    up.includes("FRAUD") ||
-    up.includes("RISK") ||
-    up.includes("STOLEN")
-  ) {
-    return "RISK_FLAGGED";
-  }
+
+  // Exact match first (fast path for known codes)
+  const ROOT_CAUSE_MAP: Record<string, FailureClassId> = {
+    INSUFFICIENT_FUNDS: "SOFT_RETRYABLE",
+    BAD_REQUEST_PAYMENT_ACCOUNT_INSUFFICIENT_BALANCE: "SOFT_RETRYABLE",
+    BAD_REQUEST_PAYMENT_UPI_COLLECT_EXPIRED: "SOFT_RETRYABLE",
+    BAD_REQUEST_PAYMENT_OTP_VALIDATION_FAILED: "SOFT_RETRYABLE",
+    TEMPORARY_DECLINE: "SOFT_RETRYABLE",
+    NO_MANDATE_RESPONSE: "SOFT_RETRYABLE",
+    LOCAL_INSUFFICIENT_FUNDS: "SOFT_RETRYABLE",
+    RZP_INSUFFICIENT_FUNDS: "SOFT_RETRYABLE",
+    CARD_EXPIRED: "HARD_METHOD_DEAD",
+    BAD_REQUEST_PAYMENT_CARD_EXPIRED: "HARD_METHOD_DEAD",
+    BAD_REQUEST_PAYMENT_CARD_INVALID: "HARD_METHOD_DEAD",
+    BAD_REQUEST_PAYMENT_MANDATE_REVOKED: "HARD_METHOD_DEAD",
+    BAD_REQUEST_PAYMENT_UPI_INVALID_VPA: "HARD_METHOD_DEAD",
+    MANDATE_REVOKED: "HARD_METHOD_DEAD",
+    TOKEN_INVALID: "HARD_METHOD_DEAD",
+    LOCAL_EXPIRED_METHOD: "HARD_METHOD_DEAD",
+    LOCAL_INVALID_DETAILS: "HARD_METHOD_DEAD",
+    RZP_EXPIRED_METHOD: "HARD_METHOD_DEAD",
+    RZP_INVALID_DETAILS: "HARD_METHOD_DEAD",
+    GATEWAY_TIMEOUT: "NETWORK_TIMEOUT",
+    GATEWAY_ERROR: "NETWORK_TIMEOUT",
+    BANK_DOWNTIME_NETWORK_ERROR: "NETWORK_TIMEOUT",
+    BAD_REQUEST_PAYMENT_TIMED_OUT: "NETWORK_TIMEOUT",
+    ISSUER_TIMEOUT: "NETWORK_TIMEOUT",
+    NETWORK_ERROR: "NETWORK_TIMEOUT",
+    LOCAL_GATEWAY_TIMEOUT: "NETWORK_TIMEOUT",
+    LOCAL_GATEWAY_503: "NETWORK_TIMEOUT",
+    LOCAL_LOST_RESPONSE: "NETWORK_TIMEOUT",
+    RZP_RATE_LIMITED: "NETWORK_TIMEOUT",
+    RZP_SERVER_ERROR: "NETWORK_TIMEOUT",
+    SUSPECTED_FRAUD: "RISK_FLAGGED",
+    BAD_REQUEST_PAYMENT_FRAUD_IDENTIFIED: "RISK_FLAGGED",
+    BAD_REQUEST_PAYMENT_CARD_STOLEN: "RISK_FLAGGED",
+    RISK_BLOCKED: "RISK_FLAGGED",
+    LOCAL_RISK_REJECTED: "RISK_FLAGGED",
+    RZP_REJECTED: "RISK_FLAGGED",
+    BAD_REQUEST_PAYMENT_DECLINED_BY_BANK: "UNKNOWN",
+    UNKNOWN_CODE: "UNKNOWN",
+    UNKNOWN: "UNKNOWN",
+  };
+
+  if (ROOT_CAUSE_MAP[up]) return ROOT_CAUSE_MAP[up];
+
+  // Substring fallback — order matters (most specific first)
+  if (up.includes("FRAUD") || up.includes("STOLEN") || up.includes("SUSPECTED")) return "RISK_FLAGGED";
+  if (up.includes("EXPIRED") || up.includes("REVOKED") || up.includes("INVALID_CARD") || up.includes("INVALID_VPA")) return "HARD_METHOD_DEAD";
+  if (up.includes("CARD") && (up.includes("CLOSED") || up.includes("BLOCKED") || up.includes("LIMIT"))) return "HARD_METHOD_DEAD";
+  if (up.includes("BANK_DOWNTIME") || up.includes("GATEWAY") || up.includes("TIMEOUT") || up.includes("NETWORK")) return "NETWORK_TIMEOUT";
+  if (up.includes("INSUFFICIENT") || up.includes("BALANCE") || up.includes("COLLECT_EXPIRED") || up.includes("OTP")) return "SOFT_RETRYABLE";
+  if (up.includes("DECLINED") || up.includes("DO_NOT_HONOR")) return "SOFT_RETRYABLE";
+
   return "UNKNOWN";
 }
 

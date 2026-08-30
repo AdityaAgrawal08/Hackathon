@@ -253,6 +253,73 @@ app.post("/api/payments/verify", async (req: Request, res: Response) => {
   }
 });
 
+// ── Client-Side Payment Failure (immediate redirect to recovery) ─
+app.post("/api/payments/failed", async (req: Request, res: Response) => {
+  try {
+    const { razorpay_order_id, error_code, error_description, error_step, error_source, error_reason,
+            customerId, productId, productName, amountPaise } = req.body;
+
+    if (!razorpay_order_id) return res.status(400).json({ error: "razorpay_order_id required" });
+
+    // Use processFailedPayment to run full ML pipeline
+    const result = await processFailedPayment(dbClient, {
+      razorpayPaymentId: `pay_client_${Date.now()}`,
+      razorpayOrderId: razorpay_order_id,
+      amountPaise: amountPaise || 0,
+      failureCode: error_code || "UNKNOWN",
+      failureDescription: error_description || "",
+      failureStep: error_step || "",
+      failureSource: error_source || "",
+      failureReason: error_reason || "",
+      customerProfileId: customerId || "",
+      productName: productName || "",
+      nowMs: Date.now(),
+    }, outreachRouter);
+
+    // Broadcast to vendor dashboard
+    broadcastSSE("global", {
+      type: "PAYMENT_FAILED",
+      status: "failed",
+      eventId: result.eventId,
+      customerProfileId: customerId,
+      failureClass: result.failureClass,
+      probability: result.probability,
+      action: result.action,
+    });
+
+    if (result.isSuspicious) {
+      broadcastSSE("vendor:alerts", {
+        type: "SUSPICIOUS_ACTIVITY",
+        eventId: result.eventId,
+        customerProfileId: customerId,
+        reasons: result.suspicionReasons,
+        amountPaise: amountPaise,
+        failureCode: error_code,
+      });
+    }
+
+    res.json({ eventId: result.eventId, failureClass: result.failureClass, action: result.action });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// ── Lookup event by orderId (for recovery page fallback) ─────────
+app.get("/api/payments/by-order/:orderId", async (req: Request, res: Response) => {
+  try {
+    const rows = await dbClient.execute({
+      sql: "SELECT id FROM live_payment_events WHERE razorpay_order_id = ? ORDER BY created_at_utc DESC LIMIT 1",
+      args: [req.params.orderId],
+    });
+    if (rows.rows.length > 0) {
+      return res.json({ eventId: String(rows.rows[0].id) });
+    }
+    res.status(404).json({ error: "No event found for this order" });
+  } catch {
+    res.status(500).json({ error: "Lookup failed" });
+  }
+});
+
 // ── Razorpay Webhook (Authoritative) ─────────────────────────────
 app.post("/api/webhooks/razorpay", webhookLimiter, async (req: Request, res: Response) => {
   const rawBody = req.body;
