@@ -285,7 +285,7 @@ export async function simulateFailureTriage(
 
   // 5. Task 5.4: Autonomy Governance (Dynamic Autonomy Envelope Dial)
   const isAutoApproved =
-    diagClass === "SOFT_RETRYABLE" &&
+    (diagClass === "SOFT_RETRYABLE" || diagClass === "NETWORK_TIMEOUT") &&
     preset.amountPaise <= autonomyThresholdPaise &&
     decideOutput.chosen.action !== "HUMAN_REVIEW";
 
@@ -378,7 +378,11 @@ export async function simulateFailureTriage(
 
       try {
         session.dispatchResult = await defaultOutreachRouter.dispatch(channel, outreachPayload, nowMs);
-      } catch {}
+        console.log(`[Outreach Dispatch] Proposal ${proposalId} -> Channel ${channel} -> Provider: ${session.dispatchResult.providerName} | Status: ${session.dispatchResult.status}`);
+      } catch (err) {
+        console.error(`[Outreach Error] Failed to dispatch ${channel}:`, err);
+      }
+
     } else {
       session.dispatchResult = {
         providerName: "suppressed",
@@ -515,7 +519,11 @@ export async function approveProposal(proposalId: string, dbClient?: Client, now
 
       try {
         session.dispatchResult = await defaultOutreachRouter.dispatch(channel, outreachPayload, nowMs);
-      } catch {}
+        console.log(`[Outreach Dispatch (Approved)] Proposal ${session.id} -> Channel ${channel} -> Provider: ${session.dispatchResult.providerName} | Status: ${session.dispatchResult.status}`);
+      } catch (err) {
+        console.error(`[Outreach Error (Approved)] Failed to dispatch ${channel}:`, err);
+      }
+
     } else {
       session.dispatchResult = {
         providerName: "suppressed",
