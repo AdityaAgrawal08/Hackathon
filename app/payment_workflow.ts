@@ -1,0 +1,385 @@
+/**
+ * Real Payment Workflow — processes failed Razorpay payments through the full pipeline:
+ * webhook → error extraction → failure classification → ML scoring → EV decision → outreach dispatch.
+ *
+ * Replaces simulateFailureTriage with a real, production-grade pipeline.
+ */
+import type { Client } from "@libsql/client";
+import { createHash } from "node:crypto";
+import { isoUtc, paise, formatINR } from "../packages/shared/src/index.js";
+import { classifyByCode, computeFeatures, scoreWithArtifact, DEFAULT_16D_MODEL } from "../packages/ml/src/index.js";
+import { decide, defaultPolicy, type DecideOutput, type FailureClassId } from "../packages/core/src/decide/index.js";
+import { OutreachRouter, type OutreachChannel, type OutreachPayload, type ProviderDispatchResult } from "../packages/core/src/messaging/index.js";
+
+export interface Product {
+  id: string;
+  name: string;
+  description: string;
+  pricePaise: number;
+  image: string;
+}
+
+export const PRODUCTS: Product[] = [
+  {
+    id: "prod_premium_plan",
+    name: "Premium Annual Plan",
+    description: "Full access to all features for 12 months",
+    pricePaise: 499900,
+    image: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Crect fill='%230f172a' width='200' height='200'/%3E%3Ctext fill='%23ffffff' x='100' y='90' text-anchor='middle' font-size='40' font-family='Arial'%3E★%3C/text%3E%3Ctext fill='%2394a3b8' x='100' y='120' text-anchor='middle' font-size='14' font-family='Arial'%3EPremium%3C/text%3E%3C/svg%3E",
+  },
+  {
+    id: "prod_monthly_basic",
+    name: "Monthly Basic",
+    description: "Essential features, billed monthly",
+    pricePaise: 99900,
+    image: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Crect fill='%231e293b' width='200' height='200'/%3E%3Ctext fill='%23ffffff' x='100' y='90' text-anchor='middle' font-size='40' font-family='Arial'%3E◆%3C/text%3E%3Ctext fill='%2394a3b8' x='100' y='120' text-anchor='middle' font-size='14' font-family='Arial'%3EBasic%3C/text%3E%3C/svg%3E",
+  },
+  {
+    id: "prod_team_license",
+    name: "Team License (5 seats)",
+    description: "Collaborate with your team, 5 user seats",
+    pricePaise: 199900,
+    image: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Crect fill='%23334155' width='200' height='200'/%3E%3Ctext fill='%23ffffff' x='100' y='90' text-anchor='middle' font-size='40' font-family='Arial'%3E⬡%3C/text%3E%3Ctext fill='%2394a3b8' x='100' y='120' text-anchor='middle' font-size='14' font-family='Arial'%3ETeam%3C/text%3E%3C/svg%3E",
+  },
+  {
+    id: "prod_enterprise",
+    name: "Enterprise (Custom)",
+    description: "Custom solution for large organizations",
+    pricePaise: 999900,
+    image: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Crect fill='%23475569' width='200' height='200'/%3E%3Ctext fill='%23ffffff' x='100' y='90' text-anchor='middle' font-size='40' font-family='Arial'%3E⬢%3C/text%3E%3Ctext fill='%2394a3b8' x='100' y='120' text-anchor='middle' font-size='14' font-family='Arial'%3EEnterprise%3C/text%3E%3C/svg%3E",
+  },
+];
+
+export function getProduct(productId: string): Product | undefined {
+  return PRODUCTS.find((p) => p.id === productId);
+}
+
+export interface FailedPaymentInput {
+  razorpayPaymentId: string;
+  razorpayOrderId: string;
+  amountPaise: number;
+  failureCode: string;
+  failureDescription: string;
+  failureStep: string;
+  failureSource: string;
+  failureReason: string;
+  customerProfileId: string;
+  productName: string;
+  nowMs: number;
+}
+
+export interface ProcessResult {
+  eventId: string;
+  failureClass: FailureClassId;
+  probability: number;
+  action: string;
+  isSuspicious: boolean;
+  suspicionReasons: string[];
+  outreachDispatched: boolean;
+  dispatchResults: ProviderDispatchResult[];
+  scheduledOutreach: Array<{ channel: string; scheduledAtUtc: string }>;
+}
+
+export async function processFailedPayment(
+  client: Client,
+  input: FailedPaymentInput,
+  outreachRouter: OutreachRouter,
+): Promise<ProcessResult> {
+  const nowMs = input.nowMs;
+  const nowUtc = isoUtc(nowMs);
+
+  // 1. Classify failure using Razorpay's error envelope (not hardcoded)
+  const failureClass = classifyByCode(input.failureCode, {
+    SOFT_RETRYABLE: [
+      "INSUFFICIENT_FUNDS",
+      "BAD_REQUEST_PAYMENT_ACCOUNT_INSUFFICIENT_BALANCE",
+      "BAD_REQUEST_PAYMENT_UPI_COLLECT_EXPIRED",
+      "BAD_REQUEST_PAYMENT_OTP_VALIDATION_FAILED",
+      "TEMPORARY_DECLINE",
+      "NO_MANDATE_RESPONSE",
+      "LOCAL_INSUFFICIENT_FUNDS",
+      "RZP_INSUFFICIENT_FUNDS",
+    ],
+    HARD_METHOD_DEAD: [
+      "CARD_EXPIRED",
+      "BAD_REQUEST_PAYMENT_CARD_EXPIRED",
+      "BAD_REQUEST_PAYMENT_CARD_INVALID",
+      "BAD_REQUEST_PAYMENT_MANDATE_REVOKED",
+      "BAD_REQUEST_PAYMENT_UPI_INVALID_VPA",
+      "MANDATE_REVOKED",
+      "TOKEN_INVALID",
+      "LOCAL_EXPIRED_METHOD",
+      "LOCAL_INVALID_DETAILS",
+      "RZP_EXPIRED_METHOD",
+      "RZP_INVALID_DETAILS",
+    ],
+    NETWORK_TIMEOUT: [
+      "GATEWAY_TIMEOUT",
+      "GATEWAY_ERROR",
+      "BANK_DOWNTIME_NETWORK_ERROR",
+      "BAD_REQUEST_PAYMENT_TIMED_OUT",
+      "ISSUER_TIMEOUT",
+      "NETWORK_ERROR",
+      "LOCAL_GATEWAY_TIMEOUT",
+      "LOCAL_GATEWAY_503",
+      "LOCAL_LOST_RESPONSE",
+      "RZP_RATE_LIMITED",
+      "RZP_SERVER_ERROR",
+    ],
+    RISK_FLAGGED: [
+      "SUSPECTED_FRAUD",
+      "BAD_REQUEST_PAYMENT_FRAUD_IDENTIFIED",
+      "BAD_REQUEST_PAYMENT_CARD_STOLEN",
+      "RISK_BLOCKED",
+      "LOCAL_RISK_REJECTED",
+      "RZP_REJECTED",
+    ],
+    UNKNOWN: [
+      "BAD_REQUEST_PAYMENT_DECLINED_BY_BANK",
+      "UNKNOWN_CODE",
+      "UNKNOWN",
+    ],
+  });
+
+  // 2. Fetch customer profile for ML context
+  const custResult = await client.execute({
+    sql: `SELECT * FROM customer_profiles WHERE id = ?`,
+    args: [input.customerProfileId],
+  });
+  const customer = custResult.rows[0] as any;
+
+  // 3. Compute ML features using customer history
+  const priorAmounts: number[] = [];
+  if (customer) {
+    const priorEvents = await client.execute({
+      sql: `SELECT amount_paise FROM live_payment_events WHERE customer_profile_id = ? AND status = 'failed' ORDER BY created_at_utc ASC`,
+      args: [input.customerProfileId],
+    });
+    for (const row of priorEvents.rows) {
+      priorAmounts.push(Number(row.amount_paise));
+    }
+  }
+
+  const features = computeFeatures({
+    failureCode: input.failureCode,
+    amountPaise: input.amountPaise,
+    occurredAtUtc: nowUtc,
+    priorFailureAmountsPaise: priorAmounts,
+    priorFailureCount: customer?.total_failures ?? 0,
+    customer: {
+      priorSuccessCount: customer?.total_successes ?? 0,
+      joinedAtUtc: customer?.created_at_utc ?? nowUtc,
+      channelResponsiveness: 0.85,
+    },
+  });
+
+  // 4. Score with ML model
+  const scoreResult = scoreWithArtifact(features.values, DEFAULT_16D_MODEL);
+  const probability = scoreResult.probability;
+
+  // 5. EV Decision
+  const policy = defaultPolicy();
+  const decideOutput = decide({
+    probability,
+    failureClass,
+    amountPaise: input.amountPaise,
+    nowMs,
+    policy,
+    attemptsSoFar: customer?.total_failures ?? 0,
+    ltvPaise: (customer?.total_successes ?? 0) * 50000,
+    churnRiskBp: (customer?.total_failures ?? 0) > 2 ? 4000 : 1000,
+  });
+
+  // 6. Suspicious activity detection
+  const suspicionReasons: string[] = [];
+  if (customer) {
+    if (customer.total_attempts === 0) {
+      suspicionReasons.push("First transaction from this customer");
+    }
+    if (customer.total_amount_paise > 5000000 && customer.total_successes === 0) {
+      suspicionReasons.push("High total attempted amount with zero successes");
+    }
+  }
+  if (failureClass === "RISK_FLAGGED") {
+    suspicionReasons.push("Razorpay flagged this transaction as high-risk");
+  }
+  if (failureClass === "UNKNOWN" && input.amountPaise > 1000000) {
+    suspicionReasons.push("Unknown failure on high-value transaction (> ₹10,000)");
+  }
+  const isSuspicious = suspicionReasons.length > 0;
+
+  // 7. Log to live_payment_events
+  const eventId = `evt_${nowMs}_${createHash("sha256").update(`${input.razorpayPaymentId}${nowMs}`).digest("hex").slice(0, 8)}`;
+  await client.execute({
+    sql: `INSERT INTO live_payment_events
+      (id, razorpay_payment_id, razorpay_order_id, customer_profile_id, product_name, amount_paise,
+       status, failure_code, failure_description, failure_step, failure_source, failure_reason,
+       failure_class, ml_probability, ml_action, outreach_dispatched, vendor_notified, created_at_utc)
+      VALUES (?, ?, ?, ?, ?, ?, 'failed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    args: [
+      eventId,
+      input.razorpayPaymentId,
+      input.razorpayOrderId,
+      input.customerProfileId,
+      input.productName,
+      input.amountPaise,
+      input.failureCode,
+      input.failureDescription,
+      input.failureStep,
+      input.failureSource,
+      input.failureReason,
+      failureClass,
+      probability,
+      decideOutput.chosen.action,
+      false,
+      isSuspicious,
+      nowUtc,
+    ],
+  });
+
+  // 8. Update customer profile
+  await client.execute({
+    sql: `UPDATE customer_profiles SET
+      total_attempts = total_attempts + 1,
+      total_failures = total_failures + 1,
+      total_amount_paise = total_amount_paise + ?,
+      last_failure_code = ?,
+      last_failure_at_utc = ?,
+      flagged_as_suspicious = ?,
+      risk_score_bp = MAX(risk_score_bp, ?)
+      WHERE id = ?`,
+    args: [
+      input.amountPaise,
+      input.failureCode,
+      nowUtc,
+      isSuspicious ? 1 : 0,
+      isSuspicious ? 3000 : 0,
+      input.customerProfileId,
+    ],
+  });
+
+  // 9. Dispatch outreach if not suspicious
+  const dispatchResults: ProviderDispatchResult[] = [];
+  const scheduledOutreach: Array<{ channel: string; scheduledAtUtc: string }> = [];
+
+  if (!isSuspicious) {
+    // Immediate outreach via primary channels (Email + SMS only, no WhatsApp/Voice)
+    const outreachPayload: OutreachPayload = {
+      proposalId: eventId,
+      failureClass,
+      action: decideOutput.chosen.action,
+      recipient: {
+        customerName: customer?.name ?? "Customer",
+        phone: customer?.phone ?? "",
+        email: customer?.email ?? "",
+      },
+      amountPaise: input.amountPaise,
+      paymentLinkUrl: `${process.env.BASE_URL || "http://localhost:3000"}/pay/${eventId}`,
+      language: "EN",
+      rawErrorReason: input.failureCode,
+      instrumentDescription: input.failureDescription,
+    };
+
+    // Dispatch Email via Brevo
+    try {
+      const emailResult = await outreachRouter.dispatch("EMAIL", outreachPayload, nowMs);
+      dispatchResults.push(emailResult);
+    } catch (err) {
+      console.error("[Outreach] Email dispatch failed:", err);
+    }
+
+    // Dispatch SMS via MSG91
+    try {
+      const smsResult = await outreachRouter.dispatch("SMS", outreachPayload, nowMs);
+      dispatchResults.push(smsResult);
+    } catch (err) {
+      console.error("[Outreach] SMS dispatch failed:", err);
+    }
+
+    // Schedule follow-ups
+    const followUpChannels = [
+      { channel: "SMS", delayMs: 2 * 60 * 60 * 1000 }, // +2 hours
+      { channel: "EMAIL", delayMs: 24 * 60 * 60 * 1000 }, // +24 hours
+      { channel: "SMS", delayMs: 48 * 60 * 60 * 1000 }, // +48 hours
+      { channel: "EMAIL", delayMs: 72 * 60 * 60 * 1000 }, // +72 hours
+    ];
+
+    for (const fu of followUpChannels) {
+      const scheduleId = `sch_${eventId}_${fu.channel}_${fu.delayMs}`;
+      const scheduledAt = isoUtc(nowMs + fu.delayMs);
+      await client.execute({
+        sql: `INSERT OR IGNORE INTO scheduled_outreach
+          (id, live_payment_event_id, customer_profile_id, channel, scheduled_at_utc)
+          VALUES (?, ?, ?, ?, ?)`,
+        args: [scheduleId, eventId, input.customerProfileId, fu.channel, scheduledAt],
+      });
+      scheduledOutreach.push({ channel: fu.channel, scheduledAtUtc: scheduledAt });
+    }
+
+    // Mark outreach as dispatched
+    await client.execute({
+      sql: `UPDATE live_payment_events SET outreach_dispatched = 1 WHERE id = ?`,
+      args: [eventId],
+    });
+  }
+
+  return {
+    eventId,
+    failureClass,
+    probability,
+    action: decideOutput.chosen.action,
+    isSuspicious,
+    suspicionReasons,
+    outreachDispatched: !isSuspicious && dispatchResults.length > 0,
+    dispatchResults,
+    scheduledOutreach,
+  };
+}
+
+export async function recordSuccessfulPayment(
+  client: Client,
+  params: {
+    razorpayPaymentId: string;
+    razorpayOrderId: string;
+    customerProfileId: string;
+    amountPaise: number;
+    productName: string;
+    nowMs: number;
+  },
+): Promise<string> {
+  const nowUtc = isoUtc(params.nowMs);
+  const eventId = `evt_${params.nowMs}_${createHash("sha256").update(`${params.razorpayPaymentId}${params.nowMs}`).digest("hex").slice(0, 8)}`;
+
+  await client.execute({
+    sql: `INSERT INTO live_payment_events
+      (id, razorpay_payment_id, razorpay_order_id, customer_profile_id, product_name, amount_paise, status, created_at_utc)
+      VALUES (?, ?, ?, ?, ?, ?, 'captured', ?)`,
+    args: [
+      eventId,
+      params.razorpayPaymentId,
+      params.razorpayOrderId,
+      params.customerProfileId,
+      params.productName,
+      params.amountPaise,
+      nowUtc,
+    ],
+  });
+
+  await client.execute({
+    sql: `UPDATE customer_profiles SET
+      total_attempts = total_attempts + 1,
+      total_successes = total_successes + 1,
+      total_amount_paise = total_amount_paise + ?
+      WHERE id = ?`,
+    args: [params.amountPaise, params.customerProfileId],
+  });
+
+  // Cancel pending outreach for this customer
+  await client.execute({
+    sql: `UPDATE scheduled_outreach SET executed = 1, status = 'SUPPRESSED', executed_at_utc = ?
+      WHERE customer_profile_id = ? AND executed = 0`,
+    args: [nowUtc, params.customerProfileId],
+  });
+
+  return eventId;
+}
