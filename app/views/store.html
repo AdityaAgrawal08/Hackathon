@@ -206,10 +206,44 @@
         };
 
         const rzp = new Razorpay(options);
-        rzp.on('payment.failed', function(response) {
-          showError('Payment failed: ' + (response.error.description || 'Unknown error'));
+        rzp.on('payment.failed', async function(response) {
+          const err = response.error || {};
+          const errorCode = err.code || 'UNKNOWN';
+          const errorDesc = err.description || 'Payment failed';
+          const errorStep = err.step || '';
+          const errorSource = err.source || '';
+          const errorReason = err.reason || '';
+
+          showError('Payment failed: ' + errorDesc);
           payBtn.disabled = false;
           payBtn.innerHTML = 'Pay <span class="amount">' + '₹' + (selectedProduct.pricePaise / 100).toLocaleString('en-IN') + '</span>';
+
+          // Report failure to server and redirect to recovery page
+          try {
+            const failRes = await fetch('/api/payments/failed', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                razorpay_order_id: data.orderId,
+                error_code: errorCode,
+                error_description: errorDesc,
+                error_step: errorStep,
+                error_source: errorSource,
+                error_reason: errorReason,
+                customerId: data.customerId,
+                productId: selectedProduct.id,
+                productName: selectedProduct.name,
+                amountPaise: data.amountPaise,
+              }),
+            });
+            const failData = await failRes.json();
+            if (failData.eventId) {
+              window.location.href = '/recover/' + failData.eventId;
+            }
+          } catch (e) {
+            // Fallback: redirect with orderId so recovery page can look it up
+            window.location.href = '/recover/' + data.orderId;
+          }
         });
         rzp.open();
       } catch (err) {

@@ -53,18 +53,38 @@
 
     async function loadOrder() {
       try {
-        // Try to fetch actual proposal data first
-        if (proposalId && proposalId !== 'undefined') {
-          try {
-            const propRes = await fetch('/api/recovery/result/' + proposalId);
-            if (propRes.ok) {
-              customerData = await propRes.json();
-              if (customerData.customerName) {
-                document.getElementById('message').textContent =
-                  `Hi ${customerData.customerName}, your payment for ${customerData.productName || 'your order'} could not be processed. Please complete it now.`;
+        // Try to fetch actual proposal/event data first
+        let realEventId = proposalId;
+        if (realEventId && realEventId !== 'undefined') {
+          let attempts = 0;
+          while (attempts < 5) {
+            try {
+              const propRes = await fetch('/api/recovery/result/' + realEventId);
+              if (propRes.ok) {
+                customerData = await propRes.json();
+                break;
               }
-            }
-          } catch {}
+            } catch {}
+            // If not found, try looking up by orderId (webhook may not have fired yet)
+            try {
+              const orderRes = await fetch('/api/payments/by-order/' + realEventId);
+              if (orderRes.ok) {
+                const orderData = await orderRes.json();
+                realEventId = orderData.eventId;
+                const propRes2 = await fetch('/api/recovery/result/' + realEventId);
+                if (propRes2.ok) {
+                  customerData = await propRes2.json();
+                  break;
+                }
+              }
+            } catch {}
+            attempts++;
+            if (attempts < 5) await new Promise(r => setTimeout(r, 1000));
+          }
+          if (customerData?.customerName) {
+            document.getElementById('message').textContent =
+              `Hi ${customerData.customerName}, your payment for ${customerData.productName || 'your order'} could not be processed. Please complete it now.`;
+          }
         }
 
         // Create a real Razorpay order
