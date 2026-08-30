@@ -64,18 +64,26 @@ export class MSG91SmsProvider implements OutreachProvider {
     // Clean phone number: remove "+", spaces, hyphens
     const cleanPhone = (payload.recipient.phone || "").replace(/[^0-9]/g, "");
 
-    const flowBody = {
-      template_id: template.flowId,
-      sender: this.config.senderId,
-      short_url: "0",
+    const recipientObj = {
       mobiles: cleanPhone,
-      name: payload.recipient.name,
+      name: payload.recipient.name || "Customer",
       amount: formattedAmount,
       merchant: "ARBITER Store",
-      method: payload.instrumentDescription,
+      method: payload.instrumentDescription || "Card / UPI",
       url: payload.recoveryUrl,
       dlt_te_id: template.dltId,
     };
+
+    const flowBody = {
+      template_id: this.config.flowId || template.flowId,
+      sender: this.config.senderId,
+      short_url: "0",
+      mobiles: cleanPhone,
+      dlt_te_id: template.dltId,
+      recipients: [recipientObj],
+      ...recipientObj,
+    };
+
 
     // Simulated / dry-run mode when authKey is not configured
     if (!this.config.authKey) {
