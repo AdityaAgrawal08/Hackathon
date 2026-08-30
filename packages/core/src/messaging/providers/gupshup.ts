@@ -21,11 +21,13 @@ export class GupshupWhatsAppProvider implements OutreachProvider {
 
   constructor(private config: GupshupConfig = {}) {
     const rawKey = config.apiKey || process.env.GUPSHUP_API_KEY;
-    this.config.apiKey = (rawKey && !rawKey.includes("xxxxxx")) ? rawKey : undefined;
+    const isTest = process.env.NODE_ENV === "test" || process.env.VITEST === "true";
+    this.config.apiKey = (rawKey && !rawKey.includes("xxxxxx") && !isTest) ? rawKey : undefined;
     this.config.sourceNumber = config.sourceNumber || process.env.GUPSHUP_SOURCE_NUMBER || "919000000000";
     this.config.appName = config.appName || process.env.GUPSHUP_APP_NAME || "ARBITER";
     this.config.webhookSecret = config.webhookSecret || process.env.GUPSHUP_WEBHOOK_SECRET;
   }
+
 
 
 
