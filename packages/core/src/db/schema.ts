@@ -489,3 +489,101 @@ export const inboxEvents = sqliteTable(
   (t) => [index("idx_inbox_status").on(t.status)],
 );
 
+/* ── live customer profiles (real payment workflow) ──────────────── */
+/**
+ * Persistent customer profiles for the real payment workflow.
+ * Tracks payment history, risk scores, and vendor decisions across sessions.
+ */
+export const customerProfiles = sqliteTable(
+  "customer_profiles",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    phone: text("phone").notNull().unique(),
+    email: text("email").notNull(),
+    createdAtUtc: text("created_at_utc").notNull(),
+    totalAttempts: integer("total_attempts").notNull().default(0),
+    totalSuccesses: integer("total_successes").notNull().default(0),
+    totalFailures: integer("total_failures").notNull().default(0),
+    lastFailureCode: text("last_failure_code"),
+    lastFailureAtUtc: text("last_failure_at_utc"),
+    flaggedAsSuspicious: integer("flagged_as_suspicious", { mode: "boolean" }).notNull().default(false),
+    vendorDecision: text("vendor_decision", { enum: ["approved", "rejected"] }),
+    riskScoreBp: integer("risk_score_bp").notNull().default(0),
+    totalAmountPaise: integer("total_amount_paise").notNull().default(0),
+  },
+  (t) => [
+    index("idx_custprofile_phone").on(t.phone),
+    index("idx_custprofile_suspicious").on(t.flaggedAsSuspicious),
+  ],
+);
+
+/* ── live payment events (real payment workflow) ─────────────────── */
+/**
+ * Every real payment attempt (success or failure) logged with full Razorpay error envelope.
+ * Source of truth for ML analysis, outreach scheduling, and benchmark metrics.
+ */
+export const livePaymentEvents = sqliteTable(
+  "live_payment_events",
+  {
+    id: text("id").primaryKey(),
+    razorpayPaymentId: text("razorpay_payment_id"),
+    razorpayOrderId: text("razorpay_order_id"),
+    customerProfileId: text("customer_profile_id")
+      .notNull()
+      .references(() => customerProfiles.id),
+    productName: text("product_name").notNull(),
+    amountPaise: integer("amount_paise").notNull(),
+    status: text("status", { enum: ["authorized", "captured", "failed", "refunded", "pending"] }).notNull(),
+    failureCode: text("failure_code"),
+    failureDescription: text("failure_description"),
+    failureStep: text("failure_step"),
+    failureSource: text("failure_source"),
+    failureReason: text("failure_reason"),
+    failureClass: text("failure_class", {
+      enum: ["SOFT_RETRYABLE", "HARD_METHOD_DEAD", "NETWORK_TIMEOUT", "RISK_FLAGGED", "UNKNOWN"],
+    }),
+    mlProbability: real("ml_probability"),
+    mlAction: text("ml_action"),
+    outreachDispatched: integer("outreach_dispatched", { mode: "boolean" }).notNull().default(false),
+    vendorNotified: integer("vendor_notified", { mode: "boolean" }).notNull().default(false),
+    vendorDecision: text("vendor_decision", { enum: ["approved", "rejected"] }),
+    recoveredAtUtc: text("recovered_at_utc"),
+    createdAtUtc: text("created_at_utc").notNull(),
+  },
+  (t) => [
+    index("idx_liveevt_customer").on(t.customerProfileId),
+    index("idx_liveevt_status").on(t.status),
+    index("idx_liveevt_failure_class").on(t.failureClass),
+    index("idx_liveevt_created").on(t.createdAtUtc),
+    index("idx_liveevt_vendor_notified").on(t.vendorNotified),
+  ],
+);
+
+/* ── scheduled outreach (timed follow-up queue) ──────────────────── */
+/**
+ * Outreach messages scheduled for future dispatch.
+ * Background sweeper checks for due entries and dispatches via Brevo/MSG91.
+ */
+export const scheduledOutreach = sqliteTable(
+  "scheduled_outreach",
+  {
+    id: text("id").primaryKey(),
+    livePaymentEventId: text("live_payment_event_id")
+      .notNull()
+      .references(() => livePaymentEvents.id),
+    customerProfileId: text("customer_profile_id")
+      .notNull()
+      .references(() => customerProfiles.id),
+    channel: text("channel", { enum: ["EMAIL", "SMS"] }).notNull(),
+    scheduledAtUtc: text("scheduled_at_utc").notNull(),
+    executed: integer("executed", { mode: "boolean" }).notNull().default(false),
+    executedAtUtc: text("executed_at_utc"),
+    status: text("status", { enum: ["SENT", "FAILED", "SUPPRESSED"] }),
+  },
+  (t) => [
+    index("idx_scheduled_due").on(t.executed, t.scheduledAtUtc),
+    index("idx_scheduled_event").on(t.livePaymentEventId),
+  ],
+);
+

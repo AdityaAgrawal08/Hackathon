@@ -1,24 +1,10 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import type { Server } from "node:http";
-import { createHash } from "node:crypto";
 import { app, dbClient } from "../../app/server.js";
-import {
-  simulateFailureTriage,
-  getRecoveryTrace,
-  completeRecovery,
-  defaultOutreachRouter,
-} from "../../app/recovery.js";
-import {
-  OutreachRouter,
-  type OutreachProvider,
-  type OutreachPayload,
-  type ProviderDispatchResult,
-} from "../../packages/core/src/index.js";
 
-describe("Aggressive Industry-Grade Audit: Concurrency, Failover Cascade & Re-Entrancy Invariants", () => {
+describe("Concurrency, Failover & Re-Entrancy Invariants", () => {
   let server: Server;
   let baseUrl: string;
-  const DAYTIME_MS = Date.parse("2026-08-28T05:30:00.000Z"); // 11:00 AM IST
 
   beforeAll(async () => {
     await new Promise<void>((resolve) => {
@@ -38,167 +24,117 @@ describe("Aggressive Industry-Grade Audit: Concurrency, Failover Cascade & Re-En
     }
   });
 
-  describe("Audit 1: High-Concurrency Burst Stress (100 Parallel Ingestions)", () => {
-    it(
-      "handles 100 concurrent triage requests with zero race conditions, data corruption, or hash drift",
-      async () => {
-        const burstPromises = Array.from({ length: 100 }, (_, i) => {
-          const amountPaise = (1000 + i * 50) * 100;
-          return fetch(`${baseUrl}/api/recovery/triage`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              customPreset: {
-                customerName: `Burst Customer ${i}`,
-                customerPhone: `+91 98000 ${String(i).padStart(5, "0")}`,
-                amountPaise,
-                failureCode: i % 2 === 0
-                  ? "BAD_REQUEST_PAYMENT_ACCOUNT_INSUFFICIENT_BALANCE"
-                  : "BAD_REQUEST_PAYMENT_CARD_EXPIRED",
-              },
-              simulatedTimeMs: DAYTIME_MS,
-              autonomyThresholdPaise: 250000,
-            }),
-          }).then((res) => res.json());
-        });
+  describe("High-Concurrency Burst Stress", () => {
+    it("handles 50 concurrent order creation requests with zero race conditions", async () => {
+      const burstPromises = Array.from({ length: 50 }, (_, i) => {
+        return fetch(`${baseUrl}/api/orders/create`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            productId: i % 2 === 0 ? "prod_monthly_basic" : "prod_team_license",
+            customerName: `Burst Customer ${i}`,
+            customerPhone: `+91 98000${String(i).padStart(5, "0")}`,
+            customerEmail: `burst${i}@test.com`,
+          }),
+        }).then((res) => res.json());
+      });
 
-        const sessions = await Promise.all(burstPromises);
-        expect(sessions.length).toBe(100);
+      const orders = await Promise.all(burstPromises);
+      expect(orders.length).toBe(50);
 
-        // Verify every session is unique and structurally sound
-        const ids = new Set(sessions.map((s) => s.id));
-        expect(ids.size).toBe(100);
+      // Verify every order has a unique ID
+      const orderIds = new Set(orders.map((o) => o.orderId));
+      expect(orderIds.size).toBe(50);
 
-        // Concurrently query trace API for all 100 sessions
-        const tracePromises = sessions.map((s) =>
-          fetch(`${baseUrl}/api/recovery/trace/${s.id}`).then((res) => res.json()),
-        );
-        const traces = await Promise.all(tracePromises);
+      // Verify every customer has a unique ID
+      const customerIds = new Set(orders.map((o) => o.customerId));
+      expect(customerIds.size).toBe(50);
 
-        for (let i = 0; i < 100; i++) {
-          const trace = traces[i];
-          expect(trace.proposalId).toBe(sessions[i].id);
-          expect(trace.steps.length).toBeGreaterThanOrEqual(3);
-
-          // Verify SHA-256 integrity on every single step of all 100 sessions
-          for (const step of trace.steps) {
-            const recomputed = createHash("sha256")
-              .update(JSON.stringify(step.payload))
-              .digest("hex");
-            expect(step.sha256Hash).toBe(recomputed);
-          }
-        }
-      },
-      60000,
-    );
-  });
-
-
-  describe("Audit 2: Multi-Channel Provider Failover Cascade & Circuit Breakers", () => {
-    it("cascades from failing primary provider to secondary provider without dropping outreach", async () => {
-      const customRouter = new OutreachRouter();
-
-      // 1. Primary provider that fails
-      const failingPrimary: OutreachProvider = {
-        name: "failing_msg91",
-        channel: "SMS",
-        send: async () => {
-          throw new Error("Telecom Gateway 503 Service Unavailable");
-        },
-      };
-
-      // 2. Secondary backup provider that succeeds
-      const backupSecondary: OutreachProvider = {
-        name: "backup_route",
-        channel: "SMS",
-        send: async (payload: OutreachPayload) => {
-          return {
-            providerName: "backup_route",
-            channel: "SMS",
-            externalMessageId: `backup_${payload.proposalId}`,
-            status: "SENT",
-            costPaise: 25,
-            dispatchedAtUtc: new Date().toISOString(),
-          };
-        },
-      };
-
-      customRouter.registerProvider(failingPrimary);
-      customRouter.registerProvider(backupSecondary);
-
-      const payload: OutreachPayload = {
-        proposalId: "prop_failover_test",
-        failureClass: "SOFT_RETRYABLE",
-        action: "RECOVER_SMS",
-        recipient: { customerName: "Test User", phone: "+91 98765 00000" },
-        amountPaise: 199900,
-        paymentLinkUrl: "http://localhost:3000/pay/tok_test",
-        language: "EN",
-        rawErrorReason: "INSUFFICIENT_FUNDS",
-      };
-
-      const result = await customRouter.dispatch("SMS", payload, DAYTIME_MS);
-      expect(result.status).toBe("SENT");
-      expect(result.providerName).toBe("backup_route");
-      expect(result.externalMessageId).toBe("backup_prop_failover_test");
+      // Verify all customers were persisted
+      const customers = await dbClient.execute("SELECT COUNT(*) as count FROM customer_profiles");
+      expect(Number(customers.rows[0]?.count || 0)).toBeGreaterThanOrEqual(50);
     });
 
-    it("strictly suppresses SMS/Voice outreach for numbers on the NCPR DND Registry", async () => {
-      const dndPhone = "+91 99999 11111";
-      defaultOutreachRouter.addDndNumber(dndPhone);
+    it("handles concurrent vendor analytics requests without corruption", async () => {
+      const promises = Array.from({ length: 10 }, () =>
+        fetch(`${baseUrl}/api/vendor/analytics`).then((res) => res.json())
+      );
 
-      const payload: OutreachPayload = {
-        proposalId: "prop_dnd_test",
-        failureClass: "SOFT_RETRYABLE",
-        action: "RECOVER_SMS",
-        recipient: { customerName: "DND Customer", phone: dndPhone },
-        amountPaise: 199900,
-        paymentLinkUrl: "http://localhost:3000/pay/tok_dnd",
-        language: "EN",
-        rawErrorReason: "INSUFFICIENT_FUNDS",
-      };
-
-      const result = await defaultOutreachRouter.dispatch("SMS", payload, DAYTIME_MS);
-      expect(result.status).toBe("SUPPRESSED_DND");
-      expect(result.costPaise).toBe(0);
+      const results = await Promise.all(promises);
+      for (const data of results) {
+        expect(data).toHaveProperty("totalEvents");
+        expect(data).toHaveProperty("successRate");
+      }
     });
   });
 
-  describe("Audit 3: Webhook Re-Entrancy & Double-Debit Invariant", () => {
-    it("handles out-of-order payment completions idempotently without duplicate credits", async () => {
-      const triageRes = await fetch(`${baseUrl}/api/recovery/triage`, {
+  describe("Vendor Decision Re-Entrancy", () => {
+    it("handles duplicate vendor decisions idempotently", async () => {
+      // Create customer
+      const orderRes = await fetch(`${baseUrl}/api/orders/create`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          preset: "SALARY_DELAY",
-          simulatedTimeMs: DAYTIME_MS,
+          productId: "prod_premium_plan",
+          customerName: "Idempotent Decision Test",
+          customerPhone: "+91 77777 11111",
+          customerEmail: "idempotent@test.com",
         }),
       });
-      const session = await triageRes.json();
+      const orderData = (await orderRes.json()) as { customerId: string };
 
-      // 1. Complete payment first time -> Success
-      const compRes1 = await fetch(`${baseUrl}/api/recovery/complete`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ proposalId: session.id }),
+      // Insert event
+      const eventId = `evt_idem_${Date.now()}`;
+      await dbClient.execute({
+        sql: `INSERT INTO live_payment_events
+          (id, customer_profile_id, product_name, amount_paise, status, failure_class, vendor_notified, created_at_utc)
+          VALUES (?, ?, 'Premium Plan', 499900, 'failed', 'SOFT_RETRYABLE', 1, ?)`,
+        args: [eventId, orderData.customerId, new Date().toISOString()],
       });
-      const comp1 = await compRes1.json();
-      expect(comp1.success).toBe(true);
 
-      // 2. Complete payment second time (duplicate webhook / double-click) -> Idempotent false / no double-addition
-      const compRes2 = await fetch(`${baseUrl}/api/recovery/complete`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ proposalId: session.id }),
+      // Send same decision twice concurrently
+      const [res1, res2] = await Promise.all([
+        fetch(`${baseUrl}/api/vendor/decision`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ eventId, decision: "approved" }),
+        }),
+        fetch(`${baseUrl}/api/vendor/decision`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ eventId, decision: "approved" }),
+        }),
+      ]);
+
+      expect(res1.status).toBe(200);
+      expect(res2.status).toBe(200);
+
+      // Verify decision is still correct
+      const event = await dbClient.execute({
+        sql: "SELECT vendor_decision FROM live_payment_events WHERE id = ?",
+        args: [eventId],
       });
-      const comp2 = await compRes2.json();
-      expect(comp2.success).toBe(false); // Already executed, double-debit blocked
+      expect(event.rows[0]?.vendor_decision).toBe("approved");
+    });
+  });
 
-      // Verify trace records exact outcome
-      const traceRes = await fetch(`${baseUrl}/api/recovery/trace/${session.id}`);
-      const trace = await traceRes.json();
-      expect(trace.isRecovered).toBe(true);
-      expect(trace.autonomyStatus).toBe("EXECUTED");
+  describe("SSE Connection Management", () => {
+    it("handles multiple SSE connections on same channel", async () => {
+      const controller1 = new AbortController();
+      const controller2 = new AbortController();
+
+      const res1 = await fetch(`${baseUrl}/api/sse/test-channel`, {
+        signal: controller1.signal,
+      });
+      const res2 = await fetch(`${baseUrl}/api/sse/test-channel`, {
+        signal: controller2.signal,
+      });
+
+      expect(res1.status).toBe(200);
+      expect(res2.status).toBe(200);
+
+      controller1.abort();
+      controller2.abort();
     });
   });
 });

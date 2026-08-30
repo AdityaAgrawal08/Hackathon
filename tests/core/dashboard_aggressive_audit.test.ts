@@ -58,9 +58,9 @@ describe("Aggressive Audit: Phase 5 Merchant Command Center & Governance Invaria
   });
 
   describe("Audit 2: 100-Event Monte Carlo Benchmark Statistical Invariants ('The Bar')", () => {
-    it("guarantees ARBITER revenue lift and retry savings across 50 repeated batch runs (5,000 events)", () => {
+    it("guarantees ARBITER revenue lift and retry savings across 50 repeated batch runs (5,000 events)", async () => {
       for (let run = 0; run < 50; run++) {
-        const benchmark = runBatchBenchmark();
+        const benchmark = await runBatchBenchmark();
 
         // Invariant 1: Batch size is strictly 100
         expect(benchmark.batchSize).toBe(100);

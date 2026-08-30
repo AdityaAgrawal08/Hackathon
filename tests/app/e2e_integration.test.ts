@@ -1,113 +1,117 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { startServer, dbClient, localGateway } from "../../app/server.js";
-import { createHmac } from "node:crypto";
 import type { Server } from "node:http";
+import { app, dbClient } from "../../app/server.js";
 
-describe("End-to-End Payment Infrastructure & Recovery Integration", () => {
-  let serverInstance: { app: unknown; server: Server; sweeperInterval: NodeJS.Timeout };
-  const baseUrl = "http://127.0.0.1:3000";
+describe("End-to-End Payment Workflow Integration", () => {
+  let server: Server;
+  let baseUrl: string;
 
   beforeAll(async () => {
-    serverInstance = await startServer();
+    await new Promise<void>((resolve) => {
+      server = app.listen(0, "127.0.0.1", () => {
+        const addr = server.address();
+        if (addr && typeof addr === "object") {
+          baseUrl = `http://127.0.0.1:${addr.port}`;
+        }
+        resolve();
+      });
+    });
   });
 
   afterAll(async () => {
-    clearInterval(serverInstance.sweeperInterval);
-    await new Promise<void>((resolve) => serverInstance.server.close(() => resolve()));
+    if (server) {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   });
 
-  it("completes full order creation -> mobile pay -> charge -> settlement lifecycle", async () => {
-    // 1. Create order
-    const orderRes = await fetch(`${baseUrl}/api/orders`, {
+  it("creates order with customer info and returns Razorpay params", async () => {
+    const orderRes = await fetch(`${baseUrl}/api/orders/create`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ amountPaise: 49900, paymentMode: "LOCAL_SANDBOX" }),
+      body: JSON.stringify({
+        productId: "prod_monthly_basic",
+        customerName: "E2E Test Customer",
+        customerPhone: "+91 99999 88888",
+        customerEmail: "e2e@test.com",
+      }),
     });
     expect(orderRes.status).toBe(200);
-    const orderData = (await orderRes.json()) as {
-      token: string;
-      orderId: string;
-      qrCodeDataUrl: string;
-      mobileUrl: string;
-    };
-    expect(orderData.token).toBeDefined();
-    expect(orderData.qrCodeDataUrl).toContain("data:image/png;base64,");
+    const data = await orderRes.json();
+    expect(data.orderId).toBeDefined();
+    expect(data.amountPaise).toBe(99900);
+    expect(data.currency).toBe("INR");
+    expect(data.customerId).toBeDefined();
+    expect(data.keyId).toBeDefined();
+  });
 
-    // 2. Fetch mobile payment page using token
-    const pageRes = await fetch(`${baseUrl}/pay/${orderData.token}`);
-    expect(pageRes.status).toBe(200);
-    const html = await pageRes.text();
-    expect(html).toContain("Order:");
-    expect(html).toContain(orderData.orderId);
+  it("rejects order creation with missing fields", async () => {
+    const res = await fetch(`${baseUrl}/api/orders/create`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ productId: "prod_monthly_basic" }),
+    });
+    expect(res.status).toBe(400);
+  });
 
-    // 3. Submit charge with LOCAL_SUCCESS
-    const chargeRes = await fetch(`${baseUrl}/api/payments/charge`, {
+  it("rejects order creation with invalid product", async () => {
+    const res = await fetch(`${baseUrl}/api/orders/create`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        token: orderData.token,
-        clientIdemKey: `idem_e2e_${Date.now()}`,
-        scenario: "LOCAL_SUCCESS",
+        productId: "nonexistent",
+        customerName: "Test",
+        customerPhone: "+91 99999 88888",
+        customerEmail: "test@test.com",
       }),
     });
-    expect(chargeRes.status).toBe(200);
-    const chargeData = (await chargeRes.json()) as { knowledgeStatus: string; userMessage: string };
-    expect(chargeData.knowledgeStatus).toBe("RESOLVED_SUCCESS");
-    expect(chargeData.userMessage).toContain("Thank you — your payment of ₹499.00 was received.");
-
-    // 4. Verify durable settlement projection in SQLite
-    const settlements = await dbClient.execute(`SELECT * FROM local_settlements WHERE idem_key LIKE 'idem_e2e_%'`);
-    expect(settlements.rows.length).toBeGreaterThan(0);
+    expect(res.status).toBe(400);
   });
 
-  it("handles decline scenario with empathetic messaging and advisory classification", async () => {
-    const orderRes = await fetch(`${baseUrl}/api/orders`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ amountPaise: 199900, paymentMode: "LOCAL_SANDBOX" }),
-    });
-    const orderData = (await orderRes.json()) as { token: string };
-
-    const chargeRes = await fetch(`${baseUrl}/api/payments/charge`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        token: orderData.token,
-        clientIdemKey: `idem_decline_${Date.now()}`,
-        scenario: "LOCAL_INSUFFICIENT_FUNDS",
-      }),
-    });
-
-    expect(chargeRes.status).toBe(400);
-    const chargeData = (await chargeRes.json()) as { knowledgeStatus: string; userMessage: string; userMessageHi: string };
-    expect(chargeData.knowledgeStatus).toBe("RESOLVED_FAILED");
-    expect(chargeData.userMessage).toContain("insufficient balance");
-    expect(chargeData.userMessageHi).toContain("पर्याप्त बैलेंस नहीं था");
-  });
-
-  it("accepts and acknowledges verified webhooks in <100ms", async () => {
-    const rawBody = JSON.stringify({
-      id: `evt_e2e_${Date.now()}`,
-      event: "payment.captured",
-      payload: { payment: { entity: { id: `pay_e2e_${Date.now()}`, order_id: "order_123", amount: 49900 } } },
-    });
-    const secret = process.env.RZP_WEBHOOK_SECRET || "whsec_local_test_secret_12345";
-    const sig = createHmac("sha256", secret).update(rawBody).digest("hex");
-
-    const t0 = Date.now();
-
-    const res = await fetch(`${baseUrl}/api/webhooks/razorpay`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-razorpay-signature": sig,
-      },
-      body: rawBody,
-    });
-    const duration = Date.now() - t0;
-
+  it("returns vendor analytics with correct structure", async () => {
+    const res = await fetch(`${baseUrl}/api/vendor/analytics`);
     expect(res.status).toBe(200);
-    expect(duration).toBeLessThan(1000);
+    const data = await res.json();
+    expect(data).toHaveProperty("totalEvents");
+    expect(data).toHaveProperty("totalSuccesses");
+    expect(data).toHaveProperty("totalFailures");
+    expect(data).toHaveProperty("recoveredPaise");
+    expect(data).toHaveProperty("successRate");
   });
 
+  it("handles vendor decision endpoint", async () => {
+    const orderRes = await fetch(`${baseUrl}/api/orders/create`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        productId: "prod_team_license",
+        customerName: "Decision Test",
+        customerPhone: "+91 77777 66666",
+        customerEmail: "decision@test.com",
+      }),
+    });
+    const orderData = await orderRes.json();
+
+    const eventId = `evt_test_${Date.now()}`;
+    await dbClient.execute({
+      sql: `INSERT INTO live_payment_events
+        (id, customer_profile_id, product_name, amount_paise, status, failure_class, vendor_notified, created_at_utc)
+        VALUES (?, ?, 'Team License', 199900, 'failed', 'SOFT_RETRYABLE', 1, ?)`,
+      args: [eventId, orderData.customerId, new Date().toISOString()],
+    });
+
+    const approveRes = await fetch(`${baseUrl}/api/vendor/decision`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ eventId, decision: "approved" }),
+    });
+    expect(approveRes.status).toBe(200);
+  });
+
+  it("serves SSE endpoint", async () => {
+    const controller = new AbortController();
+    const res = await fetch(`${baseUrl}/api/sse/global`, { signal: controller.signal });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/event-stream");
+    controller.abort();
+  });
 });

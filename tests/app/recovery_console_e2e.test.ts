@@ -65,8 +65,8 @@ describe("Recovery Command Center & Customer Simulator E2E (Task 1.1 - 1.5)", ()
   });
 
 
-  it("runs the 100-event Monte Carlo Batch Benchmark (The Bar) and measures lift", () => {
-    const benchmark = runBatchBenchmark();
+  it("runs the 100-event Monte Carlo Batch Benchmark (The Bar) and measures lift", async () => {
+    const benchmark = await runBatchBenchmark();
 
     expect(benchmark.batchSize).toBe(100);
     expect(benchmark.totalAtRiskPaise).toBeGreaterThan(0);

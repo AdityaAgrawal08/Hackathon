@@ -3,321 +3,237 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ARBITER — Live Storefront & Payment Degradation Simulator</title>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+  <title>ARBITER Store</title>
+  <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
   <style>
-    :root {
-      --pico-font-size: 90%;
-      --pico-primary: #3b82f6;
-      --pico-primary-hover: #2563eb;
-    }
-    body { background-color: #0f172a; padding: 2rem; color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-    .container { max-width: 960px; margin: 0 auto; }
-    .badge {
-      display: inline-block;
-      padding: 0.25rem 0.6rem;
-      border-radius: 9999px;
-      font-size: 0.72rem;
-      font-weight: 700;
-      letter-spacing: 0.03em;
-      text-transform: uppercase;
-    }
-    .badge-info { background-color: #0284c7; color: white; }
-    .badge-success { background-color: #10b981; color: white; }
-    .badge-warning { background-color: #f59e0b; color: white; }
-    .badge-danger { background-color: #ef4444; color: white; }
-    .card {
-      background: #1e293b;
-      border-radius: 12px;
-      padding: 1.5rem;
-      border: 1px solid #334155;
-      box-shadow: 0 10px 15px -3px rgba(0,0,0,0.4);
-      margin-bottom: 1.5rem;
-    }
-    .service-card {
-      background: #0f172a;
-      border: 2px solid #334155;
-      border-radius: 10px;
-      padding: 1rem;
-      cursor: pointer;
-      transition: all 0.2s ease;
-      text-align: left;
-    }
-    .service-card:hover, .service-card.selected {
-      border-color: #3b82f6;
-      background: rgba(59, 130, 246, 0.08);
-    }
-    .btn-submit {
-      width: 100%;
-      padding: 0.85rem;
-      font-size: 1rem;
-      font-weight: 700;
-      background: #3b82f6;
-      border: none;
-      color: white;
-      border-radius: 8px;
-      cursor: pointer;
-      transition: background 0.2s;
-    }
-    .btn-submit:hover { background: #2563eb; }
-    .consent-box {
-      background: rgba(15, 23, 42, 0.6);
-      border: 1px solid #334155;
-      border-radius: 8px;
-      padding: 1rem;
-      margin: 1.25rem 0;
-    }
-    input, select {
-      background-color: #0f172a !important;
-      color: #f8fafc !important;
-      border-color: #334155 !important;
-    }
-    input:focus, select:focus {
-      border-color: #3b82f6 !important;
-    }
-    .result-box {
-      display: none;
-      background: #0f172a;
-      border: 1px solid #10b981;
-      border-radius: 10px;
-      padding: 1.25rem;
-      margin-top: 1.5rem;
-    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; }
+    .header { background: #1e293b; border-bottom: 1px solid #334155; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; }
+    .header h1 { font-size: 20px; font-weight: 600; letter-spacing: 0.5px; }
+    .header .badge { background: #2563eb; color: white; padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: 500; }
+    .container { max-width: 1200px; margin: 0 auto; padding: 32px 24px; }
+    .section-title { font-size: 24px; font-weight: 600; margin-bottom: 24px; color: #f8fafc; }
+    .products { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 24px; margin-bottom: 48px; }
+    .product-card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; overflow: hidden; transition: border-color 0.2s, transform 0.2s; cursor: pointer; }
+    .product-card:hover { border-color: #2563eb; transform: translateY(-2px); }
+    .product-card.selected { border-color: #2563eb; box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.3); }
+    .product-image { width: 100%; height: 160px; object-fit: cover; background: #0f172a; }
+    .product-info { padding: 20px; }
+    .product-name { font-size: 18px; font-weight: 600; margin-bottom: 8px; color: #f8fafc; }
+    .product-desc { font-size: 14px; color: #94a3b8; margin-bottom: 16px; line-height: 1.5; }
+    .product-price { font-size: 24px; font-weight: 700; color: #22c55e; }
+    .product-price .currency { font-size: 16px; font-weight: 500; }
+    .checkout-section { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 32px; max-width: 500px; }
+    .checkout-section h2 { font-size: 20px; font-weight: 600; margin-bottom: 24px; color: #f8fafc; }
+    .form-group { margin-bottom: 20px; }
+    .form-group label { display: block; font-size: 14px; font-weight: 500; color: #94a3b8; margin-bottom: 8px; }
+    .form-group input { width: 100%; padding: 12px 16px; background: #0f172a; border: 1px solid #475569; border-radius: 8px; color: #e2e8f0; font-size: 16px; transition: border-color 0.2s; }
+    .form-group input:focus { outline: none; border-color: #2563eb; }
+    .form-group input::placeholder { color: #64748b; }
+    .pay-btn { width: 100%; padding: 14px; background: #2563eb; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; transition: background 0.2s; }
+    .pay-btn:hover { background: #1d4ed8; }
+    .pay-btn:disabled { background: #475569; cursor: not-allowed; }
+    .pay-btn .amount { font-weight: 700; }
+    .error { background: #450a0a; border: 1px solid #7f1d1d; color: #fca5a5; padding: 12px 16px; border-radius: 8px; margin-top: 16px; display: none; }
+    .success { background: #052e16; border: 1px solid #14532d; color: #86efac; padding: 12px 16px; border-radius: 8px; margin-top: 16px; display: none; }
+    .no-product { text-align: center; padding: 40px; color: #64748b; }
+    @media (max-width: 640px) { .products { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
+  <div class="header">
+    <h1>ARBITER</h1>
+    <span class="badge">Test Mode</span>
+  </div>
   <div class="container">
-    <!-- Header -->
-    <header style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; border-bottom: 1px solid #334155; padding-bottom: 1rem;">
-      <div>
-        <div style="display: flex; align-items: center; gap: 0.75rem;">
-          <h2 style="margin: 0; font-weight: 800; color: #fff;">ARBITER Storefront</h2>
-          <span class="badge badge-info">Track 03 · AI Revenue Recovery</span>
+    <h2 class="section-title">Select a Plan</h2>
+    <div class="products" id="products"></div>
+
+    <div class="checkout-section" id="checkout-section" style="display: none;">
+      <h2>Complete Your Purchase</h2>
+      <div id="selected-product" style="margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid #334155;"></div>
+      <form id="checkout-form">
+        <div class="form-group">
+          <label for="customer-name">Full Name</label>
+          <input type="text" id="customer-name" placeholder="Enter your full name" required>
         </div>
-        <p style="margin: 0.25rem 0 0 0; color: #94a3b8; font-size: 0.85rem;">
-          Interactive Checkout, Real-World Payment Degradation, & Live Multi-Channel Outreach Demo
-        </p>
-      </div>
-      <div>
-        <a href="/dashboard" role="button" class="outline" style="border-color: #475569; color: #cbd5e1; font-size: 0.85rem; padding: 0.4rem 0.8rem;">
-          📊 Open Merchant Command Center &rarr;
-        </a>
-      </div>
-    </header>
-
-    <div class="grid" style="grid-template-columns: 1fr; gap: 1.5rem;">
-      <form id="store-form" onsubmit="handleStoreSubmit(event)">
-        <!-- Step 1: Select Service -->
-        <div class="card">
-          <h4 style="margin-bottom: 0.5rem; color: #fff; font-size: 1.1rem;">1. Select Product / Service Tier</h4>
-          <p style="color: #94a3b8; font-size: 0.82rem; margin-bottom: 1rem;">Choose a service to initiate recurring billing or checkout:</p>
-          
-          <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
-            <div class="service-card selected" onclick="selectService(this, 1999, 'SaaS Pro Annual Subscription', 'BAD_REQUEST_PAYMENT_ACCOUNT_INSUFFICIENT_BALANCE', 'HDFC Bank')">
-              <strong>🚀 SaaS Pro Annual</strong>
-              <div style="color: #60a5fa; font-weight: 700; font-size: 1.1rem; margin: 0.25rem 0;">₹1,999 / yr</div>
-              <small style="color: #94a3b8;">Subscription Mandate · Auto-Approved tier</small>
-            </div>
-
-            <div class="service-card" onclick="selectService(this, 25000, 'Enterprise B2B License', 'BAD_REQUEST_PAYMENT_ACCOUNT_INSUFFICIENT_BALANCE', 'ICICI Bank')">
-              <strong>🏢 Enterprise B2B</strong>
-              <div style="color: #60a5fa; font-weight: 700; font-size: 1.1rem; margin: 0.25rem 0;">₹25,000 / mo</div>
-              <small style="color: #94a3b8;">High-Value Invoice · Smart Collect / Review</small>
-            </div>
-
-            <div class="service-card" onclick="selectService(this, 4999, 'E-Commerce Order #8821', 'BAD_REQUEST_PAYMENT_CARD_EXPIRED', 'Visa ending in 8831')">
-              <strong>📦 E-Commerce Order</strong>
-              <div style="color: #60a5fa; font-weight: 700; font-size: 1.1rem; margin: 0.25rem 0;">₹4,999</div>
-              <small style="color: #94a3b8;">One-Time Checkout · Expired Card Fault</small>
-            </div>
-
-            <div class="service-card" onclick="selectService(this, 2999, 'Gym Membership Mandate', 'BANK_DOWNTIME_NETWORK_ERROR', 'State Bank of India')">
-              <strong>🏋️ Gym Mandate</strong>
-              <div style="color: #60a5fa; font-weight: 700; font-size: 1.1rem; margin: 0.25rem 0;">₹2,999 / mo</div>
-              <small style="color: #94a3b8;">e-NACH Recurring · Bank Server Outage</small>
-            </div>
-          </div>
+        <div class="form-group">
+          <label for="customer-phone">Phone Number</label>
+          <input type="tel" id="customer-phone" placeholder="+91 98765 43210" required>
         </div>
-
-        <!-- Step 2: Customer Credentials -->
-        <div class="card">
-          <h4 style="margin-bottom: 0.5rem; color: #fff; font-size: 1.1rem;">2. Customer Information (Where to Receive Live Outreach)</h4>
-          <p style="color: #94a3b8; font-size: 0.82rem; margin-bottom: 1rem;">
-            Enter your <strong>real details</strong> to receive the actual Email, SMS/WhatsApp, or Voice call on your device:
-          </p>
-
-          <div class="grid" style="grid-template-columns: 1fr 1fr 1fr; gap: 1rem;">
-            <div>
-              <label for="cust-name" style="font-size: 0.82rem; color: #94a3b8;">Full Name *</label>
-              <input type="text" id="cust-name" placeholder="e.g. Aditya Agrawal" required value="Aditya Agrawal">
-            </div>
-
-            <div>
-              <label for="cust-phone" style="font-size: 0.82rem; color: #94a3b8;">Mobile Phone (+91...) *</label>
-              <input type="tel" id="cust-phone" placeholder="+919876543210" required value="+919876543210">
-            </div>
-
-            <div>
-              <label for="cust-email" style="font-size: 0.82rem; color: #94a3b8;">Email Address *</label>
-              <input type="email" id="cust-email" placeholder="yourname@gmail.com" required value="aditya@example.com">
-            </div>
-          </div>
+        <div class="form-group">
+          <label for="customer-email">Email Address</label>
+          <input type="email" id="customer-email" placeholder="you@example.com" required>
         </div>
-
-        <!-- Step 3: Bank & Failure Injection -->
-        <div class="card">
-          <h4 style="margin-bottom: 0.5rem; color: #fff; font-size: 1.1rem;">3. Select Bank Degradation & Fault Injection</h4>
-          <p style="color: #94a3b8; font-size: 0.82rem; margin-bottom: 1rem;">
-            Simulate real-world banking failures to trigger ARBITER's AI recovery decisions:
-          </p>
-
-          <div class="grid" style="grid-template-columns: 1fr 1fr; gap: 1rem;">
-            <div>
-              <label for="sel-bank-fault" style="font-size: 0.82rem; color: #94a3b8;">Bank / Rail Fault Mechanism</label>
-              <select id="sel-bank-fault" onchange="handleFaultChange(this.value)">
-                <option value="BAD_REQUEST_PAYMENT_ACCOUNT_INSUFFICIENT_BALANCE" selected>🟢 HDFC Bank — Insufficient Balance (Salary Day 28th)</option>
-                <option value="BAD_REQUEST_PAYMENT_CARD_EXPIRED">🟡 ICICI Bank — Expired Card / Mandate Dead (Hard Failure)</option>
-                <option value="BANK_DOWNTIME_NETWORK_ERROR">🔴 State Bank of India (SBI) — 504 Gateway Timeout</option>
-                <option value="BAD_REQUEST_PAYMENT_UPI_COLLECT_EXPIRED">🟣 Axis / Google Pay — UPI Collect Expired (1-Click Link)</option>
-                <option value="BAD_REQUEST_PAYMENT_FRAUD_IDENTIFIED">🚨 Kotak Bank — Suspicious Bot Risk / Fraud Quarantine</option>
-              </select>
-            </div>
-
-            <div>
-              <label for="inp-custom-amount" style="font-size: 0.82rem; color: #94a3b8;">Custom Order Amount (₹)</label>
-              <input type="number" id="inp-custom-amount" min="1" step="1" value="1999">
-            </div>
-          </div>
-        </div>
-
-        <!-- Step 4: Gated Consent Checkboxes -->
-        <div class="consent-box">
-          <h5 style="margin-bottom: 0.5rem; color: #fff; font-size: 0.95rem;">4. Mandatory Consent & Outreach Permissions</h5>
-          
-          <label style="display: flex; align-items: flex-start; gap: 0.5rem; margin-bottom: 0.5rem; cursor: pointer;">
-            <input type="checkbox" id="chk-tc" required checked style="margin-top: 0.2rem;">
-            <span style="font-size: 0.82rem; color: #cbd5e1;">
-              I agree to the <strong>Terms & Conditions</strong>, Recurring Billing Mandate Policy, and Merchant Service Agreement. (Required)
-            </span>
-          </label>
-
-          <label style="display: flex; align-items: flex-start; gap: 0.5rem; margin-bottom: 0; cursor: pointer;">
-            <input type="checkbox" id="chk-consent" checked style="margin-top: 0.2rem;">
-            <span style="font-size: 0.82rem; color: #60a5fa;">
-              <strong>Explicit Outreach Permission:</strong> I authorize ARBITER to send real-time recovery notifications via <strong>Email, SMS/WhatsApp, or Voice IVR</strong> to my provided contact credentials if payment fails.
-            </span>
-          </label>
-        </div>
-
-        <!-- Action Button -->
-        <button type="submit" id="btn-submit-order" class="btn-submit">
-          ⚡ Place Order & Simulate Payment Degradation
+        <button type="submit" class="pay-btn" id="pay-btn">
+          Pay <span class="amount" id="pay-amount"></span>
         </button>
       </form>
+      <div class="error" id="error-msg"></div>
+      <div class="success" id="success-msg"></div>
+    </div>
 
-      <!-- Live Result Banner -->
-      <div id="result-box" class="result-box">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
-          <h4 style="margin: 0; color: #10b981; font-weight: 700;">✓ Payment Degradation Ingested & AI Triaged!</h4>
-          <span id="res-badge-status" class="badge badge-success">AUTO_APPROVED</span>
-        </div>
-
-        <p id="res-summary" style="font-size: 0.88rem; color: #e2e8f0; margin-bottom: 0.75rem;"></p>
-
-        <div style="background: rgba(0,0,0,0.3); border-radius: 8px; padding: 0.85rem; margin-bottom: 1rem; font-size: 0.82rem; color: #94a3b8;">
-          <div><strong>Diagnosis:</strong> <span id="res-diag" style="color: #fff;"></span></div>
-          <div><strong>AI Action Picked:</strong> <code id="res-action" style="color: #60a5fa;"></code></div>
-          <div><strong>Outreach Status:</strong> <span id="res-outreach" style="color: #10b981;"></span></div>
-        </div>
-
-        <div style="display: flex; gap: 1rem; align-items: center;">
-          <a id="btn-open-recovery" href="#" target="_blank" role="button" style="background: #10b981; border: none; font-weight: 700; flex: 1; text-align: center;">
-            👉 Open Customer Recovery Portal & Pay with Razorpay Test Mode &rarr;
-          </a>
-          <a href="/dashboard" role="button" class="outline" style="border-color: #475569; color: #cbd5e1;">
-            📊 View Live in Dashboard
-          </a>
-        </div>
-      </div>
+    <div class="no-product" id="no-product" style="display: none;">
+      <p>Select a product above to continue.</p>
     </div>
   </div>
 
   <script>
-    let selectedAmount = 1999;
-    let selectedFailureCode = 'BAD_REQUEST_PAYMENT_ACCOUNT_INSUFFICIENT_BALANCE';
-    let selectedInstrument = 'HDFC Bank';
+    const PRODUCTS = [
+      { id: "prod_premium_plan", name: "Premium Annual Plan", description: "Full access to all features for 12 months", pricePaise: 499900 },
+      { id: "prod_monthly_basic", name: "Monthly Basic", description: "Essential features, billed monthly", pricePaise: 99900 },
+      { id: "prod_team_license", name: "Team License (5 seats)", description: "Collaborate with your team, 5 user seats", pricePaise: 199900 },
+      { id: "prod_enterprise", name: "Enterprise (Custom)", description: "Custom solution for large organizations", pricePaise: 999900 },
+    ];
 
-    function selectService(el, amount, name, defaultCode, defaultInstrument) {
-      document.querySelectorAll('.service-card').forEach(c => c.classList.remove('selected'));
-      el.classList.add('selected');
-      selectedAmount = amount;
-      selectedFailureCode = defaultCode;
-      selectedInstrument = defaultInstrument;
-      document.getElementById('inp-custom-amount').value = amount;
-      document.getElementById('sel-bank-fault').value = defaultCode;
+    let selectedProduct = null;
+
+    function formatINR(paise) {
+      return '₹' + (paise / 100).toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
     }
 
-    function handleFaultChange(val) {
-      selectedFailureCode = val;
+    function renderProducts() {
+      const container = document.getElementById('products');
+      container.innerHTML = PRODUCTS.map(p => `
+        <div class="product-card" data-id="${p.id}" onclick="selectProduct('${p.id}')">
+          <div style="height:160px;background:linear-gradient(135deg,#1e293b,#334155);display:flex;align-items:center;justify-content:center;">
+            <span style="font-size:48px;color:#64748b;">${p.id.includes('premium') ? '★' : p.id.includes('basic') ? '◆' : p.id.includes('team') ? '⬡' : '⬢'}</span>
+          </div>
+          <div class="product-info">
+            <div class="product-name">${p.name}</div>
+            <div class="product-desc">${p.description}</div>
+            <div class="product-price"><span class="currency">₹</span>${(p.pricePaise / 100).toLocaleString('en-IN')}</div>
+          </div>
+        </div>
+      `).join('');
     }
 
-    async function handleStoreSubmit(e) {
+    function selectProduct(productId) {
+      selectedProduct = PRODUCTS.find(p => p.id === productId);
+      document.querySelectorAll('.product-card').forEach(c => c.classList.remove('selected'));
+      document.querySelector(`.product-card[data-id="${productId}"]`).classList.add('selected');
+
+      document.getElementById('checkout-section').style.display = 'block';
+      document.getElementById('no-product').style.display = 'none';
+
+      document.getElementById('selected-product').innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <div>
+            <div style="font-weight:600;color:#f8fafc;">${selectedProduct.name}</div>
+            <div style="font-size:14px;color:#94a3b8;">${selectedProduct.description}</div>
+          </div>
+          <div style="font-size:20px;font-weight:700;color:#22c55e;">₹${(selectedProduct.pricePaise / 100).toLocaleString('en-IN')}</div>
+        </div>
+      `;
+      document.getElementById('pay-amount').textContent = '₹' + (selectedProduct.pricePaise / 100).toLocaleString('en-IN');
+    }
+
+    document.getElementById('checkout-form').addEventListener('submit', async function(e) {
       e.preventDefault();
-      const btn = document.getElementById('btn-submit-order');
-      btn.disabled = true;
-      btn.textContent = '⏳ Ingesting Failure & Running AI Triage...';
+      if (!selectedProduct) return;
 
-      const name = document.getElementById('cust-name').value;
-      const phone = document.getElementById('cust-phone').value;
-      const email = document.getElementById('cust-email').value;
-      const amount = parseFloat(document.getElementById('inp-custom-amount').value || selectedAmount);
-      const tcAgreed = document.getElementById('chk-tc').checked;
-      const outreachPermitted = document.getElementById('chk-consent').checked;
-      const code = document.getElementById('sel-bank-fault').value;
+      const name = document.getElementById('customer-name').value.trim();
+      const phone = document.getElementById('customer-phone').value.trim();
+      const email = document.getElementById('customer-email').value.trim();
+
+      if (!name || !phone || !email) {
+        showError('Please fill in all fields.');
+        return;
+      }
+
+      const payBtn = document.getElementById('pay-btn');
+      payBtn.disabled = true;
+      payBtn.textContent = 'Creating order...';
 
       try {
-        const res = await fetch('/api/orders/simulate', {
+        const response = await fetch('/api/orders/create', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
+            productId: selectedProduct.id,
             customerName: name,
             customerPhone: phone,
             customerEmail: email,
-            amountPaise: Math.round(amount * 100),
-            failureCode: code,
-            instrumentDesc: selectedInstrument,
-            tcAgreed,
-            outreachPermitted
-          })
+          }),
         });
 
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Simulation failed');
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Failed to create order');
 
-        // Show result
-        const box = document.getElementById('result-box');
-        box.style.display = 'block';
-        document.getElementById('res-badge-status').textContent = data.session.autonomyStatus;
-        document.getElementById('res-badge-status').className = `badge ${data.session.autonomyStatus === 'AUTO_APPROVED' ? 'badge-success' : 'badge-warning'}`;
-        document.getElementById('res-summary').textContent = `Order of ₹${amount.toLocaleString('en-IN')} for ${name} degraded under ${code}.`;
-        document.getElementById('res-diag').textContent = `${data.session.diagnosis.class} — ${data.session.diagnosis.explanation}`;
-        document.getElementById('res-action').textContent = data.session.decideOutput.chosen.action;
-        
-        if (outreachPermitted) {
-          document.getElementById('res-outreach').textContent = `✓ Dispatched live to ${email} and ${phone}`;
-        } else {
-          document.getElementById('res-outreach').textContent = `Suppressed per user permission setting (Zero Spam Policy)`;
-        }
+        const options = {
+          key: data.keyId,
+          amount: data.amountPaise,
+          currency: data.currency,
+          name: 'ARBITER',
+          description: selectedProduct.name,
+          order_id: data.orderId,
+          handler: async function(response) {
+            try {
+              const verifyRes = await fetch('/api/payments/verify', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  razorpay_payment_id: response.razorpay_payment_id,
+                  razorpay_order_id: response.razorpay_order_id,
+                  razorpay_signature: response.razorpay_signature,
+                  orderId: data.orderId,
+                }),
+              });
+              const verifyData = await verifyRes.json();
+              if (verifyData.success) {
+                showSuccess('Payment successful! Your order has been confirmed.');
+              } else {
+                showError('Payment verification failed. Please contact support.');
+              }
+            } catch (err) {
+              showError('Payment completed but verification pending. We will confirm shortly.');
+            }
+          },
+          prefill: {
+            name: name,
+            email: email,
+            contact: phone,
+          },
+          theme: {
+            color: '#2563eb',
+          },
+          modal: {
+            ondismiss: function() {
+              payBtn.disabled = false;
+              payBtn.innerHTML = 'Pay <span class="amount">' + '₹' + (selectedProduct.pricePaise / 100).toLocaleString('en-IN') + '</span>';
+            },
+          },
+        };
 
-        document.getElementById('btn-open-recovery').href = `/recover?tok=${data.session.recoveryToken}&prop=${data.session.id}`;
-        box.scrollIntoView({ behavior: 'smooth' });
+        const rzp = new Razorpay(options);
+        rzp.on('payment.failed', function(response) {
+          showError('Payment failed: ' + (response.error.description || 'Unknown error'));
+          payBtn.disabled = false;
+          payBtn.innerHTML = 'Pay <span class="amount">' + '₹' + (selectedProduct.pricePaise / 100).toLocaleString('en-IN') + '</span>';
+        });
+        rzp.open();
       } catch (err) {
-        alert('Error: ' + err.message);
-      } finally {
-        btn.disabled = false;
-        btn.textContent = '⚡ Place Order & Simulate Payment Degradation';
+        showError(err.message);
+        payBtn.disabled = false;
+        payBtn.innerHTML = 'Pay <span class="amount">' + '₹' + (selectedProduct.pricePaise / 100).toLocaleString('en-IN') + '</span>';
       }
+    });
+
+    function showError(msg) {
+      const el = document.getElementById('error-msg');
+      el.textContent = msg;
+      el.style.display = 'block';
+      document.getElementById('success-msg').style.display = 'none';
     }
+
+    function showSuccess(msg) {
+      const el = document.getElementById('success-msg');
+      el.textContent = msg;
+      el.style.display = 'block';
+      document.getElementById('error-msg').style.display = 'none';
+    }
+
+    renderProducts();
   </script>
 </body>
 </html>

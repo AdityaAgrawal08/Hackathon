@@ -7,3 +7,4 @@ export * from "./pipeline.js";
 export * from "./metrics.js";
 export * from "./dataset.js";
 export * from "./train.js";
+export * from "./credibility.js";
