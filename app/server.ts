@@ -1,1101 +1,576 @@
 /**
- * ARBITER Interactive Payment Server & Merchant Console.
+ * ARBITER Payment Server — Real Payment Workflow
  *
- * Exposes:
- *  - GET  /                     -> Desktop Checkout with Dynamic QR
- *  - POST /api/orders           -> Creates Checkout Session + QR
- *  - GET  /pay/:token           -> Smartphone Mobile Checkout Page
- *  - POST /api/payments/charge  -> Dispatches payment attempt with idempotency guard
- *  - POST /api/webhooks/razorpay-> Fast async webhook ingestion (<100ms ACK)
- *  - GET  /api/status/:token    -> Live SSE payment status stream with reconnection
- *  - GET  /dashboard            -> Merchant Reconciliation & Audit Console
- *  - GET  /api/admin/intents    -> Admin data for console
- *  - POST /api/admin/reconcile  -> Manual sweep trigger
+ * Two actors: Store (customer) and Vendor Dashboard (merchant).
+ * One payment gateway: Razorpay test mode.
+ * No simulation. Real checkout, real webhooks, real ML analysis, real outreach.
  */
 import express, { type Request, type Response, type NextFunction } from "express";
 import { rateLimit } from "express-rate-limit";
-import qrcode from "qrcode";
 import { createClient, type Client } from "@libsql/client";
 import { randomBytes, createHash, createHmac, timingSafeEqual } from "node:crypto";
-
 import { readFileSync, existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-// Load environment variables from .env file natively if it exists
 if (existsSync(".env")) {
-  try {
-    process.loadEnvFile();
-  } catch (err) {
-    console.warn("Failed to load .env file:", err);
-  }
+  try { process.loadEnvFile(); } catch {}
 }
 
 import { isoUtc, formatINR, paise } from "../packages/shared/src/index.js";
 import {
-  RazorpayLiveGateway,
-  LocalDeterministicGateway,
-  type PaymentGateway,
-  type PaymentMode,
-  userFacingMessage,
-} from "../packages/trial/src/index.js";
-import {
   runMigrations,
-  reconcilePaymentIntent,
-  sweepStuckIntents,
-  ingestDomainWebhook,
-  computeCanonicalPayloadHash,
-  CHECKOUT_SESSION_TTL_MS,
-  DEFAULT_LOCAL_ADMIN_SECRET,
-  DEFAULT_LOCAL_WEBHOOK_SECRET,
-  RATE_LIMIT_CHECKOUT_ORDERS_PER_MIN,
-  RATE_LIMIT_CHARGES_PER_MIN,
   RATE_LIMIT_WEBHOOKS_PER_MIN,
-  RATE_LIMIT_ADMIN_PER_MIN,
-  MAX_SSE_CONNECTIONS_PER_TOKEN,
-  generateTwilioHandoffTwiML,
+  DEFAULT_LOCAL_WEBHOOK_SECRET,
 } from "../packages/core/src/index.js";
-
-
 import {
-  simulateFailureTriage,
-  approveProposal,
-  completeRecovery,
-  initiateRecoveryOrder,
-  recordPromiseToPay,
-  getRecoveryResult,
-  getRecoveryTrace,
-  runBatchBenchmark,
-  recoverySessions,
-  liveMetrics,
-  PRESETS,
-} from "./recovery.js";
-
-
-
-
+  OutreachRouter,
+  MSG91SmsProvider,
+  BrevoEmailProvider,
+} from "../packages/core/src/messaging/index.js";
+import {
+  PRODUCTS,
+  getProduct,
+  processFailedPayment,
+  recordSuccessfulPayment,
+} from "./payment_workflow.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-
 export const app = express();
 const PORT = parseInt(process.env.PORT || "3000", 10);
-
 const HOST = process.env.HOST || "0.0.0.0";
-const DEFAULT_MODE: PaymentMode = (process.env.PAYMENT_MODE as PaymentMode) || "LOCAL_SANDBOX";
-
-const ADMIN_SECRET = process.env.ADMIN_SECRET_KEY || DEFAULT_LOCAL_ADMIN_SECRET;
-const WEBHOOK_SECRET = process.env.RZP_WEBHOOK_SECRET || (DEFAULT_MODE === "REAL_SANDBOX" ? "" : DEFAULT_LOCAL_WEBHOOK_SECRET);
-
-if (DEFAULT_MODE === "REAL_SANDBOX" && !WEBHOOK_SECRET) {
-  console.warn("WARNING: RZP_WEBHOOK_SECRET is not configured for REAL_SANDBOX mode.");
-}
+const WEBHOOK_SECRET = process.env.RZP_WEBHOOK_SECRET || DEFAULT_LOCAL_WEBHOOK_SECRET;
+const RZP_KEY_ID = process.env.RZP_TEST_KEY_ID || process.env.RZP_KEY_ID || "";
+const RZP_KEY_SECRET = process.env.RZP_TEST_KEY_SECRET || process.env.RZP_KEY_SECRET || "";
 
 const dbPath = process.env.ARBITER_DB_PATH || "data/arbiter.sqlite";
 const dbUrl = (dbPath.startsWith("libsql:") || dbPath.startsWith("http:") || dbPath.startsWith("https:") || dbPath.startsWith("file:"))
   ? dbPath
   : `file:${resolve(dbPath)}`;
-export const dbClient: Client = createClient({
-  url: dbUrl,
-  authToken: process.env.ARBITER_DB_TOKEN,
-});
+export const dbClient: Client = createClient({ url: dbUrl, authToken: process.env.ARBITER_DB_TOKEN });
 
+const outreachRouter = new OutreachRouter();
+outreachRouter.registerProvider(new BrevoEmailProvider());
+outreachRouter.registerProvider(new MSG91SmsProvider());
 
-// ── Gateways ────────────────────────────────────────────────────────
-export const localGateway = new LocalDeterministicGateway(dbClient, WEBHOOK_SECRET || DEFAULT_LOCAL_WEBHOOK_SECRET);
-let liveGateway: RazorpayLiveGateway | null = null;
-try {
-  liveGateway = new RazorpayLiveGateway({ webhookSecret: WEBHOOK_SECRET });
-} catch {
-  // Live gateway missing keys; LOCAL_SANDBOX will remain active
-}
+const webhookLimiter = rateLimit({ windowMs: 60_000, limit: RATE_LIMIT_WEBHOOKS_PER_MIN, standardHeaders: true });
 
-export function getGateway(mode: PaymentMode): PaymentGateway {
-  if (mode === "REAL_SANDBOX") {
-    if (!liveGateway) {
-      throw new Error("Razorpay Test Mode credentials not configured. Please set RZP_TEST_KEY_ID and RZP_TEST_KEY_SECRET.");
-    }
-    return liveGateway;
-  }
-  return localGateway;
-}
-
-// ── Rate Limiters ───────────────────────────────────────────────────
-const orderLimiter = rateLimit({ windowMs: 60 * 1000, limit: RATE_LIMIT_CHECKOUT_ORDERS_PER_MIN, standardHeaders: true });
-const chargeLimiter = rateLimit({ windowMs: 60 * 1000, limit: RATE_LIMIT_CHARGES_PER_MIN, standardHeaders: true });
-const webhookLimiter = rateLimit({ windowMs: 60 * 1000, limit: RATE_LIMIT_WEBHOOKS_PER_MIN, standardHeaders: true });
-const adminLimiter = rateLimit({ windowMs: 60 * 1000, limit: RATE_LIMIT_ADMIN_PER_MIN, standardHeaders: true });
-
-// ── Middleware ───────────────────────────────────────────────────────
-// Raw body for webhooks
-app.use("/api/webhooks/razorpay", express.raw({ type: "*/*" }));
-// JSON parser for other endpoints
-app.use(express.json());
-
-// Host Header Validation helper (protects QR URLs from Host header injection)
-function getSanitizedHost(req: Request): string {
-  const host = req.get("host") || `localhost:${PORT}`;
-  const validHostRegex = /^[a-zA-Z0-9.:_-]+$/;
-  if (!validHostRegex.test(host)) {
-    return `localhost:${PORT}`;
-  }
-  return host;
-}
-
-// Admin Auth Middleware
-function requireAdminAuth(req: Request, res: Response, next: NextFunction) {
-  const authHeader = (req.headers["x-admin-key"] as string) || (req.query.admin_key as string);
-  if (!authHeader) {
-    // In local dev without key supplied, check if admin key is explicitly requested
-    if (process.env.NODE_ENV === "production" || process.env.ENFORCE_ADMIN_KEY === "true") {
-      return res.status(401).json({ error: "UNAUTHORIZED_ADMIN_ACCESS" });
-    }
-    return next();
-  }
-  const keyBuf = Buffer.from(authHeader, "utf-8");
-  const secretBuf = Buffer.from(ADMIN_SECRET, "utf-8");
-  if (keyBuf.length !== secretBuf.length || !timingSafeEqual(keyBuf, secretBuf)) {
-    return res.status(401).json({ error: "UNAUTHORIZED_ADMIN_ACCESS" });
-  }
-  next();
-}
-
-// ── SSE Live Status Stream Manager ──────────────────────────────────
-interface SSEClient {
-  res: Response;
-  token: string;
-  connectedAt: number;
-}
+// ── SSE ──────────────────────────────────────────────────────────
+interface SSEClient { res: Response; id: string; connectedAt: number; }
 const sseClients = new Map<string, Set<SSEClient>>();
 
-function broadcastStatus(token: string, state: Record<string, unknown>) {
-  const clients = sseClients.get(token);
+function broadcastSSE(channel: string, data: Record<string, unknown>) {
+  const clients = sseClients.get(channel);
   if (!clients) return;
-  const msg = `data: ${JSON.stringify(state)}\n\n`;
-  for (const c of clients) {
-    try {
-      c.res.write(msg);
-    } catch {}
-  }
+  const msg = `data: ${JSON.stringify(data)}\n\n`;
+  for (const c of clients) { try { c.res.write(msg); } catch {} }
 }
 
-// ── HTML Views ──────────────────────────────────────────────────────
-const checkoutHtml = readFileSync(resolve(__dirname, "views/checkout.html"), "utf8");
-const mobilePayHtml = readFileSync(resolve(__dirname, "views/mobile_pay.html"), "utf8");
+// ── Middleware ────────────────────────────────────────────────────
+app.use("/api/webhooks/razorpay", express.raw({ type: "*/*" }));
+app.use(express.json());
+
+// ── HTML Views ───────────────────────────────────────────────────
+const storeHtml = readFileSync(resolve(__dirname, "views/store.html"), "utf8");
 const dashboardHtml = readFileSync(resolve(__dirname, "views/dashboard.html"), "utf8");
 const recoverHtml = readFileSync(resolve(__dirname, "views/recover.html"), "utf8");
-const resultHtml = readFileSync(resolve(__dirname, "views/result.html"), "utf8");
-const storeHtml = readFileSync(resolve(__dirname, "views/store.html"), "utf8");
 
-// ── Routes ──────────────────────────────────────────────────────────
+// ── Store Routes ─────────────────────────────────────────────────
+app.get("/", (_req, res) => { res.setHeader("Content-Type", "text/html"); res.send(storeHtml); });
+app.get("/store", (_req, res) => { res.setHeader("Content-Type", "text/html"); res.send(storeHtml); });
+app.get("/dashboard", (_req, res) => { res.setHeader("Content-Type", "text/html"); res.send(dashboardHtml); });
+app.get("/recover/:eventId", (_req, res) => { res.setHeader("Content-Type", "text/html"); res.send(recoverHtml); });
 
-// 1. Merchant Recovery Command Center UI (Default Home)
-app.get(["/", "/dashboard"], (_req, res) => {
-  res.setHeader("Content-Type", "text/html");
-  res.send(dashboardHtml);
+// ── Get Products ─────────────────────────────────────────────────
+app.get("/api/products", (_req, res) => {
+  res.json(PRODUCTS);
 });
 
-// 2. Interactive Storefront & Fault Simulator
-app.get("/store", (_req, res) => {
-  res.setHeader("Content-Type", "text/html");
-  res.send(storeHtml);
-});
-
-// 3. Customer 1-Click Recovery Portal (Task 3.1 & 3.3)
-app.get("/recover", (_req, res) => {
-  res.setHeader("Content-Type", "text/html");
-  res.send(recoverHtml);
-});
-
-// 4. Post-Payment Outcome & Receipt Center (Task 4.1 - 4.4)
-app.get("/result", (_req, res) => {
-  res.setHeader("Content-Type", "text/html");
-  res.send(resultHtml);
-});
-
-// Standalone Checkout UI (for test/manual checkout)
-app.get("/checkout", (_req, res) => {
-  res.setHeader("Content-Type", "text/html");
-  res.send(checkoutHtml);
-});
-
-
-// ── Recovery Engine API Endpoints ────────────────────────────────────
-
-// A. Storefront Order Simulation & Fault Ingestion
-app.post("/api/orders/simulate", async (req, res) => {
+// ── Create Razorpay Order + Upsert Customer ─────────────────────
+app.post("/api/orders/create", async (req: Request, res: Response) => {
   try {
-    const {
-      customerName,
-      customerPhone,
-      customerEmail,
-      amountPaise = 199900,
-      failureCode = "BAD_REQUEST_PAYMENT_ACCOUNT_INSUFFICIENT_BALANCE",
-      instrumentDesc = "HDFC Bank",
-      tcAgreed,
-      outreachPermitted = true,
-      autonomyThresholdPaise = 200000,
-    } = req.body || {};
-
-    if (!tcAgreed) {
-      return res.status(400).json({ error: "TERMS_AND_CONDITIONS_REQUIRED" });
+    const { productId, customerName, customerPhone, customerEmail } = req.body;
+    if (!productId || !customerName || !customerPhone || !customerEmail) {
+      return res.status(400).json({ error: "Missing required fields" });
     }
+    const product = getProduct(productId);
+    if (!product) return res.status(400).json({ error: "Invalid product" });
 
-    if (!customerName || !customerPhone) {
-      return res.status(400).json({ error: "CUSTOMER_NAME_AND_PHONE_REQUIRED" });
-    }
-
-    const hostHeader = getSanitizedHost(req);
-    const proto = req.protocol === "https" || req.get("x-forwarded-proto") === "https" ? "https" : "http";
-    const baseUrl = `${proto}://${hostHeader}`;
-
-    const session = await simulateFailureTriage(
-      {
-        id: `store_${Date.now()}`,
-        customerName: String(customerName).trim(),
-        customerPhone: String(customerPhone).trim(),
-        customerEmail: customerEmail ? String(customerEmail).trim() : undefined,
-        amountPaise: Number(amountPaise),
-        failureCode: String(failureCode),
-        instrumentDesc: String(instrumentDesc),
-        outreachPermitted: Boolean(outreachPermitted),
-      },
-      baseUrl,
-      dbClient,
-      undefined,
-      autonomyThresholdPaise,
-    );
-
-
-
-    // Real-time broadcast to dashboard via SSE
-    broadcastStatus("global", { type: "FAILURE_INGESTED", session });
-
-    res.json({ success: true, session });
-  } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
-  }
-});
-
-// B. Simulate failure ingestion and execute real-time triage (Task 5.1 & 5.4)
-app.post("/api/recovery/triage", async (req, res) => {
-  try {
-    const { preset = "SALARY_DELAY", customPreset, autonomyThresholdPaise = 200000, simulatedTimeMs } = req.body || {};
-    const hostHeader = getSanitizedHost(req);
-    const proto = req.protocol === "https" || req.get("x-forwarded-proto") === "https" ? "https" : "http";
-    const baseUrl = `${proto}://${hostHeader}`;
-    const target = customPreset || preset;
-    const session = await simulateFailureTriage(target, baseUrl, dbClient, simulatedTimeMs, autonomyThresholdPaise);
-
-    res.json(session);
-  } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
-  }
-});
-
-
-// C. Initiate dedicated recovery order & dynamic QR (Task 3.2)
-app.post("/api/recovery/initiate", async (req, res) => {
-
-  try {
-    const { proposalId, token, preferredMethod = "upi" } = req.body || {};
-    const order = await initiateRecoveryOrder(proposalId || token, preferredMethod, dbClient);
-    if (!order) {
-      return res.status(404).json({ error: "NO_ACTIVE_RECOVERY_SESSION" });
-    }
-    res.json(order);
-  } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
-  }
-});
-
-// C. Promise-to-Pay Salary Day Commitment (Task 3.5)
-app.post("/api/recovery/promise-to-pay", async (req, res) => {
-  try {
-    const { proposalId, promisedDay = 28 } = req.body || {};
-    const result = await recordPromiseToPay(proposalId, promisedDay, dbClient);
-    res.json(result);
-  } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
-  }
-});
-
-// D. Approve proposal in merchant queue (Task 5.4 & 6.3)
-app.post("/api/recovery/approve", async (req, res) => {
-  try {
-    const { proposalId } = req.body;
-    const ok = await approveProposal(proposalId, dbClient);
-    const session = recoverySessions.get(proposalId);
-    if (session) {
-      broadcastStatus(session.recoveryToken, { type: "PROPOSAL_APPROVED", proposalId, status: "APPROVED" });
-      broadcastStatus("global", { type: "PROPOSAL_APPROVED", proposalId, status: "APPROVED" });
-    }
-    res.json({ success: ok, proposalId });
-  } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
-  }
-});
-
-// E. Complete customer recovery payment (with HMAC signature verification) (Task 4.9 & 6.4)
-app.post("/api/recovery/complete", async (req, res) => {
-  try {
-    const { proposalId, razorpay_payment_id, razorpay_order_id, razorpay_signature } = req.body || {};
-
-    // Cryptographic Signature Verification (Requirement 4.9)
-    const keySecret = process.env.RZP_KEY_SECRET || process.env.RZP_TEST_KEY_SECRET;
-    if (razorpay_signature && keySecret) {
-      const payload = `${razorpay_order_id}|${razorpay_payment_id}`;
-      const expected = createHmac("sha256", keySecret).update(payload).digest("hex");
-      const sigBuf = Buffer.from(razorpay_signature, "utf-8");
-      const expBuf = Buffer.from(expected, "utf-8");
-      if (sigBuf.length !== expBuf.length || !timingSafeEqual(sigBuf, expBuf)) {
-        return res.status(400).json({ error: "INVALID_RAZORPAY_SIGNATURE" });
-      }
-    }
-
-
-    const ok = await completeRecovery(proposalId, dbClient);
-    const session = recoverySessions.get(proposalId);
-    if (session) {
-      broadcastStatus(session.recoveryToken, { type: "PAYMENT_RECOVERED", proposalId, status: "SETTLED_RECOVERED" });
-      broadcastStatus("global", { type: "PAYMENT_RECOVERED", proposalId, status: "SETTLED_RECOVERED" });
-    }
-    res.json({ success: ok, proposalId, status: "SETTLED_RECOVERED" });
-  } catch (err) {
-
-    res.status(500).json({ error: (err as Error).message });
-  }
-});
-
-// F. Get Recovery Result & Outcome Details (Task 4.2 & 4.8)
-app.get(["/api/recovery/result", "/api/recovery/result/:id"], async (req, res) => {
-  try {
-    const id = (req.params.id as string) || (req.query.tok as string) || (req.query.prop as string) || "";
-
-    const result = await getRecoveryResult(id, dbClient);
-    if (!result) {
-      return res.status(404).json({ error: "NO_ACTIVE_RECOVERY_SESSION" });
-    }
-    res.json(result);
-  } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
-  }
-});
-
-// G. Get Full Forensic Transaction Trace (Task 6.8 & 6.5)
-app.get(["/api/recovery/trace", "/api/recovery/trace/:id"], async (req, res) => {
-  try {
-    const id = (req.params.id as string) || (req.query.tok as string) || (req.query.prop as string) || "";
-    const trace = await getRecoveryTrace(id, dbClient);
-    if (!trace) {
-      return res.status(404).json({ error: "NO_ACTIVE_RECOVERY_TRACE" });
-    }
-    res.json(trace);
-  } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
-  }
-});
-
-
-
-
-
-// F. Run 100-event Monte Carlo Batch Benchmark (The Bar)
-app.get("/api/recovery/batch-proof", (_req, res) => {
-
-  try {
-    const result = runBatchBenchmark();
-    res.json(result);
-  } catch (err) {
-    console.error("Batch proof error:", err);
-    res.status(500).json({ error: (err as Error).message });
-  }
-
-});
-
-// E. Get current recovery state (persisted in SQLite ledger)
-app.get("/api/recovery/state", async (_req, res) => {
-  let dbRecoveredPaise = liveMetrics.totalRecoveredPaise;
-  try {
-    const r = await dbClient.execute({
-      sql: `SELECT count(*) as count, coalesce(sum(json_extract(payload_json, '$.amountPaise')), 0) as total
-            FROM audit_log
-            WHERE entry_type = 'OUTCOME' AND json_extract(payload_json, '$.status') = 'SETTLED_RECOVERED'`,
-      args: [],
-    });
-    if (r.rows.length > 0 && Number(r.rows[0].total) > 0) {
-      dbRecoveredPaise = Math.max(dbRecoveredPaise, Number(r.rows[0].total));
-    }
-  } catch {}
-
-  const recoveryRate =
-    liveMetrics.totalAtRiskPaise > 0
-      ? ((dbRecoveredPaise / liveMetrics.totalAtRiskPaise) * 100).toFixed(1) + "%"
-      : "0.0%";
-
-  res.json({
-    sessions: Array.from(recoverySessions.values()).reverse(),
-    metrics: {
-      ...liveMetrics,
-      totalRecoveredPaise: dbRecoveredPaise,
-      totalAtRiskFormatted: formatINR(paise(liveMetrics.totalAtRiskPaise)),
-      totalRecoveredFormatted: formatINR(paise(dbRecoveredPaise)),
-      recoveryRate,
-    },
-    presets: PRESETS,
-  });
-});
-
-
-// ── Provider DLR & IVR Webhook Endpoints (Task 2.8) ──────────────────
-
-// 1. Brevo Email DLR Webhook
-app.post("/api/webhooks/providers/brevo", async (req, res) => {
-  try {
-    const event = req.body;
-    if (dbClient) {
-      await dbClient.execute({
-        sql: `INSERT INTO audit_log (ts_utc, tenant_id, event_id, actor, entry_type, payload_json)
-              VALUES (?, ?, ?, ?, ?, ?)`,
-        args: [
-          isoUtc(Date.now()),
-          "demo",
-          String(event.messageId || event["message-id"] || `brevo_evt_${Date.now()}`),
-          "PIPELINE",
-          "OUTCOME",
-          JSON.stringify({ modelVersion: "logreg@1.0.0", policyVersion: "policy-v1", provider: "brevo", event: event.event, email: event.email, timestamp: event.date }),
-        ],
-      });
-    }
-    res.json({ received: true });
-  } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
-  }
-});
-
-// 2. MSG91 SMS DLR Webhook
-app.post("/api/webhooks/providers/msg91", async (req, res) => {
-  try {
-    const event = req.body;
-    if (dbClient) {
-      await dbClient.execute({
-        sql: `INSERT INTO audit_log (ts_utc, tenant_id, event_id, actor, entry_type, payload_json)
-              VALUES (?, ?, ?, ?, ?, ?)`,
-        args: [
-          isoUtc(Date.now()),
-          "demo",
-          String(event.requestId || `msg91_evt_${Date.now()}`),
-          "PIPELINE",
-          "OUTCOME",
-          JSON.stringify({ modelVersion: "logreg@1.0.0", policyVersion: "policy-v1", provider: "msg91", status: event.status, mobile: event.mobile }),
-        ],
-      });
-    }
-    res.json({ received: true });
-  } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
-  }
-});
-
-// 3. Gupshup WhatsApp DLR Webhook
-app.post("/api/webhooks/providers/gupshup", async (req, res) => {
-  try {
-    const event = req.body;
-    if (dbClient) {
-      await dbClient.execute({
-        sql: `INSERT INTO audit_log (ts_utc, tenant_id, event_id, actor, entry_type, payload_json)
-              VALUES (?, ?, ?, ?, ?, ?)`,
-        args: [
-          isoUtc(Date.now()),
-          "demo",
-          String(event.payload?.id || `gupshup_evt_${Date.now()}`),
-          "PIPELINE",
-          "OUTCOME",
-          JSON.stringify({ modelVersion: "logreg@1.0.0", policyVersion: "policy-v1", provider: "gupshup", type: event.type, payload: event.payload }),
-        ],
-      });
-    }
-    res.json({ received: true });
-  } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
-  }
-});
-
-// 4. Twilio IVR Keypad Gather Webhook (Press 1 Handoff)
-app.post("/api/webhooks/twilio/gather", async (req, res) => {
-  try {
-    const { Digits } = req.body;
-    const proposalId = String(req.query.proposalId || "");
-    const session = recoverySessions.get(proposalId);
-
-    // If user pressed "1", complete handoff to instant WhatsApp payment link
-    if (Digits === "1" || Digits === 1) {
-      if (dbClient) {
-        await dbClient.execute({
-          sql: `INSERT INTO audit_log (ts_utc, tenant_id, event_id, actor, entry_type, payload_json)
-                VALUES (?, ?, ?, ?, ?, ?)`,
-          args: [
-            isoUtc(Date.now()),
-            "demo",
-            proposalId || `twilio_gather_${Date.now()}`,
-            "CUSTOMER",
-            "ACTION",
-            JSON.stringify({ modelVersion: "logreg@1.0.0", policyVersion: "policy-v1", action: "PRESS_1_GATHER_HANDOFF", channel: "WHATSAPP", customer: session?.customerName }),
-          ],
-        });
-      }
-      const isHindi = session ? session.messages.voiceHi !== null : true;
-      const handoffXml = generateTwilioHandoffTwiML(isHindi);
-      res.setHeader("Content-Type", "text/xml");
-      res.send(handoffXml);
-      return;
-    }
-
-    // Default hangup response
-    res.setHeader("Content-Type", "text/xml");
-    res.send(`<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Response>`);
-  } catch (err) {
-    res.status(500).send(`<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Response>`);
-  }
-});
-
-
-
-
-// 2. Order & Checkout Session Creation
-app.post("/api/orders", orderLimiter, async (req, res) => {
-  try {
-    const { amountPaise = 49900, paymentMode = DEFAULT_MODE, tenantId = "demo" } = req.body;
-    const gateway = getGateway(paymentMode);
     const nowMs = Date.now();
-    const nowIso = isoUtc(nowMs);
-    const expiresIso = isoUtc(nowMs + CHECKOUT_SESSION_TTL_MS);
+    const nowUtc = isoUtc(nowMs);
 
-    // Create Order with Gateway
-    const order = await gateway.createOrder({
-      tenantId,
-      amountPaise,
-      receipt: `rcpt_${nowMs}`,
+    // Upsert customer profile
+    const existing = await dbClient.execute({
+      sql: "SELECT id FROM customer_profiles WHERE phone = ?",
+      args: [customerPhone],
     });
 
-    // Create Opaque Token for Checkout Session
-    const token = randomBytes(24).toString("base64url");
+    let customerId: string;
+    if (existing.rows.length > 0) {
+      customerId = String(existing.rows[0].id);
+      await dbClient.execute({
+        sql: "UPDATE customer_profiles SET name = ?, email = ? WHERE id = ?",
+        args: [customerName, customerEmail, customerId],
+      });
+    } else {
+      customerId = `cust_${nowMs}_${randomBytes(4).toString("hex")}`;
+      await dbClient.execute({
+        sql: `INSERT INTO customer_profiles (id, name, phone, email, created_at_utc)
+              VALUES (?, ?, ?, ?, ?)`,
+        args: [customerId, customerName, customerPhone, customerEmail, nowUtc],
+      });
+    }
 
-    // Persist Checkout Session in SQLite
-    await dbClient.execute({
-      sql: `INSERT INTO checkout_sessions
-              (token, tenant_id, order_id, amount_paise, currency, payment_mode, expires_at_utc, created_at_utc)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      args: [token, tenantId, order.id, amountPaise, "INR", paymentMode, expiresIso, nowIso],
-    });
-
-    // Generate Mobile Checkout URL & Scannable QR Code
-    const hostHeader = getSanitizedHost(req);
-    const proto = req.protocol === "https" || req.get("x-forwarded-proto") === "https" ? "https" : "http";
-    const mobileUrl = `${proto}://${hostHeader}/pay/${token}`;
-    const qrCodeDataUrl = await qrcode.toDataURL(mobileUrl, { width: 300, margin: 2 });
+    // Create Razorpay order
+    let orderId = `order_${nowMs}_${randomBytes(4).toString("hex")}`;
+    if (RZP_KEY_ID && RZP_KEY_SECRET && !RZP_KEY_ID.includes("xxxxxx")) {
+      try {
+        const auth = Buffer.from(`${RZP_KEY_ID}:${RZP_KEY_SECRET}`).toString("base64");
+        const rzpRes = await fetch("https://api.razorpay.com/v1/orders", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Basic ${auth}` },
+          body: JSON.stringify({
+            amount: product.pricePaise,
+            currency: "INR",
+            receipt: `rcpt_${customerId.slice(0, 12)}_${nowMs}`,
+            notes: { customer_profile_id: customerId, product_id: productId, product_name: product.name },
+          }),
+        });
+        if (rzpRes.ok) {
+          const rzpData = (await rzpRes.json()) as { id: string };
+          if (rzpData?.id) orderId = rzpData.id;
+        }
+      } catch (err) {
+        console.warn("Razorpay order creation failed, using local order:", err);
+      }
+    }
 
     res.json({
-      token,
-      orderId: order.id,
-      amountPaise,
-      paymentMode,
-      mobileUrl,
-      qrCodeDataUrl,
-      expiresAtUtc: expiresIso,
+      orderId,
+      amountPaise: product.pricePaise,
+      currency: "INR",
+      keyId: RZP_KEY_ID || "rzp_test_demo",
+      customerId,
+      productId,
     });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }
 });
 
-// 3. Mobile Payment Checkout Page
-app.get("/pay/:token", async (req, res) => {
+// ── Verify Payment (called by frontend after Checkout.js success) ─
+app.post("/api/payments/verify", async (req: Request, res: Response) => {
   try {
-    const { token } = req.params;
-    const r = await dbClient.execute({
-      sql: `SELECT * FROM checkout_sessions WHERE token = ?`,
-      args: [token],
-    });
+    const { razorpay_payment_id, razorpay_order_id, razorpay_signature, orderId } = req.body;
+    if (!razorpay_payment_id || !razorpay_order_id || !razorpay_signature) {
+      return res.status(400).json({ error: "Missing payment verification fields" });
+    }
 
-    if (r.rows.length === 0) {
-      // Check if token belongs to an active recovery session
-      const recoverySession = Array.from(recoverySessions.values()).find(
-        (s) => s.recoveryToken === token || s.id === token,
-      );
-      if (recoverySession) {
-        const formattedAmount = (recoverySession.amountPaise / 100).toFixed(2);
-        const rendered = mobilePayHtml
-          .replace(/{{SESSION_TOKEN}}/g, recoverySession.recoveryToken)
-          .replace(/{{TOKEN}}/g, recoverySession.recoveryToken)
-          .replace(/{{ORDER_ID}}/g, `order_rec_${recoverySession.id}`)
-          .replace(/{{AMOUNT_PAISE}}/g, String(recoverySession.amountPaise))
-          .replace(/{{AMOUNT_FORMATTED}}/g, formattedAmount)
-          .replace(/{{PAYMENT_MODE}}/g, "RECOVERY_PORTAL")
-          .replace(/{{MODE_BADGE_CLASS}}/g, "badge-real")
-          .replace(/{{RZP_KEY_ID}}/g, process.env.RZP_KEY_ID || "rzp_test_demo")
-          .replace(/{{KEY_ID}}/g, process.env.RZP_KEY_ID || "rzp_test_demo");
-        res.setHeader("Content-Type", "text/html");
-        return res.send(rendered);
+    // HMAC verification
+    if (RZP_KEY_SECRET) {
+      const payload = `${razorpay_order_id}|${razorpay_payment_id}`;
+      const expected = createHmac("sha256", RZP_KEY_SECRET).update(payload).digest("hex");
+      if (!timingSafeEqual(Buffer.from(razorpay_signature), Buffer.from(expected))) {
+        return res.status(400).json({ error: "Invalid signature" });
       }
-      return res.status(404).send("<h3>Checkout Session Not Found</h3>");
     }
 
-    const session = r.rows[0] as unknown as {
-      token: string;
-      order_id: string;
-      amount_paise: number;
-      payment_mode: PaymentMode;
-      expires_at_utc: string;
-      revoked_at_utc?: string;
-    };
-
-    if (session.revoked_at_utc) {
-      return res.status(410).send("<h3>Checkout Session Already Completed</h3>");
-    }
-
-    if (Date.parse(session.expires_at_utc) < Date.now()) {
-      return res.status(401).send("<h3>Checkout Session Expired</h3>");
-    }
-
-    const formattedAmount = (session.amount_paise / 100).toFixed(2);
-    const badgeClass = session.payment_mode === "REAL_SANDBOX" ? "badge-real" : "badge-local";
-
-    const rendered = mobilePayHtml
-      .replace(/{{SESSION_TOKEN}}/g, session.token)
-      .replace(/{{TOKEN}}/g, session.token)
-      .replace(/{{ORDER_ID}}/g, session.order_id)
-      .replace(/{{AMOUNT_PAISE}}/g, String(session.amount_paise))
-      .replace(/{{AMOUNT_FORMATTED}}/g, formattedAmount)
-      .replace(/{{PAYMENT_MODE}}/g, session.payment_mode)
-      .replace(/{{MODE_BADGE_CLASS}}/g, badgeClass)
-      .replace(/{{RZP_KEY_ID}}/g, process.env.RZP_TEST_KEY_ID || process.env.RZP_KEY_ID || "rzp_test_demo")
-      .replace(/{{KEY_ID}}/g, process.env.RZP_TEST_KEY_ID || process.env.RZP_KEY_ID || "rzp_test_demo");
-
-    res.setHeader("Content-Type", "text/html");
-    res.send(rendered);
-  } catch (err) {
-    res.status(500).send("Server Error: " + (err as Error).message);
-  }
-});
-
-
-// 4. Payment Execution & Charge Endpoint
-app.post("/api/payments/charge", chargeLimiter, async (req, res) => {
-  try {
-    const { token, scenario, instrument } = req.body || {};
-    const clientIdemKey = req.body?.clientIdemKey || req.body?.idempotency_key;
-    if (!token || !clientIdemKey) {
-      return res.status(400).json({ error: "Missing token or clientIdemKey" });
-    }
-
-
-    // 1. Verify Checkout Session
-    const sessRes = await dbClient.execute({
-      sql: `SELECT * FROM checkout_sessions WHERE token = ?`,
-      args: [token],
-    });
-    if (sessRes.rows.length === 0) {
-      return res.status(404).json({ error: "INVALID_CHECKOUT_TOKEN" });
-    }
-    const session = sessRes.rows[0] as unknown as {
-      token: string;
-      tenant_id: string;
-      order_id: string;
-      amount_paise: number;
-      payment_mode: PaymentMode;
-      expires_at_utc: string;
-      revoked_at_utc?: string;
-    };
-
-    if (Date.parse(session.expires_at_utc) < Date.now()) {
-      return res.status(401).json({ error: "TOKEN_EXPIRED" });
-    }
-
-    // 2. Deterministic Persisted Idempotency Verification (Canonical JSON key order)
-    const payloadHash = computeCanonicalPayloadHash({
-      amountPaise: session.amount_paise,
-      scenario: scenario || "LOCAL_SUCCESS",
-      token,
-    });
-
-    const attemptRes = await dbClient.execute({
-      sql: `SELECT * FROM payment_attempts WHERE tenant_id = ? AND client_idem_key = ?`,
-      args: [session.tenant_id, clientIdemKey],
-    });
-
-    if (attemptRes.rows.length > 0) {
-      const prior = attemptRes.rows[0] as unknown as {
-        payload_hash: string;
-        payment_intent_id: string;
-        status: string;
-      };
-      if (prior.payload_hash !== payloadHash) {
-        return res.status(409).json({ error: "IDEMPOTENCY_PAYLOAD_MISMATCH" });
-      }
-      // Return cached / current intent status
-      const piRes = await dbClient.execute({
-        sql: `SELECT * FROM payment_intents WHERE id = ?`,
-        args: [prior.payment_intent_id],
-      });
-      const pi = piRes.rows[0] as unknown as { status: string; client_visible: string };
-      return res.status(200).json({
-        idempotent: true,
-        intentId: prior.payment_intent_id,
-        intent_id: prior.payment_intent_id,
-        knowledgeStatus: pi.status === "SUCCEEDED" ? "RESOLVED_SUCCESS" : pi.status === "FAILED" ? "RESOLVED_FAILED" : "UNRESOLVED_UNKNOWN",
-        userMessage: userFacingMessage({ visible: pi.client_visible as any, amountPaise: session.amount_paise }),
-      });
-    }
-
-
-    // 3. Create Intent & Attempt Record
-    const intentId = `pi_${clientIdemKey.slice(0, 16)}`;
-    const attemptId = `att_${Date.now()}_${randomBytes(4).toString("hex")}`;
-    const nowMs = Date.now();
-    const nowIso = isoUtc(nowMs);
-
-    const proposalId = `prop_${intentId}`;
-
-    await dbClient.batch(
-      [
-        {
-          sql: `INSERT INTO payment_intents
-                  (id, client_idem_key, proposal_id, customer_id, tenant_id, order_id, checkout_token, amount_paise, status, client_visible, scenario, created_at_utc)
-                VALUES (?, ?, ?, 'cust_demo', ?, ?, ?, ?, 'PROCESSING', 'PROCESSING', ?, ?)
-                ON CONFLICT(id) DO NOTHING`,
-          args: [intentId, clientIdemKey, proposalId, session.tenant_id, session.order_id, token, session.amount_paise, scenario, nowIso],
-        },
-
-        {
-          sql: `INSERT INTO payment_attempts
-                  (id, payment_intent_id, tenant_id, client_idem_key, payload_hash, attempt_number, status, scenario, started_at_utc)
-                VALUES (?, ?, ?, ?, ?, 1, 'IN_FLIGHT', ?, ?)`,
-          args: [attemptId, intentId, session.tenant_id, clientIdemKey, payloadHash, scenario, nowIso],
-        },
-      ],
-      "write",
-    );
-
-    // 4. Dispatch to Gateway
-    const gateway = getGateway(session.payment_mode);
-    const chargeResult = await gateway.charge({
-      tenantId: session.tenant_id,
-      orderId: session.order_id,
-      clientIdemKey,
-      amountPaise: session.amount_paise,
-      scenario,
-      instrument,
-    });
-
-    // 5. Commit Outcome & Project State
-    if (chargeResult.status === "succeeded") {
-      await dbClient.batch(
-        [
-          {
-            sql: `INSERT INTO local_settlements
-                    (id, payment_intent_id, idem_key, provider_payment_id, amount_paise, currency, settled_at_utc)
-                  VALUES (?, ?, ?, ?, ?, 'INR', ?)
-                  ON CONFLICT(payment_intent_id) DO NOTHING`,
-            args: [`set_${intentId}`, intentId, clientIdemKey, chargeResult.providerPaymentId, session.amount_paise, nowIso],
-          },
-          {
-            sql: `UPDATE payment_intents SET status = 'SUCCEEDED', client_visible = 'SUCCEEDED', resolved_at_utc = ? WHERE id = ?`,
-            args: [nowIso, intentId],
-          },
-          {
-            sql: `UPDATE payment_attempts SET status = 'SUCCEEDED', provider_payment_id = ?, completed_at_utc = ? WHERE id = ?`,
-            args: [chargeResult.providerPaymentId, nowIso, attemptId],
-          },
-        ],
-        "write",
-      );
-
-      const msgEn = userFacingMessage({ visible: "SUCCEEDED", amountPaise: session.amount_paise, locale: "en" });
-      const msgHi = userFacingMessage({ visible: "SUCCEEDED", amountPaise: session.amount_paise, locale: "hi" });
-
-      broadcastStatus(token, {
-        knowledgeStatus: "RESOLVED_SUCCESS",
-        executionState: "SUCCEEDED",
-        userMessage: msgEn,
-        userMessageHi: msgHi,
-      });
-
-      return res.status(200).json({
-        intentId,
-        intent_id: intentId,
-        knowledgeStatus: "RESOLVED_SUCCESS",
-        providerPaymentId: chargeResult.providerPaymentId,
-        userMessage: msgEn,
-        userMessageHi: msgHi,
-      });
-
-    }
-
-    if (chargeResult.status === "failed") {
-      await dbClient.batch(
-        [
-          {
-            sql: `UPDATE payment_intents SET status = 'FAILED', client_visible = 'FAILED', resolved_at_utc = ? WHERE id = ?`,
-            args: [nowIso, intentId],
-          },
-          {
-            sql: `UPDATE payment_attempts SET status = 'FAILED', provider_payment_id = ?, completed_at_utc = ? WHERE id = ?`,
-            args: [chargeResult.providerPaymentId, nowIso, attemptId],
-          },
-        ],
-        "write",
-      );
-
-      const msgEn = userFacingMessage({ visible: "FAILED", amountPaise: session.amount_paise, errorCode: chargeResult.errorCode, locale: "en" });
-      const msgHi = userFacingMessage({ visible: "FAILED", amountPaise: session.amount_paise, errorCode: chargeResult.errorCode, locale: "hi" });
-
-      broadcastStatus(token, {
-        knowledgeStatus: "RESOLVED_FAILED",
-        executionState: "FAILED",
-        errorCode: chargeResult.errorCode,
-        userMessage: msgEn,
-        userMessageHi: msgHi,
-        advisory: {
-          rootCause: chargeResult.errorDescription || "Card declined",
-          recommendedAction: "RECOVER_WHATSAPP",
-          recoveryProbability: 0.82,
-        },
-      });
-
-      return res.status(400).json({
-        intentId,
-        intent_id: intentId,
-        knowledgeStatus: "RESOLVED_FAILED",
-        errorCode: chargeResult.errorCode,
-        userMessage: msgEn,
-        userMessageHi: msgHi,
-      });
-
-    }
-
-    // Transport Dropped / Lost Response / Timeout -> Hold in UNRESOLVED_UNKNOWN
-    await dbClient.batch(
-      [
-        {
-          sql: `UPDATE payment_intents SET status = 'UNKNOWN', client_visible = 'UNKNOWN', resolved_at_utc = ? WHERE id = ?`,
-          args: [nowIso, intentId],
-        },
-        {
-          sql: `UPDATE payment_attempts SET status = 'UNKNOWN', provider_payment_id = ?, completed_at_utc = ? WHERE id = ?`,
-          args: [chargeResult.providerPaymentId, nowIso, attemptId],
-        },
-      ],
-      "write",
-    );
-
-    const msgEn = userFacingMessage({ visible: "UNKNOWN", amountPaise: session.amount_paise, locale: "en" });
-    const msgHi = userFacingMessage({ visible: "UNKNOWN", amountPaise: session.amount_paise, locale: "hi" });
-
-    broadcastStatus(token, {
-      knowledgeStatus: "UNRESOLVED_UNKNOWN",
-      executionState: "UNKNOWN",
-      userMessage: msgEn,
-      userMessageHi: msgHi,
-    });
-
-    // Schedule active reconciliation check after 2 seconds
-    setTimeout(() => {
-      reconcilePaymentIntent(dbClient, localGateway, intentId, Date.now()).then((rec) => {
-        if (rec.resolved) {
-          broadcastStatus(token, {
-            knowledgeStatus: rec.knowledgeStatus,
-            executionState: rec.knowledgeStatus === "RESOLVED_SUCCESS" ? "SUCCEEDED" : "FAILED",
-            userMessage: userFacingMessage({
-              visible: rec.knowledgeStatus === "RESOLVED_SUCCESS" ? "SUCCEEDED" : "FAILED",
-              amountPaise: session.amount_paise,
-            }),
-          });
-        }
-      }).catch(() => {});
-    }, 2000);
-
-    return res.status(202).json({
-      knowledgeStatus: "UNRESOLVED_UNKNOWN",
-      userMessage: msgEn,
-      userMessageHi: msgHi,
-    });
-  } catch (err) {
-    const errorMsg = (err as Error).message || "";
-    if (errorMsg.includes("UNIQUE") || errorMsg.includes("constraint") || errorMsg.includes("conflict")) {
+    // Fetch order details to get customer profile
+    let customerProfileId = "";
+    let productName = "";
+    if (RZP_KEY_ID && RZP_KEY_SECRET && !RZP_KEY_ID.includes("xxxxxx")) {
       try {
-        const clientIdemKey = req.body?.clientIdemKey || req.body?.idempotency_key;
-        if (clientIdemKey) {
-          const attemptRes = await dbClient.execute({
-            sql: `SELECT * FROM payment_attempts WHERE client_idem_key = ?`,
-            args: [clientIdemKey],
-          });
-          if (attemptRes.rows.length > 0) {
-            const prior = attemptRes.rows[0] as unknown as { payment_intent_id: string };
-            const piRes = await dbClient.execute({
-              sql: `SELECT * FROM payment_intents WHERE id = ?`,
-              args: [prior.payment_intent_id],
-            });
-            if (piRes.rows.length > 0) {
-              const pi = piRes.rows[0] as unknown as { status: string; client_visible: string; amount_paise: number };
-              return res.status(200).json({
-                idempotent: true,
-                intentId: prior.payment_intent_id,
-                intent_id: prior.payment_intent_id,
-                knowledgeStatus: pi.status === "SUCCEEDED" ? "RESOLVED_SUCCESS" : pi.status === "FAILED" ? "RESOLVED_FAILED" : "UNRESOLVED_UNKNOWN",
-                userMessage: userFacingMessage({ visible: (pi.client_visible || "SUCCEEDED") as any, amountPaise: pi.amount_paise || 199900 }),
-              });
-            }
-          }
+        const auth = Buffer.from(`${RZP_KEY_ID}:${RZP_KEY_SECRET}`).toString("base64");
+        const orderRes = await fetch(`https://api.razorpay.com/v1/orders/${razorpay_order_id}`, {
+          headers: { Authorization: `Basic ${auth}` },
+        });
+        if (orderRes.ok) {
+          const orderData = (await orderRes.json()) as any;
+          customerProfileId = orderData?.notes?.customer_profile_id || "";
+          productName = orderData?.notes?.product_name || "";
         }
       } catch {}
     }
+
+    if (!customerProfileId) {
+      return res.status(400).json({ error: "Could not identify customer" });
+    }
+
+    // Fetch payment details
+    let amountPaise = 0;
+    if (RZP_KEY_ID && RZP_KEY_SECRET && !RZP_KEY_ID.includes("xxxxxx")) {
+      try {
+        const auth = Buffer.from(`${RZP_KEY_ID}:${RZP_KEY_SECRET}`).toString("base64");
+        const payRes = await fetch(`https://api.razorpay.com/v1/payments/${razorpay_payment_id}`, {
+          headers: { Authorization: `Basic ${auth}` },
+        });
+        if (payRes.ok) {
+          const payData = (await payRes.json()) as any;
+          amountPaise = payData?.amount || 0;
+        }
+      } catch {}
+    }
+
+    // Record successful payment
+    const eventId = await recordSuccessfulPayment(dbClient, {
+      razorpayPaymentId: razorpay_payment_id,
+      razorpayOrderId: razorpay_order_id,
+      customerProfileId,
+      amountPaise,
+      productName,
+      nowMs: Date.now(),
+    });
+
+    // Broadcast to vendor dashboard
+    broadcastSSE("global", {
+      type: "PAYMENT_RECEIVED",
+      status: "captured",
+      eventId,
+      customerProfileId,
+      amountPaise,
+      productName,
+    });
+
+    res.json({ success: true, status: "captured", eventId });
+  } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }
 });
 
-
-// 5. Fast-ACK Webhook Ingestion Endpoint
-app.post("/api/webhooks/razorpay", webhookLimiter, async (req, res) => {
-  const signature = (req.headers["x-razorpay-signature"] as string) || null;
+// ── Razorpay Webhook (Authoritative) ─────────────────────────────
+app.post("/api/webhooks/razorpay", webhookLimiter, async (req: Request, res: Response) => {
   const rawBody = req.body as Buffer;
+  const signature = req.headers["x-razorpay-signature"] as string;
 
-  const result = await ingestDomainWebhook({
-    client: dbClient,
-    rawBody,
-    signature,
-    webhookSecret: WEBHOOK_SECRET || DEFAULT_LOCAL_WEBHOOK_SECRET,
-  });
+  // Webhook signature verification
+  if (WEBHOOK_SECRET) {
+    const expectedSig = createHmac("sha256", WEBHOOK_SECRET).update(rawBody).digest("hex");
+    if (!timingSafeEqual(Buffer.from(signature || ""), Buffer.from(expectedSig))) {
+      return res.status(400).json({ error: "Invalid signature" });
+    }
+  }
 
-  if (result.statusCode === 200) {
-    try {
-      const rawStr = Buffer.isBuffer(rawBody) ? rawBody.toString("utf8") : String(rawBody);
-      const parsed = JSON.parse(rawStr);
-      const pay = parsed.payload?.payment?.entity;
-      const orderId = pay?.order_id || parsed.payload?.order?.entity?.id;
-      const propId = pay?.notes?.proposal_id || pay?.notes?.proposalId;
+  try {
+    const event = JSON.parse(rawBody.toString("utf8"));
+    const eventType = event.event as string;
 
-      // Find matching session
-      let targetSession = propId ? recoverySessions.get(propId) : undefined;
-      if (!targetSession && orderId) {
-        for (const s of recoverySessions.values()) {
-          if (s.id === orderId || (s as any).orderId === orderId) {
-            targetSession = s;
-            break;
+    if (eventType === "payment.captured") {
+      const payment = event.payload?.payment?.entity;
+      if (payment?.id && payment?.order_id) {
+        // Fetch order to get customer profile
+        let customerProfileId = "";
+        let productName = "";
+        if (RZP_KEY_ID && RZP_KEY_SECRET && !RZP_KEY_ID.includes("xxxxxx")) {
+          try {
+            const auth = Buffer.from(`${RZP_KEY_ID}:${RZP_KEY_SECRET}`).toString("base64");
+            const orderRes = await fetch(`https://api.razorpay.com/v1/orders/${payment.order_id}`, {
+              headers: { Authorization: `Basic ${auth}` },
+            });
+            if (orderRes.ok) {
+              const orderData = (await orderRes.json()) as any;
+              customerProfileId = orderData?.notes?.customer_profile_id || "";
+              productName = orderData?.notes?.product_name || "";
+            }
+          } catch {}
+        }
+
+        if (customerProfileId) {
+          await recordSuccessfulPayment(dbClient, {
+            razorpayPaymentId: payment.id,
+            razorpayOrderId: payment.order_id,
+            customerProfileId,
+            amountPaise: payment.amount || 0,
+            productName,
+            nowMs: Date.now(),
+          });
+
+          broadcastSSE("global", {
+            type: "PAYMENT_RECEIVED",
+            status: "captured",
+            customerProfileId,
+            amountPaise: payment.amount,
+          });
+        }
+      }
+    }
+
+    if (eventType === "payment.failed") {
+      const payment = event.payload?.payment?.entity;
+      if (payment?.id && payment?.order_id) {
+        // Fetch order to get customer profile
+        let customerProfileId = "";
+        let productName = "";
+        if (RZP_KEY_ID && RZP_KEY_SECRET && !RZP_KEY_ID.includes("xxxxxx")) {
+          try {
+            const auth = Buffer.from(`${RZP_KEY_ID}:${RZP_KEY_SECRET}`).toString("base64");
+            const orderRes = await fetch(`https://api.razorpay.com/v1/orders/${payment.order_id}`, {
+              headers: { Authorization: `Basic ${auth}` },
+            });
+            if (orderRes.ok) {
+              const orderData = (await orderRes.json()) as any;
+              customerProfileId = orderData?.notes?.customer_profile_id || "";
+              productName = orderData?.notes?.product_name || "";
+            }
+          } catch {}
+        }
+
+        if (customerProfileId) {
+          const result = await processFailedPayment(dbClient, {
+            razorpayPaymentId: payment.id,
+            razorpayOrderId: payment.order_id,
+            amountPaise: payment.amount || 0,
+            failureCode: payment.error_code || "UNKNOWN",
+            failureDescription: payment.error_description || "",
+            failureStep: payment.error_step || "",
+            failureSource: payment.error_source || "",
+            failureReason: payment.error_reason || "",
+            customerProfileId,
+            productName,
+            nowMs: Date.now(),
+          }, outreachRouter);
+
+          // Broadcast to vendor dashboard
+          broadcastSSE("global", {
+            type: "PAYMENT_FAILED",
+            status: "failed",
+            eventId: result.eventId,
+            customerProfileId,
+            failureClass: result.failureClass,
+            probability: result.probability,
+            action: result.action,
+          });
+
+          if (result.isSuspicious) {
+            broadcastSSE("vendor:alerts", {
+              type: "SUSPICIOUS_ACTIVITY",
+              eventId: result.eventId,
+              customerProfileId,
+              reasons: result.suspicionReasons,
+              amountPaise: payment.amount,
+              failureCode: payment.error_code,
+            });
           }
         }
       }
+    }
 
-      if (targetSession) {
-        await completeRecovery(targetSession.id, dbClient);
-        broadcastStatus(targetSession.recoveryToken, {
-          type: "PAYMENT_RECOVERED",
-          proposalId: targetSession.id,
-          status: "SETTLED_RECOVERED",
-        });
-        broadcastStatus("global", {
-          type: "PAYMENT_RECOVERED",
-          proposalId: targetSession.id,
-          status: "SETTLED_RECOVERED",
-        });
-      }
-    } catch {}
+    res.json({ received: true });
+  } catch (err) {
+    console.error("Webhook processing error:", err);
+    res.status(200).json({ received: true }); // Always ACK webhooks
   }
-
-  return res.status(result.statusCode).json(result);
 });
 
-
-// 6. Live SSE Payment Status Endpoint
-app.get("/api/status/:token", async (req, res) => {
-  const { token } = req.params;
-  res.setHeader("Content-Type", "text/event-stream");
-  res.setHeader("Cache-Control", "no-cache");
-  res.setHeader("Connection", "keep-alive");
-
-  if (!sseClients.has(token)) {
-    sseClients.set(token, new Set());
-  }
-  const clientSet = sseClients.get(token)!;
-  if (clientSet.size >= MAX_SSE_CONNECTIONS_PER_TOKEN) {
-    return res.status(429).end("Too many status connections for this token");
-  }
-
-  const sseClient: SSEClient = { res, token, connectedAt: Date.now() };
-  clientSet.add(sseClient);
-
-  // Send initial heartbeat
-  res.write(`data: ${JSON.stringify({ type: "INIT", status: "CONNECTED" })}\n\n`);
-
-  // Heartbeat timer every 15s
-  const heartbeat = setInterval(() => {
-    res.write(`: heartbeat\n\n`);
-  }, 15000);
-
-  req.on("close", () => {
-    clearInterval(heartbeat);
-    clientSet.delete(sseClient);
-    if (clientSet.size === 0) sseClients.delete(token);
-  });
-});
-
-// 7. Merchant Console & Admin Data
-app.get("/dashboard", requireAdminAuth, (_req, res) => {
-  res.setHeader("Content-Type", "text/html");
-  res.send(dashboardHtml);
-});
-
-app.get("/api/admin/intents", adminLimiter, requireAdminAuth, async (_req, res) => {
+// ── Vendor Dashboard API ─────────────────────────────────────────
+app.get("/api/vendor/payments", async (_req: Request, res: Response) => {
   try {
-    const intents = await dbClient.execute(`SELECT * FROM payment_intents ORDER BY created_at_utc DESC LIMIT 50`);
-    const settlements = await dbClient.execute(`SELECT * FROM local_settlements ORDER BY settled_at_utc DESC LIMIT 50`);
-    const proposals = await dbClient.execute(`SELECT * FROM proposals ORDER BY id DESC LIMIT 50`);
-    const auditLog = await dbClient.execute(`SELECT * FROM audit_log ORDER BY ts_utc DESC LIMIT 50`);
+    const result = await dbClient.execute({
+      sql: `SELECT lpe.*, cp.name as customer_name, cp.phone as customer_phone, cp.email as customer_email
+            FROM live_payment_events lpe
+            JOIN customer_profiles cp ON cp.id = lpe.customer_profile_id
+            ORDER BY lpe.created_at_utc DESC LIMIT 50`,
+      args: [],
+    });
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
 
+app.get("/api/vendor/alerts", async (_req: Request, res: Response) => {
+  try {
+    const result = await dbClient.execute({
+      sql: `SELECT lpe.*, cp.name as customer_name, cp.phone as customer_phone, cp.email as customer_email
+            FROM live_payment_events lpe
+            JOIN customer_profiles cp ON cp.id = lpe.customer_profile_id
+            WHERE lpe.vendor_notified = 1 AND lpe.vendor_decision IS NULL
+            ORDER BY lpe.created_at_utc DESC`,
+      args: [],
+    });
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+app.get("/api/vendor/analytics", async (_req: Request, res: Response) => {
+  try {
+    const stats = await dbClient.execute({
+      sql: `SELECT
+              COUNT(*) as total_events,
+              SUM(CASE WHEN status = 'captured' THEN 1 ELSE 0 END) as total_successes,
+              SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as total_failures,
+              SUM(CASE WHEN status = 'captured' THEN amount_paise ELSE 0 END) as recovered_paise,
+              SUM(CASE WHEN status = 'failed' THEN amount_paise ELSE 0 END) as at_risk_paise,
+              SUM(CASE WHEN vendor_notified = 1 THEN 1 ELSE 0 END) as suspicious_count
+            FROM live_payment_events`,
+      args: [],
+    });
+    const row = stats.rows[0] as any;
     res.json({
-      intents: intents.rows,
-      settlements: settlements.rows,
-      proposals: proposals.rows,
-      auditLog: auditLog.rows,
+      totalEvents: Number(row?.total_events || 0),
+      totalSuccesses: Number(row?.total_successes || 0),
+      totalFailures: Number(row?.total_failures || 0),
+      recoveredPaise: Number(row?.recovered_paise || 0),
+      atRiskPaise: Number(row?.at_risk_paise || 0),
+      suspiciousCount: Number(row?.suspicious_count || 0),
+      successRate: row?.total_events > 0
+        ? ((Number(row.total_successes) / Number(row.total_events)) * 100).toFixed(1) + "%"
+        : "0.0%",
     });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }
 });
 
-app.post("/api/admin/reconcile", adminLimiter, requireAdminAuth, async (_req, res) => {
+app.post("/api/vendor/decision", async (req: Request, res: Response) => {
   try {
-    const count = await sweepStuckIntents(dbClient, localGateway, Date.now());
-    res.json({ success: true, resolvedCount: count });
+    const { eventId, decision } = req.body;
+    if (!eventId || !["approved", "rejected"].includes(decision)) {
+      return res.status(400).json({ error: "Invalid parameters" });
+    }
+
+    await dbClient.execute({
+      sql: "UPDATE live_payment_events SET vendor_decision = ? WHERE id = ?",
+      args: [decision, eventId],
+    });
+
+    // Update customer profile risk
+    const event = await dbClient.execute({
+      sql: "SELECT customer_profile_id FROM live_payment_events WHERE id = ?",
+      args: [eventId],
+    });
+    if (event.rows.length > 0) {
+      const cpId = String(event.rows[0].customer_profile_id);
+      await dbClient.execute({
+        sql: "UPDATE customer_profiles SET vendor_decision = ?, flagged_as_suspicious = 0 WHERE id = ?",
+        args: [decision, cpId],
+      });
+
+      // If approved, dispatch outreach
+      if (decision === "approved") {
+        const evt = await dbClient.execute({
+          sql: "SELECT * FROM live_payment_events WHERE id = ?",
+          args: [eventId],
+        });
+        if (evt.rows.length > 0) {
+          const row = evt.rows[0] as any;
+          const cust = await dbClient.execute({
+            sql: "SELECT * FROM customer_profiles WHERE id = ?",
+            args: [cpId],
+          });
+          if (cust.rows.length > 0) {
+            const c = cust.rows[0] as any;
+            const payload = {
+              proposalId: eventId,
+              failureClass: row.failure_class || "UNKNOWN",
+              action: row.ml_action || "RETRY_NOW",
+              recipient: { customerName: c.name, phone: c.phone, email: c.email },
+              amountPaise: row.amount_paise,
+              paymentLinkUrl: `${process.env.BASE_URL || `http://localhost:${PORT}`}/recover/${eventId}`,
+              language: "EN" as const,
+              rawErrorReason: row.failure_code || "",
+              instrumentDescription: row.failure_description || "",
+            };
+            try { await outreachRouter.dispatch("EMAIL", payload); } catch {}
+            try { await outreachRouter.dispatch("SMS", payload); } catch {}
+            await dbClient.execute({
+              sql: "UPDATE live_payment_events SET outreach_dispatched = 1 WHERE id = ?",
+              args: [eventId],
+            });
+          }
+        }
+      }
+    }
+
+    broadcastSSE("global", { type: "VENDOR_DECISION", eventId, decision });
+    res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }
 });
 
-// ── Startup & Periodic Sweeper ──────────────────────────────────────
+// ── SSE Endpoints ────────────────────────────────────────────────
+app.get("/api/sse/:channel", (req: Request, res: Response) => {
+  const { channel } = req.params;
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders();
+
+  const client: SSEClient = { res, id: randomBytes(8).toString("hex"), connectedAt: Date.now() };
+  if (!sseClients.has(channel)) sseClients.set(channel, new Set());
+  sseClients.get(channel)!.add(client);
+
+  res.write(`data: ${JSON.stringify({ type: "CONNECTED", channel })}\n\n`);
+  const heartbeat = setInterval(() => { res.write(": heartbeat\n\n"); }, 15000);
+  req.on("close", () => {
+    clearInterval(heartbeat);
+    sseClients.get(channel)?.delete(client);
+  });
+});
+
+// ── Scheduled Outreach Sweeper ───────────────────────────────────
+async function sweepScheduledOutreach() {
+  try {
+    const nowUtc = isoUtc(Date.now());
+    const due = await dbClient.execute({
+      sql: `SELECT so.*, cp.name, cp.phone, cp.email, lpe.failure_class, lpe.failure_code, lpe.amount_paise
+            FROM scheduled_outreach so
+            JOIN customer_profiles cp ON cp.id = so.customer_profile_id
+            JOIN live_payment_events lpe ON lpe.id = so.live_payment_event_id
+            WHERE so.executed = 0 AND so.scheduled_at_utc <= ?`,
+      args: [nowUtc],
+    });
+
+    for (const row of due.rows) {
+      const r = row as any;
+      const payload = {
+        proposalId: r.live_payment_event_id,
+        failureClass: r.failure_class || "UNKNOWN",
+        action: "REMINDER",
+        recipient: { customerName: r.name, phone: r.phone, email: r.email },
+        amountPaise: r.amount_paise,
+        paymentLinkUrl: `${process.env.BASE_URL || `http://localhost:${PORT}`}/recover/${r.live_payment_event_id}`,
+        language: "EN" as const,
+        rawErrorReason: r.failure_code || "",
+        instrumentDescription: "Payment reminder",
+      };
+
+      let status = "FAILED";
+      try {
+        if (r.channel === "EMAIL") {
+          await outreachRouter.dispatch("EMAIL", payload);
+        } else if (r.channel === "SMS") {
+          await outreachRouter.dispatch("SMS", payload);
+        }
+        status = "SENT";
+      } catch {}
+
+      await dbClient.execute({
+        sql: "UPDATE scheduled_outreach SET executed = 1, executed_at_utc = ?, status = ? WHERE id = ?",
+        args: [isoUtc(Date.now()), status, r.id],
+      });
+    }
+  } catch {}
+}
+
+// ── Startup ──────────────────────────────────────────────────────
 export async function startServer() {
   await runMigrations(dbClient);
   const server = app.listen(PORT, HOST, () => {
-    console.log(`\n======================================================`);
-    console.log(`  ARBITER Payment Sandbox & Recovery Engine`);
-    console.log(`  Running at: http://${HOST}:${PORT}`);
-    console.log(`  Default Mode: ${DEFAULT_MODE}`);
-    console.log(`  Merchant Console: http://${HOST}:${PORT}/dashboard`);
-    console.log(`======================================================\n`);
+    console.log(`\n  ARBITER Payment Server`);
+    console.log(`  Store:     http://${HOST}:${PORT}`);
+    console.log(`  Dashboard: http://${HOST}:${PORT}/dashboard`);
+    console.log(`  Mode:      ${RZP_KEY_ID ? "Razorpay Test Mode" : "Local Sandbox"}\n`);
   });
 
-  // Background Sweeper every 30 seconds
-  const sweeperInterval = setInterval(async () => {
-    try {
-      await sweepStuckIntents(dbClient, localGateway, Date.now());
-    } catch {}
-  }, 30000);
+  // Sweep scheduled outreach every 60 seconds
+  setInterval(sweepScheduledOutreach, 60_000);
 
-  return { app, server, sweeperInterval };
+  return { app, server };
 }
 
 if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split("/").pop() ?? "")) {
-  startServer().catch((err) => {
-    console.error("Server startup failed:", err);
-    process.exit(1);
-  });
+  startServer().catch((err) => { console.error("Startup failed:", err); process.exit(1); });
 }
