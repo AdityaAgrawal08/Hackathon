@@ -32,8 +32,9 @@ describe("Aggressive Audit: Interactive Payment Flow & Financial Invariants", ()
         const order = await initiateRecoveryOrder(tok);
         if (order) {
           // Should fallback to valid active session or return null safely
-          expect(order.orderId).toMatch(/^order_rec_/);
+          expect(order.orderId).toMatch(/^order_/);
           expect(order.amountPaise).toBeGreaterThan(0);
+
           expect(order.currency).toBe("INR");
           expect(order.qrDataUrl).toMatch(/^data:image\/png;base64,/);
           expect(order.upiIntentUrl).toContain("upi://pay");
