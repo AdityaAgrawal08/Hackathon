@@ -54,8 +54,9 @@ describe("Phase 3: Interactive Payment Flow Integration Tests", () => {
     expect(res.status).toBe(200);
     const data = await res.json();
 
-    expect(data.orderId).toMatch(/^order_rec_/);
+    expect(data.orderId).toMatch(/^order_/);
     expect(data.amountPaise).toBe(199900);
+
     expect(data.formattedAmount).toBe("₹1,999.00");
     expect(data.currency).toBe("INR");
     expect(data.keyId).toBeDefined();

@@ -390,6 +390,11 @@
           <label style="font-size: 0.8rem; color: #94a3b8;">Customer Phone:
             <input type="text" id="cust-phone" value="+91 99888 77665" style="background: #0f172a; color: #fff; border-color: #334155; margin-top: 0.25rem;">
           </label>
+          <label style="font-size: 0.8rem; color: #94a3b8;">Customer Email:
+            <input type="email" id="cust-email" value="aditya@example.com" placeholder="user@example.com" style="background: #0f172a; color: #fff; border-color: #334155; margin-top: 0.25rem;">
+          </label>
+        </div>
+        <div style="margin-top: 0.5rem;">
           <label style="font-size: 0.8rem; color: #94a3b8;">Instrument Desc:
             <input type="text" id="cust-instrument" value="ICICI Netbanking" style="background: #0f172a; color: #fff; border-color: #334155; margin-top: 0.25rem;">
           </label>
@@ -411,6 +416,7 @@
       const name = document.getElementById('cust-name').value;
       const amount = parseFloat(document.getElementById('cust-amount').value || '1999');
       const phone = document.getElementById('cust-phone').value;
+      const email = document.getElementById('cust-email').value;
       const instrument = document.getElementById('cust-instrument').value;
 
       document.getElementById('modal-custom').close();
@@ -423,6 +429,7 @@
             customPreset: {
               customerName: name,
               customerPhone: phone,
+              customerEmail: email,
               amountPaise: Math.round(amount * 100),
               failureCode: code,
               instrumentDesc: instrument,
@@ -433,6 +440,7 @@
         if (!res.ok) throw new Error('Custom triage failed');
         activeSession = await res.json();
         renderActiveSession(activeSession);
+
         await loadState();
       } catch (e) {
         alert('Failed to inject custom failure: ' + e.message);

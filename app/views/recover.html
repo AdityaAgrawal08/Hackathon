@@ -209,21 +209,25 @@
         order_id: data.orderId,
         prefill: {
           name: sessionData ? sessionData.customerName : "Customer",
-          contact: sessionData ? sessionData.customerPhone : "+919876543210"
+          contact: sessionData ? sessionData.customerPhone : "+919876543210",
+          email: sessionData && sessionData.customerEmail ? sessionData.customerEmail : undefined,
         },
         theme: { color: "#3b82f6" },
         handler: async function (response) {
-          // Settle on backend
+          // Settle on backend with cryptographic verification
           await fetch("/api/recovery/complete", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               proposalId: currentProposalId,
-              paymentId: response.razorpay_payment_id
+              razorpay_payment_id: response.razorpay_payment_id,
+              razorpay_order_id: response.razorpay_order_id,
+              razorpay_signature: response.razorpay_signature,
             })
           });
           showSuccess(response.razorpay_payment_id || "pay_rec_success");
         },
+
         modal: {
           ondismiss: function () {
             console.log("Checkout dismissed by user");

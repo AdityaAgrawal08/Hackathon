@@ -56,6 +56,7 @@ export interface SimulationPreset {
   name: string;
   customerName: string;
   customerPhone: string;
+  customerEmail?: string;
   amountPaise: number;
   failureCode: string;
   instrumentDesc: string;
@@ -64,6 +65,7 @@ export interface SimulationPreset {
   pastSuccesses: number;
   pastFailures: number;
 }
+
 
 export const PRESETS: Record<string, SimulationPreset> = {
   SALARY_DELAY: {
@@ -139,10 +141,12 @@ export interface RecoveryProposalSession {
   presetId: string;
   customerName: string;
   customerPhone: string;
+  customerEmail?: string;
   amountPaise: number;
   formattedAmount: string;
   failureCode: string;
   instrumentDesc: string;
+
   diagnosis: Diagnosis;
   features: ComputedFeatures;
   scoreResult: ScoreResult;
@@ -306,10 +310,12 @@ export async function simulateFailureTriage(
     presetId: preset.id,
     customerName: preset.customerName,
     customerPhone: preset.customerPhone,
+    customerEmail: preset.customerEmail,
     amountPaise: preset.amountPaise,
     formattedAmount: formatINR(paise(preset.amountPaise)),
     failureCode: preset.failureCode,
     instrumentDesc: preset.instrumentDesc,
+
     diagnosis,
     features,
     scoreResult,
@@ -349,8 +355,9 @@ export async function simulateFailureTriage(
       recipient: {
         customerName: preset.customerName,
         phone: preset.customerPhone,
-        email: `${preset.customerName.toLowerCase().replace(/[^a-z0-9]/g, "")}@example.com`,
+        email: preset.customerEmail || `${preset.customerName.toLowerCase().replace(/[^a-z0-9]/g, "")}@example.com`,
       },
+
       amountPaise: preset.amountPaise,
       paymentLinkUrl: recoveryUrl,
       language: "EN",
@@ -816,10 +823,44 @@ export async function initiateRecoveryOrder(
   if (!session) return null;
 
   const nowMs = Date.now();
-  const orderId = `order_rec_${nowMs}_${session.id.slice(-6)}`;
+  let orderId = `order_rec_${nowMs}_${session.id.slice(-6)}`;
   const amountRupees = (session.amountPaise / 100).toFixed(2);
   const upiVpa = "arbiter.recovery@hdfcbank";
   const upiIntentUrl = `upi://pay?pa=${upiVpa}&pn=ARBITER%20Recovery&am=${amountRupees}&tr=${session.id}&cu=INR&tn=Subscription%20Recovery`;
+
+  const keyId = process.env.RZP_TEST_KEY_ID || process.env.RZP_KEY_ID;
+  const keySecret = process.env.RZP_TEST_KEY_SECRET || process.env.RZP_KEY_SECRET;
+
+  if (keyId && keySecret && !keyId.includes("xxxxxx") && !keySecret.includes("xxxxxx")) {
+    try {
+      const auth = Buffer.from(`${keyId}:${keySecret}`).toString("base64");
+      const rzpRes = await fetch("https://api.razorpay.com/v1/orders", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Basic ${auth}`,
+        },
+        body: JSON.stringify({
+          amount: session.amountPaise,
+          currency: "INR",
+          receipt: `rcpt_rec_${session.id.slice(0, 12)}`,
+          notes: {
+            proposal_id: session.id,
+            recovery_token: session.recoveryToken,
+            channel: preferredMethod,
+          },
+        }),
+      });
+      if (rzpRes.ok) {
+        const rzpData = (await rzpRes.json()) as { id: string };
+        if (rzpData && rzpData.id) {
+          orderId = rzpData.id;
+        }
+      }
+    } catch (err) {
+      console.warn("Live Razorpay order creation failed, fallback to local:", err);
+    }
+  }
 
   // Generate dynamic QR Code Data URL
   let qrDataUrl = "";
@@ -875,12 +916,13 @@ export async function initiateRecoveryOrder(
     amountPaise: session.amountPaise,
     formattedAmount: session.formattedAmount,
     currency: "INR",
-    keyId: process.env.RZP_KEY_ID || "rzp_test_arbiter_mock",
+    keyId: keyId || "rzp_test_arbiter_mock",
     qrDataUrl,
     upiIntentUrl,
     deepLinks,
     idempotencyKey: idemKey,
   };
+
 }
 
 export async function recordPromiseToPay(
