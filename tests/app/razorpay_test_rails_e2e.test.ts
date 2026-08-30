@@ -132,15 +132,16 @@ describe("Phase 7: Razorpay Test Rails, Idempotency & Compliance Verification (T
     const chargeResponses = await Promise.all(chargePromises);
     // console.log("chargeResponses:", chargeResponses);
 
-    // Verify all 5 concurrent calls returned status 200 without double charges
-    for (const res of chargeResponses) {
-      if (res.status !== 200) {
-        console.error("Non-200 charge response:", res);
-      }
+    // Verify all 5 concurrent calls returned status 200 and mapped to the same payment intent ID
+    const intentIds = chargeResponses.map((res) => {
       expect(res.status).toBe(200);
-      expect(res.body.knowledgeStatus).toBe("RESOLVED_SUCCESS");
-    }
+      return res.body.intentId || res.body.intent_id;
+    });
+    const uniqueIntents = [...new Set(intentIds)];
+    expect(uniqueIntents.length).toBe(1);
+    expect(uniqueIntents[0]).toBeDefined();
   });
+
 
 
 
