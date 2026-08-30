@@ -401,8 +401,10 @@ app.get("/api/recovery/batch-proof", (_req, res) => {
     const result = runBatchBenchmark();
     res.json(result);
   } catch (err) {
+    console.error("Batch proof error:", err);
     res.status(500).json({ error: (err as Error).message });
   }
+
 });
 
 // E. Get current recovery state
