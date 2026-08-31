@@ -198,6 +198,11 @@ export async function processFailedPayment(
       joinedAtUtc: customer?.created_at_utc ?? nowUtc,
       channelResponsiveness: 0.85,
     },
+    // Payment method features (from Razorpay webhook)
+    paymentMethod: input.paymentMethod,
+    cardType: input.cardType,
+    cardEmi: input.cardEmi,
+    isInternational: input.isInternational,
   });
 
   // 4. Score with ML model

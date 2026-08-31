@@ -6,10 +6,10 @@ import {
   type FeatureInput,
 } from "../../packages/ml/src/features.js";
 
-describe("16-Dimensional ML Feature Vector Specification (Task 1.2)", () => {
-  it("defines exactly 16 features in FEATURE_NAMES", () => {
-    expect(FEATURE_NAMES.length).toBe(16);
-    expect(FEATURE_COUNT).toBe(16);
+describe("23-Dimensional ML Feature Vector Specification (Task 1.2)", () => {
+  it("defines exactly 23 features in FEATURE_NAMES", () => {
+    expect(FEATURE_NAMES.length).toBe(23);
+    expect(FEATURE_COUNT).toBe(23);
     expect(FEATURE_NAMES).toContain("days_since_last_attempt_norm");
     expect(FEATURE_NAMES).toContain("high_value_tier");
     expect(FEATURE_NAMES).toContain("bank_rail_health_norm");
@@ -31,7 +31,7 @@ describe("16-Dimensional ML Feature Vector Specification (Task 1.2)", () => {
     };
 
     const res = computeFeatures(input);
-    expect(res.values.length).toBe(16);
+    expect(res.values.length).toBe(23);
     expect(res.values.every((v) => Number.isFinite(v))).toBe(true);
 
     // Verify specific feature semantics
@@ -54,7 +54,7 @@ describe("16-Dimensional ML Feature Vector Specification (Task 1.2)", () => {
     };
 
     const res = computeFeatures(input);
-    expect(res.values.length).toBe(16);
+    expect(res.values.length).toBe(23);
     expect(res.values.every((v) => Number.isFinite(v))).toBe(true);
     expect(res.raw.failureClass).toBe("HARD_METHOD_DEAD");
 

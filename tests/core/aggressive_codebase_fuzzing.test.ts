@@ -57,8 +57,8 @@ describe("Aggressive Codebase Fuzzing & Invariant Audit", () => {
     });
   });
 
-  describe("Fuzzer 2: 16-Dimensional ML Feature Extraction & Scoring", () => {
-    it("guarantees 100% finite, leakage-free 16-D vectors under extreme values", () => {
+  describe("Fuzzer 2: 23-Dimensional ML Feature Extraction & Scoring", () => {
+    it("guarantees 100% finite, leakage-free 23-D vectors under extreme values", () => {
       const edgeCases = [
         // Case 1: 1 paise transaction with null customer
         {
@@ -101,8 +101,8 @@ describe("Aggressive Codebase Fuzzing & Invariant Audit", () => {
 
       for (const ec of edgeCases) {
         const feat = computeFeatures(ec);
-        expect(feat.values.length).toBe(16);
-        expect(FEATURE_NAMES.length).toBe(16);
+        expect(feat.values.length).toBe(23);
+        expect(FEATURE_NAMES.length).toBe(23);
 
         for (let i = 0; i < 16; i++) {
           const val = feat.values[i];
@@ -147,7 +147,7 @@ describe("Aggressive Codebase Fuzzing & Invariant Audit", () => {
 
     it("verifies mathematical attribution identity across 1,000 random vectors", () => {
       for (let trial = 0; trial < 1000; trial++) {
-        const randomValues = Array.from({ length: 16 }, () => (Math.random() - 0.5) * 10);
+        const randomValues = Array.from({ length: 23 }, () => (Math.random() - 0.5) * 10);
         const res = scoreWithArtifact(randomValues, DEFAULT_16D_MODEL);
 
         expect(res.probability).toBeGreaterThanOrEqual(0.0);
