@@ -601,6 +601,8 @@ app.post("/api/webhooks/razorpay", webhookLimiter, async (req: Request, res: Res
               paymentMethod: payment.method,
               cardLast4: card.last4,
               cardNetwork: card.network,
+              amountPaise: payment.amount,
+              productName: payment.productName || "",
             });
 
             if (result.isSuspicious) {
