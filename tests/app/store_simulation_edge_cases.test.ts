@@ -131,7 +131,7 @@ describe("Store & Payment Workflow Edge-Case Tests", () => {
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("Vendor Dashboard");
-    expect(html).toContain("Live Payment Feed");
+    expect(html).toContain("Transactions");
     expect(html).toContain("Suspicious Activity");
   });
 

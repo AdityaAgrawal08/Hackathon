@@ -7,121 +7,286 @@
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; }
-    .header { background: #1e293b; border-bottom: 1px solid #334155; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; }
-    .header h1 { font-size: 20px; font-weight: 600; }
-    .header .nav { display: flex; gap: 16px; }
-    .header .nav a { color: #94a3b8; text-decoration: none; font-size: 14px; }
-    .header .nav a:hover { color: #e2e8f0; }
-    .container { max-width: 1400px; margin: 0 auto; padding: 24px; }
-    .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 32px; }
-    .stat-card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 20px; }
-    .stat-label { font-size: 13px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+
+    /* Header */
+    .header { background: #1e293b; border-bottom: 1px solid #334155; padding: 14px 24px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 100; }
+    .header-left { display: flex; align-items: center; gap: 12px; }
+    .header h1 { font-size: 18px; font-weight: 600; letter-spacing: 0.5px; }
+    .header .live-badge { display: flex; align-items: center; gap: 6px; background: #052e16; border: 1px solid #14532d; padding: 4px 12px; border-radius: 20px; font-size: 12px; color: #86efac; }
+    .header .live-dot { width: 6px; height: 6px; background: #22c55e; border-radius: 50%; animation: pulse 2s infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+    .header-right { display: flex; align-items: center; gap: 12px; }
+    .header-right a { color: #94a3b8; text-decoration: none; font-size: 13px; padding: 6px 12px; border-radius: 6px; transition: all 0.2s; }
+    .header-right a:hover { color: #e2e8f0; background: #334155; }
+    .header-right a.active { color: #e2e8f0; background: #334155; }
+    .refresh-btn { background: none; border: 1px solid #334155; color: #94a3b8; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; transition: all 0.2s; }
+    .refresh-btn:hover { border-color: #3b82f6; color: #3b82f6; }
+
+    /* Main container */
+    .container { max-width: 1400px; margin: 0 auto; padding: 20px 24px; }
+
+    /* Stats row */
+    .stats-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+    .stat-card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 20px; position: relative; overflow: hidden; }
+    .stat-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; }
+    .stat-card.failed::before { background: #ef4444; }
+    .stat-card.success::before { background: #22c55e; }
+    .stat-card.lost::before { background: #f59e0b; }
+    .stat-card.recovered::before { background: #3b82f6; }
+    .stat-label { font-size: 12px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
     .stat-value { font-size: 28px; font-weight: 700; }
-    .stat-value.green { color: #22c55e; }
     .stat-value.red { color: #ef4444; }
+    .stat-value.green { color: #22c55e; }
+    .stat-value.yellow { color: #f59e0b; }
     .stat-value.blue { color: #3b82f6; }
-    .stat-value.yellow { color: #eab308; }
-    .stat-value.purple { color: #a855f7; }
-    .section { margin-bottom: 32px; }
-    .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
-    .section-title { font-size: 18px; font-weight: 600; }
-    .badge { padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: 500; }
-    .badge-count { background: #ef4444; color: white; }
-    .badge-live { background: #22c55e; color: white; animation: pulse 2s infinite; }
-    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
+    .stat-sub { font-size: 12px; color: #64748b; margin-top: 4px; }
+
+    /* Method cards */
+    .method-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 24px; }
+    .method-card { background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 14px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: all 0.2s; }
+    .method-card:hover { border-color: #3b82f6; }
+    .method-card.active { border-color: #3b82f6; background: #172554; }
+    .method-card .mc-icon { font-size: 24px; }
+    .method-card .mc-info { flex: 1; }
+    .method-card .mc-name { font-size: 13px; font-weight: 500; }
+    .method-card .mc-count { font-size: 20px; font-weight: 700; color: #e2e8f0; }
+    .method-card .mc-pct { font-size: 11px; color: #64748b; }
+
+    /* Alert banner */
+    .alert-banner { background: #450a0a; border: 1px solid #7f1d1d; border-radius: 10px; padding: 14px 20px; margin-bottom: 24px; display: none; }
+    .alert-banner.show { display: flex; align-items: center; justify-content: space-between; }
+    .alert-banner .alert-text { font-size: 14px; color: #fca5a5; }
+    .alert-banner .alert-text strong { color: #fbbf24; }
+    .alert-banner .alert-actions { display: flex; gap: 8px; }
+    .alert-banner .alert-btn { padding: 6px 14px; border-radius: 6px; border: none; font-size: 13px; font-weight: 500; cursor: pointer; }
+    .alert-banner .btn-view { background: #7f1d1d; color: #fca5a5; }
+    .alert-banner .btn-dismiss { background: transparent; color: #94a3b8; border: 1px solid #475569; }
+
+    /* Toolbar */
+    .toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+    .toolbar-left { display: flex; align-items: center; gap: 12px; }
+    .toolbar-title { font-size: 16px; font-weight: 600; }
+    .toolbar-right { display: flex; align-items: center; gap: 8px; }
+    .filter-select { background: #1e293b; color: #e2e8f0; border: 1px solid #334155; border-radius: 8px; padding: 8px 12px; font-size: 13px; cursor: pointer; }
+    .filter-select:focus { outline: none; border-color: #3b82f6; }
+    .export-btn { background: #1e293b; color: #94a3b8; border: 1px solid #334155; border-radius: 8px; padding: 8px 14px; font-size: 13px; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: all 0.2s; }
+    .export-btn:hover { border-color: #3b82f6; color: #3b82f6; }
+
+    /* Analysis button */
+    .analysis-btn { background: #2563eb; color: white; border: none; border-radius: 8px; padding: 8px 16px; font-size: 13px; font-weight: 500; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: all 0.2s; }
+    .analysis-btn:hover { background: #1d4ed8; }
+
+    /* Table */
     .table-container { background: #1e293b; border: 1px solid #334155; border-radius: 12px; overflow: hidden; }
     table { width: 100%; border-collapse: collapse; }
-    th { background: #0f172a; padding: 12px 16px; text-align: left; font-size: 13px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid #334155; }
+    th { background: #0f172a; padding: 12px 16px; text-align: left; font-size: 12px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid #334155; white-space: nowrap; }
     td { padding: 12px 16px; border-bottom: 1px solid #1e293b; font-size: 14px; }
-    tr:hover { background: #334155; }
-    .status { padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 500; }
+    tr:hover { background: rgba(51, 65, 85, 0.3); }
+    tr:last-child td { border-bottom: none; }
+
+    /* Status badges */
+    .status { padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 500; white-space: nowrap; }
     .status-captured { background: #052e16; color: #86efac; }
     .status-failed { background: #450a0a; color: #fca5a5; }
     .status-pending { background: #422006; color: #fde047; }
-    .action-btn { padding: 8px 16px; border: none; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer; }
-    .btn-approve { background: #16a34a; color: white; }
-    .btn-approve:hover { background: #15803d; }
-    .btn-reject { background: #dc2626; color: white; }
-    .btn-reject:hover { background: #b91c1c; }
-    .btn-disabled { background: #475569; color: #94a3b8; cursor: not-allowed; }
-    .alert-card { background: #1e293b; border: 1px solid #ef4444; border-radius: 12px; padding: 20px; margin-bottom: 16px; }
-    .alert-card .alert-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
-    .alert-card .alert-title { font-weight: 600; color: #fca5a5; }
-    .alert-card .alert-reasons { font-size: 13px; color: #94a3b8; margin-bottom: 12px; }
-    .alert-card .alert-actions { display: flex; gap: 8px; }
-    .empty-state { text-align: center; padding: 40px; color: #64748b; }
-    .live-dot { width: 8px; height: 8px; background: #22c55e; border-radius: 50%; display: inline-block; margin-right: 8px; animation: pulse 2s infinite; }
-    .filter-row { display: flex; gap: 10px; align-items: center; margin-bottom: 16px; }
-    .filter-row select { background: #1e293b; color: #e2e8f0; border: 1px solid #334155; border-radius: 8px; padding: 8px 12px; font-size: 13px; cursor: pointer; }
-    .filter-row select:focus { outline: none; border-color: #3b82f6; }
-    .method-pill { display: inline-flex; align-items: center; gap: 6px; background: #0f172a; border: 1px solid #334155; border-radius: 6px; padding: 4px 10px; font-size: 13px; white-space: nowrap; }
-    .method-icon { font-size: 14px; }
-    .method-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-top: 12px; }
-    .method-card { background: #0f172a; border: 1px solid #334155; border-radius: 10px; padding: 16px; text-align: center; }
-    .method-card .mc-icon { font-size: 28px; margin-bottom: 6px; }
-    .method-card .mc-label { font-size: 12px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; }
-    .method-card .mc-value { font-size: 22px; font-weight: 700; margin-top: 4px; }
+
+    /* Method pill */
+    .method-pill { display: inline-flex; align-items: center; gap: 5px; background: #0f172a; border: 1px solid #334155; border-radius: 6px; padding: 3px 8px; font-size: 12px; white-space: nowrap; }
+
+    /* Failure reason text */
+    .failure-reason { font-size: 12px; color: #94a3b8; max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .failure-reason:hover { color: #e2e8f0; white-space: normal; }
+
+    /* Action badge */
+    .action-badge { font-size: 11px; padding: 3px 8px; border-radius: 4px; background: #1e3a5f; color: #60a5fa; white-space: nowrap; }
+
+    /* Empty state */
+    .empty-state { text-align: center; padding: 60px 20px; color: #64748b; }
+    .empty-state .empty-icon { font-size: 48px; margin-bottom: 12px; }
+    .empty-state p { font-size: 14px; }
+
+    /* Toast notification */
+    .toast-container { position: fixed; top: 70px; right: 24px; z-index: 200; display: flex; flex-direction: column; gap: 8px; }
+    .toast { background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 12px 16px; font-size: 13px; display: flex; align-items: center; gap: 10px; animation: slideIn 0.3s ease; box-shadow: 0 8px 32px rgba(0,0,0,0.3); }
+    .toast.success { border-color: #14532d; }
+    .toast.error { border-color: #7f1d1d; }
+    @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+    /* Analysis modal */
+    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 300; display: none; align-items: center; justify-content: center; }
+    .modal-overlay.show { display: flex; }
+    .modal { background: #1e293b; border: 1px solid #334155; border-radius: 16px; width: 90%; max-width: 640px; max-height: 80vh; overflow-y: auto; }
+    .modal-header { padding: 20px 24px; border-bottom: 1px solid #334155; display: flex; align-items: center; justify-content: space-between; }
+    .modal-header h2 { font-size: 18px; font-weight: 600; }
+    .modal-close { background: none; border: none; color: #94a3b8; font-size: 20px; cursor: pointer; padding: 4px 8px; border-radius: 6px; }
+    .modal-close:hover { background: #334155; color: #e2e8f0; }
+    .modal-body { padding: 20px 24px; }
+    .analysis-item { padding: 16px; border: 1px solid #334155; border-radius: 10px; margin-bottom: 12px; }
+    .analysis-item:last-child { margin-bottom: 0; }
+    .analysis-rank { font-size: 11px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+    .analysis-reason { font-size: 15px; font-weight: 500; color: #e2e8f0; margin-bottom: 4px; }
+    .analysis-code { font-size: 12px; color: #64748b; font-family: monospace; margin-bottom: 8px; }
+    .analysis-meta { display: flex; gap: 16px; font-size: 13px; }
+    .analysis-meta .count { color: #ef4444; }
+    .analysis-meta .amount { color: #f59e0b; }
+    .analysis-meta .pct { color: #94a3b8; }
+    .analysis-action { margin-top: 10px; padding: 10px 14px; background: #0f172a; border-radius: 8px; font-size: 13px; color: #86efac; border: 1px solid #14532d; }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      .stats-row { grid-template-columns: repeat(2, 1fr); }
+      .method-row { grid-template-columns: repeat(2, 1fr); }
+      .toolbar { flex-direction: column; gap: 12px; align-items: flex-start; }
+      .container { padding: 16px; }
+    }
   </style>
 </head>
 <body>
+  <!-- Header -->
   <div class="header">
-    <h1>ARBITER — Vendor Dashboard</h1>
-    <div class="nav">
+    <div class="header-left">
+      <h1>ARBITER</h1>
+      <div class="live-badge"><span class="live-dot"></span> Live</div>
+    </div>
+    <div class="header-right">
       <a href="/store">Store</a>
-      <a href="/dashboard">Dashboard</a>
+      <a href="/dashboard" class="active">Dashboard</a>
+      <button class="refresh-btn" onclick="refreshAll()">↻ Refresh</button>
     </div>
   </div>
+
   <div class="container">
-    <div class="stats" id="stats"></div>
-    <div class="section" id="method-section">
-      <div class="section-title" style="margin-bottom:8px;">Payment Methods</div>
-      <div class="method-grid" id="method-grid"></div>
+    <!-- Stats Row -->
+    <div class="stats-row" id="stats-row"></div>
+
+    <!-- Payment Method Cards -->
+    <div class="method-row" id="method-row"></div>
+
+    <!-- Suspicious Activity Banner -->
+    <div class="alert-banner" id="alert-banner">
+      <div class="alert-text" id="alert-text"></div>
+      <div class="alert-actions">
+        <button class="alert-btn btn-view" onclick="showAlerts()">Review</button>
+        <button class="alert-btn btn-dismiss" onclick="dismissAlert()">Dismiss</button>
+      </div>
     </div>
 
-    <div class="section" id="alerts-section" style="display:none;">
-      <div class="section-header">
-        <span class="section-title">Suspicious Activity</span>
-        <span class="badge badge-count" id="alert-count">0</span>
+    <!-- Toolbar -->
+    <div class="toolbar">
+      <div class="toolbar-left">
+        <span class="toolbar-title">Transactions</span>
+        <select class="filter-select" id="status-filter" onchange="applyFilters()">
+          <option value="all">All Status</option>
+          <option value="failed">Failed Only</option>
+          <option value="captured">Successful Only</option>
+        </select>
+        <select class="filter-select" id="method-filter" onchange="applyFilters()">
+          <option value="all">All Methods</option>
+          <option value="card">Card</option>
+          <option value="upi">UPI</option>
+          <option value="netbanking">Netbanking</option>
+          <option value="wallet">Wallet</option>
+        </select>
       </div>
-      <div id="alerts-container"></div>
+      <div class="toolbar-right">
+        <button class="analysis-btn" onclick="showAnalysis()">📊 Why Payments Fail</button>
+        <button class="export-btn" onclick="exportCSV()">↓ Export CSV</button>
+      </div>
     </div>
 
-    <div class="section">
-      <div class="section-header">
-        <span class="section-title"><span class="live-dot"></span> Live Payment Feed</span>
-        <div style="display:flex;align-items:center;gap:12px;">
-          <select id="method-filter" onchange="filterPayments()">
-            <option value="all">All Methods</option>
-            <option value="card">Card</option>
-            <option value="upi">UPI</option>
-            <option value="netbanking">Netbanking</option>
-            <option value="wallet">Wallet</option>
-          </select>
-          <span class="badge badge-live">LIVE</span>
-        </div>
+    <!-- Table -->
+    <div class="table-container">
+      <table>
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Customer</th>
+            <th>Product</th>
+            <th>Amount</th>
+            <th>Method</th>
+            <th>Status</th>
+            <th>What Happened</th>
+            <th>AI Action</th>
+          </tr>
+        </thead>
+        <tbody id="payments-body"></tbody>
+      </table>
+      <div class="empty-state" id="no-payments">
+        <div class="empty-icon">📭</div>
+        <p>No transactions yet. Waiting for payments...</p>
       </div>
-      <div class="table-container">
-        <table>
-          <thead>
-            <tr>
-              <th>Time</th>
-              <th>Customer</th>
-              <th>Product</th>
-              <th>Amount</th>
-              <th>Payment Method</th>
-              <th>Status</th>
-              <th>Failure Class</th>
-              <th>ML Probability</th>
-            </tr>
-          </thead>
-          <tbody id="payments-body"></tbody>
-        </table>
-        <div class="empty-state" id="no-payments">No payment events yet. Waiting for transactions...</div>
+    </div>
+  </div>
+
+  <!-- Toast Container -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <!-- Analysis Modal -->
+  <div class="modal-overlay" id="analysis-modal">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>Why Payments Are Failing</h2>
+        <button class="modal-close" onclick="closeAnalysis()">✕</button>
       </div>
+      <div class="modal-body" id="analysis-body">
+        <p style="color:#64748b">Loading analysis...</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Alerts Modal -->
+  <div class="modal-overlay" id="alerts-modal">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>Suspicious Transactions</h2>
+        <button class="modal-close" onclick="closeAlerts()">✕</button>
+      </div>
+      <div class="modal-body" id="alerts-body"></div>
     </div>
   </div>
 
   <script>
+    const METHOD_META = {
+      card:       { icon: '💳', label: 'Card' },
+      upi:        { icon: '📱', label: 'UPI' },
+      netbanking: { icon: '🏦', label: 'Netbanking' },
+      wallet:     { icon: '👛', label: 'Wallet' },
+    };
+
+    const FAILURE_REASONS = {
+      INSUFFICIENT_FUNDS: "Insufficient funds in account",
+      BAD_REQUEST_PAYMENT_ACCOUNT_INSUFFICIENT_BALANCE: "Insufficient balance",
+      CARD_EXPIRED: "Card has expired",
+      BAD_REQUEST_PAYMENT_CARD_EXPIRED: "Card expired",
+      BAD_REQUEST_PAYMENT_CARD_INVALID: "Invalid card details",
+      GATEWAY_TIMEOUT: "Bank server timeout",
+      ISSUER_TIMEOUT: "Bank didn't respond in time",
+      NETWORK_TIMEOUT: "Network connection issue",
+      BAD_REQUEST_PAYMENT_UPI_COLLECT_EXPIRED: "UPI request expired",
+      BAD_REQUEST_PAYMENT_OTP_VALIDATION_FAILED: "Wrong OTP entered",
+      SUSPECTED_FRAUD: "Flagged as suspicious",
+      RISK_BLOCKED: "Blocked by security",
+      MANDATE_REVOKED: "Auto-pay cancelled",
+      BAD_REQUEST_PAYMENT_MANDATE_REVOKED: "Auto-pay cancelled",
+      BANK_DOWNTIME_NETWORK_ERROR: "Bank is currently down",
+      GATEWAY_ERROR: "Payment gateway error",
+      BAD_REQUEST_PAYMENT_TIMED_OUT: "Payment timed out",
+    };
+
+    const ACTION_LABELS = {
+      RETRY_NOW: "⚡ Retry Now",
+      RETRY_PAYDAY: "📅 Remind on Payday",
+      ALTERNATE_UPI_LINK: "🔗 Send UPI Link",
+      PARTIAL_COLLECT: "💰 Partial Collect",
+      RECOVER_VIA_RAIL: "🏦 Rail Recovery",
+      RECOVER_VOICE_HI: "📞 Voice Call",
+      RECOVER_WHATSAPP: "💬 WhatsApp",
+      PROMISE_TO_PAY: "🤝 Promise to Pay",
+      REMINDER_LINK: "📧 Reminder Link",
+      HUMAN_REVIEW: "👁 Needs Review",
+      NO_ACTION: "⏸ No Action",
+    };
+
     function formatINR(paise) {
       return '₹' + (paise / 100).toLocaleString('en-IN');
     }
@@ -129,59 +294,124 @@
     function formatTime(iso) {
       if (!iso) return '—';
       const d = new Date(iso);
-      return d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      const now = new Date();
+      const isToday = d.toDateString() === now.toDateString();
+      if (isToday) return d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+      return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) + ' ' + d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
     }
 
-    const METHOD_META = {
-      card:       { icon: '💳', label: 'Card' },
-      upi:        { icon: '📱', label: 'UPI' },
-      netbanking: { icon: '🏦', label: 'Netbanking' },
-      wallet:     { icon: '👛', label: 'Wallet' },
-    };
-    function formatMethod(p) {
+    function getMethodHTML(p) {
       const raw = (p.payment_method || '').toLowerCase();
       if (raw === 'card') {
         const net = p.card_network || '';
         const last4 = p.card_last4 || '';
-        return `<span class="method-pill"><span class="method-icon">💳</span>${net ? net + ' ' : ''}${last4 ? '****' + last4 : ''}</span>`;
+        const type = p.card_type ? ` ${p.card_type}` : '';
+        return `<span class="method-pill">💳 ${net}${type} ${last4 ? '****' + last4 : ''}</span>`;
+      }
+      if (raw === 'upi') {
+        const vpa = p.vpa || '';
+        return `<span class="method-pill">📱 UPI${vpa ? ' ' + vpa : ''}</span>`;
+      }
+      if (raw === 'netbanking') {
+        const bank = p.bank_code || '';
+        return `<span class="method-pill">🏦 Netbanking${bank ? ' ' + bank : ''}</span>`;
       }
       if (METHOD_META[raw]) {
-        const m = METHOD_META[raw];
-        return `<span class="method-pill"><span class="method-icon">${m.icon}</span>${m.label}</span>`;
+        return `<span class="method-pill">${METHOD_META[raw].icon} ${METHOD_META[raw].label}</span>`;
       }
       return '<span class="method-pill" style="color:#64748b">—</span>';
     }
 
+    function getFailureReason(p) {
+      if (p.status === 'captured') return '<span style="color:#86efac">Payment received ✓</span>';
+      const code = (p.failure_code || '').toUpperCase();
+      const reason = FAILURE_REASONS[code];
+      if (reason) return reason;
+      if (p.failure_description) return p.failure_description.substring(0, 50);
+      return 'Payment failed';
+    }
+
+    function getActionBadge(p) {
+      if (p.status === 'captured') return '';
+      const action = ACTION_LABELS[p.ml_action];
+      if (action) return `<span class="action-badge">${action}</span>`;
+      return p.ml_action ? `<span class="action-badge">${p.ml_action}</span>` : '';
+    }
+
     let allPayments = [];
+    let activeMethodFilter = 'all';
 
     async function loadAnalytics() {
       try {
         const res = await fetch('/api/vendor/analytics');
         const data = await res.json();
-        document.getElementById('stats').innerHTML = `
-          <div class="stat-card"><div class="stat-label">Total Events</div><div class="stat-value blue">${data.totalEvents}</div></div>
-          <div class="stat-card"><div class="stat-label">Successful</div><div class="stat-value green">${data.totalSuccesses}</div></div>
-          <div class="stat-card"><div class="stat-label">Failed</div><div class="stat-value red">${data.totalFailures}</div></div>
-          <div class="stat-card"><div class="stat-label">Recovered</div><div class="stat-value green">${formatINR(data.recoveredPaise)}</div></div>
-          <div class="stat-card"><div class="stat-label">At Risk</div><div class="stat-value yellow">${formatINR(data.atRiskPaise)}</div></div>
-          <div class="stat-card"><div class="stat-label">Suspicious</div><div class="stat-value red">${data.suspiciousCount}</div></div>
+
+        const failed = data.totalFailures || 0;
+        const success = data.totalSuccesses || 0;
+        const netLost = (data.atRiskPaise || 0) - (data.recoveredPaise || 0);
+
+        document.getElementById('stats-row').innerHTML = `
+          <div class="stat-card failed">
+            <div class="stat-label">Failed Payments</div>
+            <div class="stat-value red">${failed}</div>
+            <div class="stat-sub">transactions</div>
+          </div>
+          <div class="stat-card success">
+            <div class="stat-label">Successful</div>
+            <div class="stat-value green">${success}</div>
+            <div class="stat-sub">transactions</div>
+          </div>
+          <div class="stat-card lost">
+            <div class="stat-label">Net Revenue Lost</div>
+            <div class="stat-value yellow">${formatINR(Math.max(0, netLost))}</div>
+            <div class="stat-sub">lost − recovered</div>
+          </div>
+          <div class="stat-card recovered">
+            <div class="stat-label">Recovered</div>
+            <div class="stat-value blue">${formatINR(data.recoveredPaise || 0)}</div>
+            <div class="stat-sub">via ARBITER</div>
+          </div>
         `;
+
         const total = data.totalEvents || 1;
-        document.getElementById('method-grid').innerHTML = `
-          <div class="method-card"><div class="mc-icon">💳</div><div class="mc-label">Card</div><div class="mc-value blue">${data.methodCard}</div><div class="mc-label" style="margin-top:2px;">${((data.methodCard/total)*100).toFixed(0)}%</div></div>
-          <div class="method-card"><div class="mc-icon">📱</div><div class="mc-label">UPI</div><div class="mc-value green">${data.methodUpi}</div><div class="mc-label" style="margin-top:2px;">${((data.methodUpi/total)*100).toFixed(0)}%</div></div>
-          <div class="method-card"><div class="mc-icon">🏦</div><div class="mc-label">Netbanking</div><div class="mc-value yellow">${data.methodNetbanking}</div><div class="mc-label" style="margin-top:2px;">${((data.methodNetbanking/total)*100).toFixed(0)}%</div></div>
-          <div class="method-card"><div class="mc-icon">👛</div><div class="mc-label">Wallet</div><div class="mc-value purple">${data.methodWallet}</div><div class="mc-label" style="margin-top:2px;">${((data.methodWallet/total)*100).toFixed(0)}%</div></div>
+        document.getElementById('method-row').innerHTML = `
+          <div class="method-card ${activeMethodFilter === 'all' ? 'active' : ''}" onclick="filterByMethod('all')">
+            <div class="mc-icon">📊</div>
+            <div class="mc-info"><div class="mc-name">All</div><div class="mc-count">${total}</div></div>
+          </div>
+          <div class="method-card ${activeMethodFilter === 'card' ? 'active' : ''}" onclick="filterByMethod('card')">
+            <div class="mc-icon">💳</div>
+            <div class="mc-info"><div class="mc-name">Card</div><div class="mc-count">${data.methodCard}</div><div class="mc-pct">${((data.methodCard/total)*100).toFixed(0)}%</div></div>
+          </div>
+          <div class="method-card ${activeMethodFilter === 'upi' ? 'active' : ''}" onclick="filterByMethod('upi')">
+            <div class="mc-icon">📱</div>
+            <div class="mc-info"><div class="mc-name">UPI</div><div class="mc-count">${data.methodUpi}</div><div class="mc-pct">${((data.methodUpi/total)*100).toFixed(0)}%</div></div>
+          </div>
+          <div class="method-card ${activeMethodFilter === 'netbanking' ? 'active' : ''}" onclick="filterByMethod('netbanking')">
+            <div class="mc-icon">🏦</div>
+            <div class="mc-info"><div class="mc-name">Netbanking</div><div class="mc-count">${data.methodNetbanking}</div><div class="mc-pct">${((data.methodNetbanking/total)*100).toFixed(0)}%</div></div>
+          </div>
         `;
       } catch (e) {
-        document.getElementById('stats').innerHTML = '<div class="stat-card"><div class="stat-label">Error</div><div class="stat-value red">Unable to load analytics</div></div>';
+        document.getElementById('stats-row').innerHTML = '<div class="stat-card"><div class="stat-label">Error</div><div class="stat-value red">Unable to load</div></div>';
       }
     }
 
-    function filterPayments() {
-      const filter = document.getElementById('method-filter').value;
-      const tbody = document.getElementById('payments-body');
-      const filtered = filter === 'all' ? allPayments : allPayments.filter(p => (p.payment_method || '').toLowerCase() === filter);
+    function filterByMethod(method) {
+      activeMethodFilter = method;
+      document.getElementById('method-filter').value = method;
+      loadAnalytics();
+      applyFilters();
+    }
+
+    function applyFilters() {
+      const statusFilter = document.getElementById('status-filter').value;
+      const methodFilter = document.getElementById('method-filter').value || activeMethodFilter;
+
+      let filtered = allPayments;
+      if (statusFilter !== 'all') filtered = filtered.filter(p => p.status === statusFilter);
+      if (methodFilter !== 'all') filtered = filtered.filter(p => (p.payment_method || '').toLowerCase() === methodFilter);
+
       renderPayments(filtered);
     }
 
@@ -195,11 +425,11 @@
           <td>${formatTime(p.created_at_utc)}</td>
           <td>${p.customer_name || '—'}</td>
           <td>${p.product_name || '—'}</td>
-          <td>${formatINR(p.amount_paise)}</td>
-          <td>${formatMethod(p)}</td>
-          <td><span class="status status-${p.status}">${p.status}</span></td>
-          <td>${p.failure_class || '—'}</td>
-          <td>${p.ml_probability ? (p.ml_probability * 100).toFixed(1) + '%' : '—'}</td>
+          <td><strong>${formatINR(p.amount_paise)}</strong></td>
+          <td>${getMethodHTML(p)}</td>
+          <td><span class="status status-${p.status}">${p.status === 'captured' ? '✓ Paid' : p.status === 'failed' ? '✗ Failed' : p.status}</span></td>
+          <td><div class="failure-reason">${getFailureReason(p)}</div></td>
+          <td>${getActionBadge(p)}</td>
         </tr>
       `).join('');
     }
@@ -208,10 +438,10 @@
       try {
         const res = await fetch('/api/vendor/payments');
         allPayments = await res.json();
-        filterPayments();
+        applyFilters();
       } catch (e) {
         document.getElementById('no-payments').style.display = 'block';
-        document.getElementById('no-payments').textContent = 'Unable to load payment data';
+        document.getElementById('no-payments').innerHTML = '<div class="empty-icon">⚠️</div><p>Unable to load payment data</p>';
       }
     }
 
@@ -219,35 +449,44 @@
       try {
         const res = await fetch('/api/vendor/alerts');
         const data = await res.json();
-        const container = document.getElementById('alerts-container');
-        const section = document.getElementById('alerts-section');
-        const countBadge = document.getElementById('alert-count');
+        const banner = document.getElementById('alert-banner');
+        const text = document.getElementById('alert-text');
 
-        if (data.length === 0) { section.style.display = 'none'; return; }
-        section.style.display = 'block';
-        countBadge.textContent = data.length;
+        if (data.length > 0) {
+          banner.classList.add('show');
+          text.innerHTML = `<strong>${data.length}</strong> suspicious transaction${data.length > 1 ? 's' : ''} need${data.length === 1 ? 's' : ''} your review`;
+          window._alerts = data;
+        } else {
+          banner.classList.remove('show');
+        }
+      } catch (e) {}
+    }
 
-        container.innerHTML = data.map(p => `
-          <div class="alert-card" id="alert-${p.id}">
-            <div class="alert-header">
-              <span class="alert-title">Suspicious Payment — ${p.customer_name}</span>
-              <span>${formatTime(p.created_at_utc)}</span>
+    function showAlerts() {
+      const data = window._alerts || [];
+      const body = document.getElementById('alerts-body');
+      if (data.length === 0) { body.innerHTML = '<p style="color:#64748b">No suspicious transactions</p>'; }
+      else {
+        body.innerHTML = data.map(p => `
+          <div class="analysis-item">
+            <div class="analysis-reason">Suspicious Transaction — ${p.customer_name || 'Unknown'}</div>
+            <div class="analysis-code">${p.failure_code || 'Unknown code'}</div>
+            <div class="analysis-meta">
+              <span class="amount">${formatINR(p.amount_paise)}</span>
+              <span class="pct">${formatTime(p.created_at_utc)}</span>
             </div>
-            <div class="alert-reasons">
-              <strong>Amount:</strong> ${formatINR(p.amount_paise)} | <strong>Failure:</strong> ${p.failure_code || 'Unknown'}
-              <br><strong>Reasons:</strong> First transaction, high amount, or Razorpay risk flag
-            </div>
-            <div class="alert-actions">
-              <button class="action-btn btn-approve" onclick="decide('${p.id}', 'approved')">Approve & Send Recovery</button>
-              <button class="action-btn btn-reject" onclick="decide('${p.id}', 'rejected')">Reject</button>
+            <div style="display:flex;gap:8px;margin-top:12px;">
+              <button class="alert-btn btn-view" style="background:#14532d;color:#86efac" onclick="decide('${p.id}','approved')">✓ Approve & Recover</button>
+              <button class="alert-btn btn-dismiss" style="border:1px solid #7f1d1d;color:#fca5a5" onclick="decide('${p.id}','rejected')">✕ Reject</button>
             </div>
           </div>
         `).join('');
-      } catch (e) {
-        document.getElementById('alerts-section').style.display = 'block';
-        document.getElementById('alerts-container').innerHTML = '<p style="color:#94a3b8">Unable to load alerts</p>';
       }
+      document.getElementById('alerts-modal').classList.add('show');
     }
+
+    function closeAlerts() { document.getElementById('alerts-modal').classList.remove('show'); }
+    function dismissAlert() { document.getElementById('alert-banner').classList.remove('show'); }
 
     async function decide(eventId, decision) {
       try {
@@ -256,13 +495,80 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ eventId, decision }),
         });
-        document.getElementById(`alert-${eventId}`)?.remove();
-        loadAlerts();
-        loadAnalytics();
-        loadPayments();
+        showToast(decision === 'approved' ? '✓ Transaction approved' : '✕ Transaction rejected', decision === 'approved' ? 'success' : 'error');
+        closeAlerts();
+        refreshAll();
       } catch (e) {
-        console.error('Decision failed:', e);
+        showToast('Decision failed', 'error');
       }
+    }
+
+    async function showAnalysis() {
+      document.getElementById('analysis-modal').classList.add('show');
+      document.getElementById('analysis-body').innerHTML = '<p style="color:#64748b">Loading analysis...</p>';
+      try {
+        const res = await fetch('/api/vendor/failure-analysis');
+        const data = await res.json();
+        if (!data.analysis || data.analysis.length === 0) {
+          document.getElementById('analysis-body').innerHTML = '<p style="color:#64748b">No failed payments to analyze yet.</p>';
+          return;
+        }
+        document.getElementById('analysis-body').innerHTML = data.analysis.map((item, i) => `
+          <div class="analysis-item">
+            <div class="analysis-rank">#${i + 1} Most Common Reason</div>
+            <div class="analysis-reason">${item.humanReason}</div>
+            <div class="analysis-code">${item.code}</div>
+            <div class="analysis-meta">
+              <span class="count">${item.count} transaction${item.count > 1 ? 's' : ''}</span>
+              <span class="amount">${formatINR(item.totalAmountPaise)} affected</span>
+              <span class="pct">${item.percentage}% of failures</span>
+            </div>
+            <div class="analysis-action">💡 ${item.recommendedAction}</div>
+          </div>
+        `).join('');
+      } catch (e) {
+        document.getElementById('analysis-body').innerHTML = '<p style="color:#fca5a5">Failed to load analysis</p>';
+      }
+    }
+
+    function closeAnalysis() { document.getElementById('analysis-modal').classList.remove('show'); }
+
+    function exportCSV() {
+      if (allPayments.length === 0) { showToast('No data to export', 'error'); return; }
+      const headers = ['Time','Customer','Product','Amount','Method','Status','Reason','Action'];
+      const rows = allPayments.map(p => [
+        p.created_at_utc || '',
+        p.customer_name || '',
+        p.product_name || '',
+        (p.amount_paise / 100).toFixed(2),
+        p.payment_method || '',
+        p.status || '',
+        FAILURE_REASONS[(p.failure_code || '').toUpperCase()] || p.failure_description || p.failure_code || '',
+        p.ml_action || '',
+      ]);
+      const csv = [headers, ...rows].map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `arbiter-transactions-${new Date().toISOString().slice(0,10)}.csv`;
+      a.click();
+      showToast('CSV exported', 'success');
+    }
+
+    function showToast(message, type) {
+      const container = document.getElementById('toast-container');
+      const toast = document.createElement('div');
+      toast.className = `toast ${type}`;
+      toast.innerHTML = `<span>${type === 'success' ? '✓' : '⚠'}</span> ${message}`;
+      container.appendChild(toast);
+      setTimeout(() => toast.remove(), 3000);
+    }
+
+    function refreshAll() {
+      loadAnalytics();
+      loadPayments();
+      loadAlerts();
+      showToast('Dashboard refreshed', 'success');
     }
 
     // SSE for real-time updates
@@ -270,15 +576,27 @@
       const evtSource = new EventSource('/api/sse/global');
       evtSource.onmessage = function(event) {
         const data = JSON.parse(event.data);
-        if (data.type === 'PAYMENT_FAILED' || data.type === 'PAYMENT_RECEIVED' || data.type === 'VENDOR_DECISION') {
-          loadPayments();
-          loadAnalytics();
-          loadAlerts();
+        if (data.type === 'PAYMENT_FAILED') {
+          showToast(`Payment failed: ${data.customerProfileId ? 'Customer payment' : 'New event'}`, 'error');
+          refreshAll();
+        } else if (data.type === 'PAYMENT_RECEIVED') {
+          showToast('Payment received!', 'success');
+          refreshAll();
         }
       };
       evtSource.onerror = function() { setTimeout(connectSSE, 5000); };
     }
 
+    // Close modals on escape
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape') { closeAnalysis(); closeAlerts(); }
+    });
+    // Close modals on overlay click
+    document.querySelectorAll('.modal-overlay').forEach(el => {
+      el.addEventListener('click', e => { if (e.target === el) el.classList.remove('show'); });
+    });
+
+    // Initial load
     loadAnalytics();
     loadPayments();
     loadAlerts();
