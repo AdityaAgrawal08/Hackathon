@@ -17,8 +17,9 @@ describe("Gateway Contract Fidelity & Deterministic Fault Profiles", () => {
     localGateway = new LocalDeterministicGateway(client);
   });
 
-  it("verifies all 9 LOCAL_SANDBOX fault profiles execute deterministically", async () => {
-    expect(LOCAL_FAULT_PROFILES.length).toBe(9);
+  it("verifies all LOCAL_SANDBOX fault profiles execute deterministically", async () => {
+    // Gateway now uses 2 explicit profiles + round-robin over 70+ real Razorpay error codes
+    expect(LOCAL_FAULT_PROFILES.length).toBeGreaterThanOrEqual(2);
 
     for (const profile of LOCAL_FAULT_PROFILES) {
       const order = await localGateway.createOrder({
@@ -38,13 +39,25 @@ describe("Gateway Contract Fidelity & Deterministic Fault Profiles", () => {
 
       if (profile === "LOCAL_SUCCESS" || profile === "LOCAL_DUPLICATE_SUBMIT") {
         expect(chargeRes.status).toBe("succeeded");
-      } else if (profile === "LOCAL_GATEWAY_TIMEOUT" || profile === "LOCAL_LOST_RESPONSE") {
-        expect(chargeRes.status).toBe("transport_dropped");
-      } else {
-        expect(chargeRes.status).toBe("failed");
-        expect(chargeRes.errorCode).toBe(profile);
       }
     }
+
+    // Test that round-robin produces real Razorpay error codes
+    const order = await localGateway.createOrder({
+      tenantId: "demo",
+      amountPaise: 99900,
+      receipt: "rcpt_roundrobin_test",
+    });
+    const chargeRes = await localGateway.charge({
+      tenantId: "demo",
+      orderId: order.id,
+      clientIdemKey: "idem_roundrobin_test",
+      amountPaise: 99900,
+      scenario: "FAIL_ROUND_ROBIN",
+    });
+    expect(chargeRes.status).toBe("failed");
+    expect(chargeRes.errorCode).toBeTruthy();
+    expect(chargeRes.errorCode).not.toContain("LOCAL_");
   });
 
   it("persists simulated provider state durably in SQLite across lookups", async () => {

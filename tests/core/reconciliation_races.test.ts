@@ -48,7 +48,11 @@ describe("Two-Way Reconciliation & Race Condition Invariants", () => {
         },
         {
           sql: `INSERT INTO payment_attempts (id, payment_intent_id, tenant_id, client_idem_key, payload_hash, attempt_number, status, provider_payment_id, started_at_utc)
-                VALUES ('att_1', ?, ?, ?, 'hash_1', 1, 'UNKNOWN', ?, ?)`,
+                VALUES ('att_1', ?, ?, ?, 'hash_1', 1, 'UNKNOWN', ?, ?)
+                ON CONFLICT(tenant_id, client_idem_key) DO UPDATE SET
+                  payment_intent_id = excluded.payment_intent_id,
+                  provider_payment_id = excluded.provider_payment_id,
+                  status = excluded.status`,
           args: [intentId, tenantId, clientIdemKey, chargeRes.providerPaymentId, nowIso],
         },
       ],

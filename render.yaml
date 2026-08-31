@@ -1,0 +1,42 @@
+services:
+  - type: web
+    name: arbiter
+    runtime: node
+    plan: free
+    buildCommand: npm install -g pnpm && pnpm install && pnpm db:migrate
+    startCommand: pnpm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      - key: RZP_TEST_KEY_ID
+        sync: false
+      - key: RZP_TEST_KEY_SECRET
+        sync: false
+      - key: RZP_WEBHOOK_SECRET
+        sync: false
+      - key: BREVO_API_KEY
+        sync: false
+      - key: BREVO_SENDER_EMAIL
+        value: magicalfootball2005@gmail.com
+      - key: BREVO_SENDER_NAME
+        value: ARBITER Recovery
+      - key: MSG91_AUTH_KEY
+        sync: false
+      - key: MSG91_SENDER_ID
+        value: ARBITR
+      - key: MSG91_DLT_TEMPLATE_ID
+        value: "1407168923450011"
+      - key: ARBITER_DB_PATH
+        sync: false
+      - key: ARBITER_DB_TOKEN
+        sync: false
+      - key: ARBITER_POLICY_PATH
+        value: config/policy.yaml
+      - key: ADMIN_SECRET_KEY
+        sync: false
+      - key: ENFORCE_ADMIN_KEY
+        value: "false"
+      - key: PAYMENT_MODE
+        value: REAL_SANDBOX

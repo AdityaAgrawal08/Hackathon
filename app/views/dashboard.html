@@ -162,6 +162,15 @@
     <!-- Payment Method Cards -->
     <div class="method-row" id="method-row"></div>
 
+    <!-- Customer Details (shows when a customer row is clicked) -->
+    <div id="customer-details" style="display:none;background:#1e293b;border:1px solid #334155;border-radius:12px;padding:20px;margin-bottom:24px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+        <h3 style="font-size:16px;font-weight:600;">Customer Details</h3>
+        <button class="modal-close" onclick="document.getElementById('customer-details').style.display='none'">✕</button>
+      </div>
+      <div id="customer-details-content" style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;"></div>
+    </div>
+
     <!-- Suspicious Activity Banner -->
     <div class="alert-banner" id="alert-banner">
       <div class="alert-text" id="alert-text"></div>
@@ -171,49 +180,67 @@
       </div>
     </div>
 
-    <!-- Toolbar -->
-    <div class="toolbar">
-      <div class="toolbar-left">
-        <span class="toolbar-title">Transactions</span>
-        <select class="filter-select" id="status-filter" onchange="applyFilters()">
-          <option value="all">All Status</option>
-          <option value="failed">Failed Only</option>
-          <option value="captured">Successful Only</option>
-        </select>
-        <select class="filter-select" id="method-filter" onchange="applyFilters()">
-          <option value="all">All Methods</option>
-          <option value="card">Card</option>
-          <option value="upi">UPI</option>
-          <option value="netbanking">Netbanking</option>
-          <option value="wallet">Wallet</option>
-        </select>
+    <!-- Failed Transactions Table -->
+    <div style="margin-bottom:24px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+        <h2 style="font-size:18px;font-weight:600;color:#ef4444;">Failed Transactions <span id="failed-count" style="font-size:14px;color:#64748b;font-weight:400;"></span></h2>
+        <div style="display:flex;gap:8px;">
+          <select class="filter-select" id="method-filter" onchange="applyFilters()">
+            <option value="all">All Methods</option>
+            <option value="card">Card</option>
+            <option value="upi">UPI</option>
+            <option value="netbanking">Netbanking</option>
+          </select>
+          <button class="analysis-btn" onclick="showAnalysis()">Why Payments Fail</button>
+          <button class="export-btn" onclick="exportCSV()">↓ Export</button>
+        </div>
       </div>
-      <div class="toolbar-right">
-        <button class="analysis-btn" onclick="showAnalysis()">📊 Why Payments Fail</button>
-        <button class="export-btn" onclick="exportCSV()">↓ Export CSV</button>
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Customer</th>
+              <th>Product</th>
+              <th>Amount</th>
+              <th>Method</th>
+              <th>What Happened</th>
+              <th>Retries</th>
+              <th>AI Action</th>
+            </tr>
+          </thead>
+          <tbody id="failed-body"></tbody>
+        </table>
+        <div class="empty-state" id="no-failed" style="display:none;">
+          <div class="empty-icon">✓</div>
+          <p>No failed payments — all clear!</p>
+        </div>
       </div>
     </div>
 
-    <!-- Table -->
-    <div class="table-container">
-      <table>
-        <thead>
-          <tr>
-            <th>Time</th>
-            <th>Customer</th>
-            <th>Product</th>
-            <th>Amount</th>
-            <th>Method</th>
-            <th>Status</th>
-            <th>What Happened</th>
-            <th>AI Action</th>
-          </tr>
-        </thead>
-        <tbody id="payments-body"></tbody>
-      </table>
-      <div class="empty-state" id="no-payments">
-        <div class="empty-icon">📭</div>
-        <p>No transactions yet. Waiting for payments...</p>
+    <!-- Successful Transactions Table -->
+    <div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+        <h2 style="font-size:18px;font-weight:600;color:#22c55e;">Successful Transactions <span id="success-count" style="font-size:14px;color:#64748b;font-weight:400;"></span></h2>
+      </div>
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Customer</th>
+              <th>Product</th>
+              <th>Amount</th>
+              <th>Method</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="success-body"></tbody>
+        </table>
+        <div class="empty-state" id="no-success" style="display:none;">
+          <div class="empty-icon">📭</div>
+          <p>No successful transactions yet.</p>
+        </div>
       </div>
     </div>
   </div>
@@ -253,24 +280,93 @@
       wallet:     { icon: '👛', label: 'Wallet' },
     };
 
+    // Full Razorpay error catalog — simplified vendor messages (never raw codes)
     const FAILURE_REASONS = {
-      INSUFFICIENT_FUNDS: "Insufficient funds in account",
-      BAD_REQUEST_PAYMENT_ACCOUNT_INSUFFICIENT_BALANCE: "Insufficient balance",
-      CARD_EXPIRED: "Card has expired",
-      BAD_REQUEST_PAYMENT_CARD_EXPIRED: "Card expired",
-      BAD_REQUEST_PAYMENT_CARD_INVALID: "Invalid card details",
-      GATEWAY_TIMEOUT: "Bank server timeout",
-      ISSUER_TIMEOUT: "Bank didn't respond in time",
-      NETWORK_TIMEOUT: "Network connection issue",
-      BAD_REQUEST_PAYMENT_UPI_COLLECT_EXPIRED: "UPI request expired",
-      BAD_REQUEST_PAYMENT_OTP_VALIDATION_FAILED: "Wrong OTP entered",
-      SUSPECTED_FRAUD: "Flagged as suspicious",
-      RISK_BLOCKED: "Blocked by security",
-      MANDATE_REVOKED: "Auto-pay cancelled",
-      BAD_REQUEST_PAYMENT_MANDATE_REVOKED: "Auto-pay cancelled",
-      BANK_DOWNTIME_NETWORK_ERROR: "Bank is currently down",
-      GATEWAY_ERROR: "Payment gateway error",
-      BAD_REQUEST_PAYMENT_TIMED_OUT: "Payment timed out",
+      // Card
+      insufficient_funds: "Insufficient funds — customer needs to add money",
+      card_expired: "Card expired — customer must use a different card",
+      card_declined: "Bank declined the card — customer should contact bank",
+      card_not_enrolled: "Card not enabled for online transactions",
+      card_disabled_for_online_payments: "Card disabled for online payments",
+      debit_instrument_inactive: "Card is inactive or frozen",
+      debit_instrument_blocked: "Card is blocked by bank or customer",
+      incorrect_cvv: "Customer entered wrong CVV",
+      authentication_failed: "Customer entered wrong OTP or verification details",
+      incorrect_otp: "Customer entered incorrect OTP",
+      incorrect_pin: "Customer entered incorrect PIN",
+      incorrect_card_details: "Customer entered incorrect card details",
+      incorrect_card_expiry_date: "Customer entered wrong expiry date",
+      incorrect_cardholder_name: "Customer entered wrong cardholder name",
+      card_number_invalid: "Invalid card number entered",
+      transaction_limit_exceeded: "Customer exceeded daily transaction limit",
+      transaction_daily_limit_exceeded: "Customer exceeded daily transaction limit",
+      transaction_daily_count_exceeded: "Customer exceeded max daily transactions",
+      otp_attempts_exceeded: "Too many wrong OTPs — card temporarily blocked",
+      pin_attempts_exceeded: "Too many wrong PINs — card temporarily blocked",
+      card_type_invalid: "Unsupported card type for this transaction",
+      card_network_not_enabled: "Card network not supported by merchant",
+      // UPI
+      invalid_vpa: "Customer entered invalid or unregistered UPI ID",
+      vpa_resolution_failed: "UPI network failed to verify the UPI ID (NPCI issue)",
+      payment_collect_request_expired: "Customer didn't complete UPI payment in time",
+      credit_failed: "Bank rejected the credit — possible account mismatch",
+      upi_app_technical_error: "Technical error at customer's UPI app",
+      psp_not_available: "UPI app is currently down",
+      psp_app_not_supported: "Customer's UPI app is not supported",
+      pin_not_set: "Customer hasn't set UPI PIN yet",
+      bank_account_invalid: "Customer's bank account is invalid or closed",
+      // Bank / Gateway
+      bank_technical_error: "Bank server experiencing technical issues",
+      gateway_technical_error: "Payment gateway or partner bank technical error",
+      payment_timed_out: "Payment timed out — customer took too long",
+      payment_cancelled: "Customer cancelled the transaction",
+      payment_declined: "Bank or gateway declined the payment",
+      payment_failed: "Payment failed at bank or gateway (no specific reason)",
+      payment_pending: "Payment pending at bank — may become authorized later",
+      payment_session_expired: "Payment session expired due to inactivity",
+      payment_declined_due_to_high_traffic: "Bank overloaded — high traffic period",
+      // Risk / Security
+      payment_risk_check_failed: "Bank flagged transaction as fraudulent",
+      compliance_violation: "Compliance violation — customer or merchant level",
+      // Netbanking
+      user_not_registered_for_netbanking: "Customer's account not registered for netbanking",
+      bank_not_available: "Bank is down for maintenance or technical issues",
+      // Server / Infrastructure
+      server_error: "Technical error at Razorpay's server",
+      gateway_error: "Error at payment gateway or downstream bank",
+      service_unavailable: "Payment service temporarily unavailable",
+      request_timed_out: "Request timed out — possible network latency",
+      // Amount / Order
+      order_already_paid: "Order already paid — duplicate attempt",
+      order_amount_mismatch: "Payment amount doesn't match order",
+      invalid_amount: "Invalid payment amount",
+      amount_less_than_minimum_amount: "Amount is less than minimum allowed",
+      payment_amount_tampered: "Payment amount was tampered with",
+      // Mandate / Autopay
+      mandate_creation_declined: "Automatic payment setup was declined",
+      mandate_creation_expired: "Mandate creation request expired",
+      mandate_creation_timeout: "Mandate creation timed out",
+      funds_blocked_by_mandate: "Funds blocked by existing mandate",
+      // EMI / Credit
+      credit_limit_exceeded: "Customer exceeded credit limit (EMI)",
+      credit_limit_expired: "Customer's credit limit expired (EMI)",
+      credit_limit_inactive: "Customer's credit limit inactive (EMI)",
+      user_not_eligible: "Customer not eligible for credit payment",
+      emi_plan_unavailable: "Selected EMI plan no longer available",
+      // Misc
+      duplicate_request: "Duplicate payment request",
+      invalid_order_id: "Invalid or missing order ID",
+      input_validation_failed: "Invalid payment request parameters",
+      payment_method_not_enabled: "Payment method not enabled for this merchant",
+      international_transaction_not_allowed: "International cards not accepted",
+      verification_failed: "Payment verification failed — temporary error",
+      bank_cutoff_in_progress: "Bank's daily settlement in progress",
+      deemed_transaction: "Payment status unknown — will resolve within 24 hours",
+      transaction_on_vpa_restricted: "Transactions on this UPI ID are restricted",
+      merchant_not_activated: "Merchant not activated with gateway",
+      collect_on_mcc_blocked: "UPI collect not allowed for this payment type",
+      mcc_amount_limit_exceeded: "Amount exceeds UPI collect limit for this category",
+      transaction_frequency_limit_exceeded: "Customer exceeded UPI daily limit",
     };
 
     const ACTION_LABELS = {
@@ -324,18 +420,88 @@
 
     function getFailureReason(p) {
       if (p.status === 'captured') return '<span style="color:#86efac">Payment received ✓</span>';
-      const code = (p.failure_code || '').toUpperCase();
+      const code = (p.failure_code || '').toLowerCase();
       const reason = FAILURE_REASONS[code];
       if (reason) return reason;
-      if (p.failure_description) return p.failure_description.substring(0, 50);
+      if (p.failure_description) return escapeHtml(p.failure_description.substring(0, 80));
       return 'Payment failed';
     }
 
     function getActionBadge(p) {
       if (p.status === 'captured') return '';
+      // AI Action: if suspicious → Needs Review; otherwise → show outreach timing
+      if (p.vendor_decision === 'approved') return '<span class="action-badge" style="background:#052e16;color:#86efac">✓ Approved</span>';
+      if (p.vendor_decision === 'rejected') return '<span class="action-badge" style="background:#450a0a;color:#fca5a5">✕ Rejected</span>';
+      if (p.is_suspicious || (p.ml_action && p.ml_action.includes('HUMAN'))) {
+        return '<span class="action-badge" style="background:#7f1d1d;color:#fca5a5;cursor:pointer" onclick="showAlerts()">👁 Needs Review</span>';
+      }
       const action = ACTION_LABELS[p.ml_action];
       if (action) return `<span class="action-badge">${action}</span>`;
-      return p.ml_action ? `<span class="action-badge">${p.ml_action}</span>` : '';
+      // Default: show outreach timing based on failure class
+      if (p.failure_class === 'SOFT_RETRYABLE') return '<span class="action-badge">⏰ Retry in 2hrs</span>';
+      if (p.failure_class === 'NETWORK_TIMEOUT') return '<span class="action-badge">⏳ Auto-retry soon</span>';
+      if (p.failure_class === 'HARD_METHOD_DEAD') return '<span class="action-badge">🔄 Use different method</span>';
+      return '<span class="action-badge">📧 Email sent</span>';
+    }
+
+    function showCustomerDetails(p) {
+      const el = document.getElementById('customer-details');
+      const content = document.getElementById('customer-details-content');
+      const method = p.payment_method || '—';
+      const methodDetail = p.payment_method === 'card' ? `${p.card_network || ''} ${p.card_type || ''} ****${p.card_last4 || ''}` :
+                          p.payment_method === 'upi' ? (p.vpa || '—') :
+                          p.payment_method === 'netbanking' ? (p.bank_code || '—') : '—';
+      content.innerHTML = `
+        <div><div style="font-size:11px;color:#64748b;text-transform:uppercase;">Name</div><div style="font-size:14px;color:#e2e8f0;font-weight:500;">${escapeHtml(p.customer_name || '—')}</div></div>
+        <div><div style="font-size:11px;color:#64748b;text-transform:uppercase;">Phone</div><div style="font-size:14px;color:#e2e8f0;font-weight:500;">${escapeHtml(p.customer_phone || p.razorpay_contact || '—')}</div></div>
+        <div><div style="font-size:11px;color:#64748b;text-transform:uppercase;">Email</div><div style="font-size:14px;color:#e2e8f0;font-weight:500;">${escapeHtml(p.customer_email || p.razorpay_email || '—')}</div></div>
+        <div><div style="font-size:11px;color:#64748b;text-transform:uppercase;">Payment Method</div><div style="font-size:14px;color:#e2e8f0;font-weight:500;">${escapeHtml(methodDetail)}</div></div>
+        <div><div style="font-size:11px;color:#64748b;text-transform:uppercase;">Total Attempts</div><div style="font-size:14px;color:#e2e8f0;font-weight:500;">${p.total_attempts || 0}</div></div>
+        <div><div style="font-size:11px;color:#64748b;text-transform:uppercase;">Successes</div><div style="font-size:14px;color:#86efac;font-weight:500;">${p.total_successes || 0}</div></div>
+        <div><div style="font-size:11px;color:#64748b;text-transform:uppercase;">Failures</div><div style="font-size:14px;color:#fca5a5;font-weight:500;">${p.total_failures || 0}</div></div>
+        <div><div style="font-size:11px;color:#64748b;text-transform:uppercase;">Success Rate</div><div style="font-size:14px;color:#e2e8f0;font-weight:500;">${(p.total_attempts || 0) > 0 ? (((p.total_successes || 0) / (p.total_attempts || 1)) * 100).toFixed(0) : 0}%</div></div>
+      `;
+      el.style.display = 'block';
+    }
+
+    function renderFailed(data) {
+      const tbody = document.getElementById('failed-body');
+      const empty = document.getElementById('no-failed');
+      const countEl = document.getElementById('failed-count');
+      countEl.textContent = `(${data.length})`;
+      if (data.length === 0) { tbody.innerHTML = ''; empty.style.display = 'block'; return; }
+      empty.style.display = 'none';
+      tbody.innerHTML = data.map(p => `
+        <tr style="cursor:pointer" onclick='showCustomerDetails(${JSON.stringify(p).replace(/'/g, "&#39;")})'>
+          <td>${formatTime(p.created_at_utc)}</td>
+          <td>${escapeHtml(p.customer_name || '—')}</td>
+          <td>${escapeHtml(p.product_name || '—')}</td>
+          <td><strong>${formatINR(p.amount_paise)}</strong></td>
+          <td>${getMethodHTML(p)}</td>
+          <td><div class="failure-reason">${getFailureReason(p)}</div></td>
+          <td>${(p.retry_count || 0) > 0 ? '<span style="color:#f59e0b">#' + (p.retry_count + 1) + '</span>' : '#1'}</td>
+          <td>${getActionBadge(p)}</td>
+        </tr>
+      `).join('');
+    }
+
+    function renderSuccess(data) {
+      const tbody = document.getElementById('success-body');
+      const empty = document.getElementById('no-success');
+      const countEl = document.getElementById('success-count');
+      countEl.textContent = `(${data.length})`;
+      if (data.length === 0) { tbody.innerHTML = ''; empty.style.display = 'block'; return; }
+      empty.style.display = 'none';
+      tbody.innerHTML = data.map(p => `
+        <tr>
+          <td>${formatTime(p.created_at_utc)}</td>
+          <td>${escapeHtml(p.customer_name || '—')}</td>
+          <td>${escapeHtml(p.product_name || '—')}</td>
+          <td><strong>${formatINR(p.amount_paise)}</strong></td>
+          <td>${getMethodHTML(p)}</td>
+          <td><span class="status status-captured">✓ Paid</span></td>
+        </tr>
+      `).join('');
     }
 
     let allPayments = [];
@@ -405,33 +571,14 @@
     }
 
     function applyFilters() {
-      const statusFilter = document.getElementById('status-filter').value;
       const methodFilter = document.getElementById('method-filter').value || activeMethodFilter;
-
       let filtered = allPayments;
-      if (statusFilter !== 'all') filtered = filtered.filter(p => p.status === statusFilter);
       if (methodFilter !== 'all') filtered = filtered.filter(p => (p.payment_method || '').toLowerCase() === methodFilter);
 
-      renderPayments(filtered);
-    }
-
-    function renderPayments(data) {
-      const tbody = document.getElementById('payments-body');
-      const noPayments = document.getElementById('no-payments');
-      if (data.length === 0) { tbody.innerHTML = ''; noPayments.style.display = 'block'; return; }
-      noPayments.style.display = 'none';
-      tbody.innerHTML = data.map(p => `
-        <tr>
-          <td>${formatTime(p.created_at_utc)}</td>
-          <td>${p.customer_name || '—'}</td>
-          <td>${p.product_name || '—'}</td>
-          <td><strong>${formatINR(p.amount_paise)}</strong></td>
-          <td>${getMethodHTML(p)}</td>
-          <td><span class="status status-${p.status}">${p.status === 'captured' ? '✓ Paid' : p.status === 'failed' ? '✗ Failed' : p.status}</span></td>
-          <td><div class="failure-reason">${getFailureReason(p)}</div></td>
-          <td>${getActionBadge(p)}</td>
-        </tr>
-      `).join('');
+      const failed = filtered.filter(p => p.status === 'failed');
+      const success = filtered.filter(p => p.status === 'captured');
+      renderFailed(failed);
+      renderSuccess(success);
     }
 
     async function loadPayments() {
@@ -440,8 +587,7 @@
         allPayments = await res.json();
         applyFilters();
       } catch (e) {
-        document.getElementById('no-payments').style.display = 'block';
-        document.getElementById('no-payments').innerHTML = '<div class="empty-icon">⚠️</div><p>Unable to load payment data</p>';
+        document.getElementById('no-failed').style.display = 'block';
       }
     }
 
