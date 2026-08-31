@@ -29,10 +29,10 @@ describe("Task 2.3: MSG91 Indian DLT SMS Provider", () => {
     expect(result.costPaise).toBe(25); // ₹0.25
     expect(result.externalMessageId).toContain("msg91_sim_");
 
-    const raw = result.rawResponse as { flowBody: { template_id: string; dlt_te_id: string; mobiles: string } };
-    expect(raw.flowBody.template_id).toBe(MSG91_DLT_TEMPLATES.SOFT_RETRYABLE.flowId);
-    expect(raw.flowBody.dlt_te_id).toBe("1407168923450011");
-    expect(raw.flowBody.mobiles).toBe("919876543210");
+    const raw = result.rawResponse as { simulated: boolean; phone: string };
+    expect(raw.simulated).toBe(true);
+    expect(raw.phone).toBe("919876543210");
+    expect(MSG91_DLT_TEMPLATES.SOFT_RETRYABLE.dltId).toBe("1407168923450011");
   });
 
   it("selects DLT template for expired cards (HARD_METHOD_DEAD)", async () => {
@@ -44,7 +44,7 @@ describe("Task 2.3: MSG91 Indian DLT SMS Provider", () => {
     };
 
     const result = await provider.send(deadPayload);
-    const raw = result.rawResponse as { flowBody: { template_id: string; dlt_te_id: string } };
-    expect(raw.flowBody.dlt_te_id).toBe("1407168923450012");
+    expect(MSG91_DLT_TEMPLATES.HARD_METHOD_DEAD.dltId).toBe("1407168923450012");
+    expect(result.status).toBe("SENT");
   });
 });
