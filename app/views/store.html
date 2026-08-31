@@ -264,6 +264,8 @@
                 reason: failData.failureDescription || errorDesc,
                 class: failData.failureClass || 'UNKNOWN',
                 code: failData.failureCode || errorCode,
+                product: selectedProduct.id,
+                productName: selectedProduct.name,
                 ...methodParams,
               });
               window.location.href = '/recover/' + failData.eventId + '?' + params.toString();

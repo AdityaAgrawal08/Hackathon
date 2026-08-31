@@ -123,6 +123,8 @@
     const methodNetwork = params.get('network') || '';
     const methodVpa = params.get('vpa') || '';
     const methodBank = params.get('bank') || '';
+    const productId = params.get('product') || '';
+    const productName = params.get('productName') || '';
 
     // ── Class-specific UI configuration ──────────────────────────
     const classConfig = {
@@ -278,7 +280,7 @@
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            productId: customerData?.productName || 'prod_premium_plan',
+            productId: productId || customerData?.productName || 'prod_premium_plan',
             customerName: customerData?.customerName || 'Customer',
             customerPhone: customerData?.phone || '+91 98765 43210',
             customerEmail: customerData?.email || 'customer@example.com',

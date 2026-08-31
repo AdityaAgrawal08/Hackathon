@@ -111,31 +111,35 @@ const TEMPLATES_BY_CLASS: Record<FailureClassId, Partial<Record<OutreachChannel,
         `Namaste ${ctx.customerName},\n\n${ctx.merchantName} ke liye aapka payment method (${formatINR(paise(ctx.amountPaise))}) expire ya revoke ho chuka hai.\n\nKya hua:\nAapka ${ctx.instrumentDescription} ab payments ke liye valid nahi hai. Card expire hone, UPI mandate cancel hone, ya saved method delete hone ki wajah se ho sakta hai.\n\nKya karein:\nKripya apna payment method update karein ya naya set karein taaki service mein koi rukawat na aaye.\n\nYahan click karke apna payment method update karein:\n${ctx.recoveryUrl}\n\nAgar aapne pehle se details update kar di hain, toh kripya is sandesh ko ignore karein.\n\nDhanyawad,\nARBITER Recovery Team`,
     },
   },
+  // ──────────────────────────────────────────────────────────────────
+  // NETWORK_TIMEOUT: Bank downtime, gateway timeout, network error
+  // User action needed: WAIT — we are resolving, will notify when fixed
+  // ──────────────────────────────────────────────────────────────────
   NETWORK_TIMEOUT: {
     WHATSAPP: {
       templateId: "arbiter_rec_whatsapp_bank_down_v1",
       dltRegistered: true,
       en: (ctx) =>
-        `Hi ${ctx.customerName}, your bank (${ctx.instrumentDescription}) is currently experiencing technical delays. No money was deducted for ${ctx.merchantName}. We will retry automatically, or you can pay now via another UPI app: ${ctx.recoveryUrl}`,
+        `Hi ${ctx.customerName}, your bank (${ctx.instrumentDescription}) is currently experiencing technical delays. No money was deducted for ${ctx.merchantName}. We are working to resolve this and will notify you once it's fixed. You can also retry via another UPI: ${ctx.recoveryUrl}`,
       hi: (ctx) =>
-        `Namaste ${ctx.customerName}, aapka bank (${ctx.instrumentDescription}) temporary network issue face kar raha hai. ${ctx.merchantName} ke liye koi paisa nahi kata hai. Aap chahein toh dusre bank UPI se turant payment kar sakte hain: ${ctx.recoveryUrl}`,
+        `Namaste ${ctx.customerName}, aapka bank (${ctx.instrumentDescription}) temporary technical issue face kar raha hai. ${ctx.merchantName} ke liye koi paisa nahi kata hai. Hum isse resolve kar rahe hain aur aapko notify karenge. Aap chahein toh dusre UPI se try kar sakte hain: ${ctx.recoveryUrl}`,
     },
     SMS: {
       templateId: "1407168923450013",
       dltRegistered: true,
       en: (ctx) =>
-        `ARBITER: Bank server issue detected for your ${formatINR(paise(ctx.amountPaise))} payment. We are resolving this. No money was deducted. Retry: ${ctx.recoveryUrl}`,
+        `ARBITER: Bank server issue for your ${formatINR(paise(ctx.amountPaise))} payment. No money deducted. We are resolving this and will notify you. Retry: ${ctx.recoveryUrl}`,
       hi: (ctx) =>
-        `ARBITER: ${formatINR(paise(ctx.amountPaise))} payment mein bank server issue aaya. Hum isse resolve kar rahe hain. Koi paisa nahi kata. Retry: ${ctx.recoveryUrl}`,
+        `ARBITER: ${formatINR(paise(ctx.amountPaise))} payment mein bank server issue. Koi paisa nahi kata. Hum resolve kar rahe hain, aapko notify karenge. Retry: ${ctx.recoveryUrl}`,
     },
     VOICE_IVR: null,
     EMAIL: {
       templateId: "email_bank_down_v1",
       dltRegistered: false,
       en: (ctx) =>
-        `Hi ${ctx.customerName},\n\nYour payment of ${formatINR(paise(ctx.amountPaise))} for ${ctx.merchantName} could not be completed due to a temporary bank server issue.\n\nWhat happened:\n${ctx.instrumentDescription} experienced a temporary network delay. This is not an issue with your account. No money has been deducted from your bank.\n\nWhat to do:\nYou can wait and we will automatically retry the payment. Or, you can pay immediately using a different bank or UPI:\n\nClick here to retry now:\n${ctx.recoveryUrl}\n\nWe are actively working to resolve the bank connectivity issue. You do not need to take any action if you prefer to wait.\n\nBest regards,\nARBITER Recovery Team`,
+        `Hi ${ctx.customerName},\n\nYour payment of ${formatINR(paise(ctx.amountPaise))} for ${ctx.merchantName} could not be completed due to a temporary bank server issue.\n\nWhat happened:\n${ctx.instrumentDescription} experienced a temporary network delay. This is not an issue with your account. No money has been deducted from your bank.\n\nWhat we are doing:\nWe are actively working to resolve the bank connectivity issue. You do not need to take any action right now.\n\nWhat to do:\nWe will notify you via email and SMS as soon as the issue is resolved. If you prefer not to wait, you can pay immediately using a different bank or UPI:\n\nClick here to pay now via alternate method:\n${ctx.recoveryUrl}\n\nBest regards,\nARBITER Recovery Team`,
       hi: (ctx) =>
-        `Namaste ${ctx.customerName},\n\n${ctx.merchantName} ke liye ${formatINR(paise(ctx.amountPaise))} ka payment temporary bank server issue ki wajah se process nahi ho paya.\n\nKya hua:\n${ctx.instrumentDescription} mein temporary network delay aaya. Yeh aapke account ki galti nahi hai. Aapke bank se koi paisa nahi kata hai.\n\nKya karein:\nAap intezar kar sakte hain — hum payment automatically retry karenge. Ya, aap turant kisi aur bank ya UPI se payment kar sakte hain:\n\nYahan click karke abhi retry karein:\n${ctx.recoveryUrl}\n\nHum bank connectivity issue ko actively resolve kar rahe hain. Agar aap wait karna chahte hain toh koi action lene ki zaroorat nahi hai.\n\nDhanyawad,\nARBITER Recovery Team`,
+        `Namaste ${ctx.customerName},\n\n${ctx.merchantName} ke liye ${formatINR(paise(ctx.amountPaise))} ka payment temporary bank server issue ki wajah se process nahi ho paya.\n\nKya hua:\n${ctx.instrumentDescription} mein temporary network delay aaya. Yeh aapke account ki galti nahi hai. Aapke bank se koi paisa nahi kata hai.\n\nHum kya kar rahe hain:\nHum bank connectivity issue ko actively resolve kar rahe hain. Aapko abhi kuch karne ki zaroorat nahi hai.\n\nKya karein:\nJab issue resolve hoga hum aapko email aur SMS se notify karenge. Agar aap wait nahi karna chahte toh kisi aur bank ya UPI se turant payment kar sakte hain:\n\nYahan click karke abhi alternate method se pay karein:\n${ctx.recoveryUrl}\n\nDhanyawad,\nARBITER Recovery Team`,
     },
   },
   RISK_FLAGGED: {
