@@ -36,6 +36,8 @@ export class BrevoEmailProvider implements OutreachProvider {
     this.config.senderEmail = config.senderEmail || process.env.BREVO_SENDER_EMAIL || "billing@arbiter.in";
     this.config.senderName = config.senderName || process.env.BREVO_SENDER_NAME || "ARBITER Recovery";
     this.config.webhookSecret = config.webhookSecret || process.env.BREVO_WEBHOOK_SECRET;
+
+    console.log(`[Brevo] Constructor — apiKey: ${this.config.apiKey ? 'SET (' + this.config.apiKey.slice(0, 12) + '...)' : 'MISSING'}, sender: ${this.config.senderEmail}`);
   }
 
 
@@ -111,7 +113,10 @@ export class BrevoEmailProvider implements OutreachProvider {
 
     // If no API key is provided, execute deterministic simulated dispatch
     if (!this.config.apiKey) {
-      console.log(`[Brevo] SIMULATED email to ${payload.recipient.email} (no API key configured)`);
+      const simReason = "no API key configured";
+      console.log(`[Brevo] SIMULATED email to ${payload.recipient.email} — reason: ${simReason}`);
+      console.log(`[Brevo] SIMULATED subject: ${subject}`);
+      console.log(`[Brevo] SIMULATED body preview: ${messageText.slice(0, 120)}...`);
       return {
         providerName: this.name,
         channel: this.channel,
@@ -119,9 +124,13 @@ export class BrevoEmailProvider implements OutreachProvider {
         status: "SENT",
         costPaise: 10, // ₹0.10 transactional email cost
         dispatchedAtUtc: nowUtc,
-        rawResponse: { simulated: true, to: payload.recipient.email, subject },
+        rawResponse: { simulated: true, to: payload.recipient.email, subject, reason: simReason },
       };
     }
+
+    console.log(`[Brevo] SENDING email to ${payload.recipient.email}`);
+    console.log(`[Brevo] Subject: ${subject}`);
+    console.log(`[Brevo] Failure class: ${payload.failureClass}, method: ${payload.method || 'unknown'}`);
 
     try {
       const res = await fetch("https://api.brevo.com/v3/smtp/email", {
@@ -145,7 +154,9 @@ export class BrevoEmailProvider implements OutreachProvider {
 
       const data = (await res.json()) as Record<string, unknown>;
       if (!res.ok) {
-        console.error(`[Brevo] FAILED to ${payload.recipient.email}: ${res.status} ${data.code} ${data.message}`);
+        console.error(`[Brevo] FAILED to ${payload.recipient.email}: HTTP ${res.status}`);
+        console.error(`[Brevo] Error code: ${data.code}, message: ${data.message}`);
+        console.error(`[Brevo] Full response: ${JSON.stringify(data)}`);
         return {
           providerName: this.name,
           channel: this.channel,
@@ -159,6 +170,8 @@ export class BrevoEmailProvider implements OutreachProvider {
         };
       }
 
+      console.log(`[Brevo] SENT email to ${payload.recipient.email}: messageId=${data.messageId}`);
+      console.log(`[Brevo] Full response: ${JSON.stringify(data)}`);
       return {
         providerName: this.name,
         channel: this.channel,
@@ -169,7 +182,7 @@ export class BrevoEmailProvider implements OutreachProvider {
         rawResponse: data,
       };
     } catch (err) {
-      console.error(`[Brevo] ERROR to ${payload.recipient.email}: ${(err as Error).message}`);
+      console.error(`[Brevo] NETWORK ERROR to ${payload.recipient.email}: ${(err as Error).message}`);
       return {
         providerName: this.name,
         channel: this.channel,

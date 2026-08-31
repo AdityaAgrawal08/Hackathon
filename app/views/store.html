@@ -59,7 +59,10 @@
         </div>
         <div class="form-group">
           <label for="customer-phone">Phone Number</label>
-          <input type="tel" id="customer-phone" placeholder="+91 98765 43210" required>
+          <div style="display:flex;align-items:center;gap:0;">
+            <span style="padding:12px 12px;background:#1e293b;border:1px solid #475569;border-right:none;border-radius:8px 0 0 8px;color:#94a3b8;font-size:16px;white-space:nowrap;">+91</span>
+            <input type="tel" id="customer-phone" placeholder="98765 43210" required maxlength="10" pattern="[0-9]{10}" style="border-radius:0 8px 8px 0;" oninput="this.value=this.value.replace(/[^0-9]/g,'').slice(0,10)">
+          </div>
         </div>
         <div class="form-group">
           <label for="customer-email">Email Address</label>
@@ -133,11 +136,16 @@
       if (!selectedProduct) return;
 
       const name = document.getElementById('customer-name').value.trim();
-      const phone = document.getElementById('customer-phone').value.trim();
+      const rawPhone = document.getElementById('customer-phone').value.trim();
+      const phone = rawPhone.length === 10 ? '91' + rawPhone : rawPhone;
       const email = document.getElementById('customer-email').value.trim();
 
       if (!name || !phone || !email) {
         showError('Please fill in all fields.');
+        return;
+      }
+      if (rawPhone.length !== 10 || !/^[0-9]{10}$/.test(rawPhone)) {
+        showError('Please enter a valid 10-digit phone number.');
         return;
       }
 
@@ -264,6 +272,8 @@
                 reason: failData.failureDescription || errorDesc,
                 class: failData.failureClass || 'UNKNOWN',
                 code: failData.failureCode || errorCode,
+                product: selectedProduct.id,
+                productName: selectedProduct.name,
                 ...methodParams,
               });
               window.location.href = '/recover/' + failData.eventId + '?' + params.toString();

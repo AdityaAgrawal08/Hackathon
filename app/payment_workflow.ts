@@ -329,6 +329,25 @@ export async function processFailedPayment(
 
   if (!isSuspicious) {
     // Immediate outreach via primary channels (Email + SMS only, no WhatsApp/Voice)
+    // Build recovery URL with product info so customer's cart is restored
+    const recoveryUrl = new URL(`${process.env.BASE_URL || "http://localhost:3000"}/recover/${eventId}`);
+    if (input.productName) {
+      // Map product name back to product ID
+      const productMap: Record<string, string> = {
+        "Premium Annual Plan": "prod_premium_plan",
+        "Monthly Basic": "prod_monthly_basic",
+        "Team License (5 seats)": "prod_team_license",
+        "Enterprise (Custom)": "prod_enterprise",
+      };
+      const pid = productMap[input.productName] || input.productName;
+      recoveryUrl.searchParams.set("product", pid);
+      recoveryUrl.searchParams.set("productName", input.productName);
+    }
+    // Include failure class info in URL for recovery page UI
+    recoveryUrl.searchParams.set("class", failureClass);
+    recoveryUrl.searchParams.set("code", input.failureCode);
+    recoveryUrl.searchParams.set("reason", input.failureReason || input.failureDescription);
+
     const outreachPayload: OutreachPayload = {
       proposalId: eventId,
       failureClass,
@@ -339,7 +358,7 @@ export async function processFailedPayment(
         email: customer?.email ?? "",
       },
       amountPaise: input.amountPaise,
-      paymentLinkUrl: `${process.env.BASE_URL || "http://localhost:3000"}/recover/${eventId}`,
+      paymentLinkUrl: recoveryUrl.toString(),
       language: "EN",
       rawErrorReason: input.failureCode,
       instrumentDescription: input.failureDescription,
