@@ -481,6 +481,10 @@ app.post("/api/webhooks/razorpay", webhookLimiter, async (req: Request, res: Res
 
         if (customerProfileId) {
           try {
+            // Extract ALL Razorpay webhook fields
+            const card = payment.card || {};
+            const acquirerData = payment.acquirer_data || {};
+
             const result = await processFailedPayment(dbClient, {
               razorpayPaymentId: payment.id,
               razorpayOrderId: payment.order_id,
@@ -493,7 +497,36 @@ app.post("/api/webhooks/razorpay", webhookLimiter, async (req: Request, res: Res
               customerProfileId,
               productName,
               nowMs: Date.now(),
+
+              // Payment method details
+              paymentMethod: payment.method || "",
+              cardLast4: card.last4 || "",
+              cardNetwork: card.network || "",
+              cardIssuer: card.issuer || "",
+              cardType: card.type || "",
+              cardEmi: !!card.emi,
+
+              // UPI details
+              vpa: payment.vpa || "",
+
+              // Netbanking details
+              bankCode: payment.bank || "",
+
+              // International flag
+              isInternational: !!payment.international,
+
+              // Acquirer data
+              acquirerAuthCode: acquirerData.auth_code || "",
+              acquirerRrn: acquirerData.rrn || "",
+
+              // Token and contact
+              razorpayTokenId: payment.token_id || "",
+              razorpayContact: payment.contact || "",
+              razorpayEmail: payment.email || "",
+              razorpayCreatedAt: payment.created_at || 0,
             }, outreachRouter);
+
+            console.log(`[Webhook] payment.failed processed: ${result.eventId} | method=${payment.method} | class=${result.failureClass} | action=${result.action}`);
 
             // Broadcast to vendor dashboard
             broadcastSSE("global", {
@@ -504,6 +537,9 @@ app.post("/api/webhooks/razorpay", webhookLimiter, async (req: Request, res: Res
               failureClass: result.failureClass,
               probability: result.probability,
               action: result.action,
+              paymentMethod: payment.method,
+              cardLast4: card.last4,
+              cardNetwork: card.network,
             });
 
             if (result.isSuspicious) {
@@ -514,6 +550,7 @@ app.post("/api/webhooks/razorpay", webhookLimiter, async (req: Request, res: Res
                 reasons: result.suspicionReasons,
                 amountPaise: payment.amount,
                 failureCode: payment.error_code,
+                paymentMethod: payment.method,
               });
             }
           } catch (err) {

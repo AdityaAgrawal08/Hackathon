@@ -66,6 +66,33 @@ export interface FailedPaymentInput {
   customerProfileId: string;
   productName: string;
   nowMs: number;
+
+  // Razorpay webhook: payment method details
+  paymentMethod?: string;     // card, upi, netbanking, wallet, emi
+  cardLast4?: string;         // Last 4 digits of card
+  cardNetwork?: string;       // Visa, Mastercard, RuPay, AMEX
+  cardIssuer?: string;        // Issuing bank (HDFC, SBI)
+  cardType?: string;          // credit, debit
+  cardEmi?: boolean;          // true if EMI payment
+
+  // Razorpay webhook: UPI details
+  vpa?: string;               // UPI VPA (user@upi)
+
+  // Razorpay webhook: netbanking details
+  bankCode?: string;          // Bank code (HDFC, KKBK)
+
+  // Razorpay webhook: international flag
+  isInternational?: boolean;  // true for international cards
+
+  // Razorpay webhook: acquirer data
+  acquirerAuthCode?: string;  // Bank authorization code
+  acquirerRrn?: string;       // Network Reference Number (RRN)
+
+  // Razorpay webhook: token and contact
+  razorpayTokenId?: string;   // Saved instrument token
+  razorpayContact?: string;   // Customer phone from webhook
+  razorpayEmail?: string;     // Customer email from webhook
+  razorpayCreatedAt?: number; // Payment created_at (epoch seconds)
 }
 
 export interface ProcessResult {
@@ -217,14 +244,22 @@ export async function processFailedPayment(
   const suspicionReasons = credResult.reasons;
   const isSuspicious = credResult.isSuspicious;
 
-  // 7. Log to live_payment_events
+  // 7. Log to live_payment_events with ALL Razorpay webhook fields
   const eventId = `evt_${nowMs}_${createHash("sha256").update(`${input.razorpayPaymentId}${nowMs}`).digest("hex").slice(0, 8)}`;
   await client.execute({
     sql: `INSERT INTO live_payment_events
       (id, razorpay_payment_id, razorpay_order_id, customer_profile_id, product_name, amount_paise,
        status, failure_code, failure_description, failure_step, failure_source, failure_reason,
-       failure_class, ml_probability, ml_action, outreach_dispatched, vendor_notified, created_at_utc)
-      VALUES (?, ?, ?, ?, ?, ?, 'failed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       failure_class, ml_probability, ml_action, outreach_dispatched, vendor_notified, created_at_utc,
+       payment_method, card_last4, card_network, card_issuer, card_type, card_emi,
+       vpa, bank_code, is_international,
+       acquirer_auth_code, acquirer_rrn,
+       razorpay_token_id, razorpay_contact, razorpay_email, razorpay_created_at)
+      VALUES (?, ?, ?, ?, ?, ?, 'failed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+              ?, ?, ?, ?, ?, ?,
+              ?, ?, ?,
+              ?, ?,
+              ?, ?, ?, ?)`,
     args: [
       eventId,
       input.razorpayPaymentId,
@@ -243,6 +278,22 @@ export async function processFailedPayment(
       false,
       isSuspicious,
       nowUtc,
+      // New Razorpay webhook fields
+      input.paymentMethod || null,
+      input.cardLast4 || null,
+      input.cardNetwork || null,
+      input.cardIssuer || null,
+      input.cardType || null,
+      input.cardEmi ? 1 : 0,
+      input.vpa || null,
+      input.bankCode || null,
+      input.isInternational ? 1 : 0,
+      input.acquirerAuthCode || null,
+      input.acquirerRrn || null,
+      input.razorpayTokenId || null,
+      input.razorpayContact || null,
+      input.razorpayEmail || null,
+      input.razorpayCreatedAt || null,
     ],
   });
 
