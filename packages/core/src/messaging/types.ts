@@ -44,8 +44,7 @@ export type DispatchStatus =
   | "SENT"
   | "DELIVERED"
   | "FAILED"
-  | "SUPPRESSED_DND"
-  | "SUPPRESSED_QUIET_HOURS";
+  | "SUPPRESSED_DND";
 
 export interface ProviderDispatchResult {
   providerName: string;

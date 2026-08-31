@@ -60,7 +60,7 @@ describe("Aggressive Audit: Phase 6 End-to-End Pipeline & Cryptographic Provenan
       expect(daySession.dispatchResult).toBeDefined();
       expect(["SENT", "DELIVERED", "QUEUED"]).toContain(daySession.dispatchResult?.status);
 
-      // 2. Nighttime run -> Suppressed under TRAI regulations
+      // 2. Nighttime run -> Now succeeds (quiet hours removed)
       const nightSession = await simulateFailureTriage(
         "SALARY_DELAY",
         "http://localhost:3000",
@@ -68,8 +68,7 @@ describe("Aggressive Audit: Phase 6 End-to-End Pipeline & Cryptographic Provenan
         NIGHTTIME_MS,
       );
       if (nightSession.dispatchResult) {
-        expect(nightSession.dispatchResult.status).toBe("SUPPRESSED_QUIET_HOURS");
-        expect(nightSession.dispatchResult.costPaise).toBe(0);
+        expect(["SENT", "DELIVERED", "QUEUED"]).toContain(nightSession.dispatchResult.status);
       }
     });
   });
