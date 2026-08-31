@@ -540,6 +540,52 @@ export async function recordSuccessfulPayment(
   const nowUtc = isoUtc(params.nowMs);
   const eventId = `evt_${params.nowMs}_${createHash("sha256").update(`${params.razorpayPaymentId}${params.nowMs}`).digest("hex").slice(0, 8)}`;
 
+  // Step 7: If customer had a failed payment for this order, UPDATE it to 'captured'
+  // (moves entry from failed view to successful view — no duplicate row)
+  const existingFailed = await client.execute({
+    sql: `SELECT id FROM live_payment_events
+          WHERE customer_profile_id = ? AND razorpay_order_id = ? AND status = 'failed'
+          ORDER BY created_at_utc DESC LIMIT 1`,
+    args: [params.customerProfileId, params.razorpayOrderId],
+  });
+
+  if (existingFailed.rows.length > 0) {
+    const existingId = String(existingFailed.rows[0].id);
+    await client.execute({
+      sql: `UPDATE live_payment_events SET
+        status = 'captured',
+        razorpay_payment_id = ?,
+        failure_code = NULL, failure_description = NULL, failure_class = NULL,
+        ml_action = 'PAYMENT_RECEIVED',
+        payment_method = NULL, card_last4 = NULL, card_network = NULL,
+        vpa = NULL, bank_code = NULL,
+        retry_count = 0
+        WHERE id = ?`,
+      args: [params.razorpayPaymentId, existingId],
+    });
+    console.log(`[Workflow] Recovery: moved event ${existingId} from failed → captured for order ${params.razorpayOrderId}`);
+
+    // Update customer profile
+    await client.execute({
+      sql: `UPDATE customer_profiles SET
+        total_attempts = total_attempts + 1,
+        total_successes = total_successes + 1,
+        total_amount_paise = total_amount_paise + ?
+        WHERE id = ?`,
+      args: [params.amountPaise, params.customerProfileId],
+    });
+
+    // Cancel pending outreach for this event
+    await client.execute({
+      sql: `UPDATE scheduled_outreach SET executed = 1, status = 'SUPPRESSED', executed_at_utc = ?
+        WHERE live_payment_event_id = ? AND executed = 0`,
+      args: [nowUtc, existingId],
+    });
+
+    return existingId;
+  }
+
+  // No prior failed row: INSERT new successful row
   await client.execute({
     sql: `INSERT INTO live_payment_events
       (id, razorpay_payment_id, razorpay_order_id, customer_profile_id, product_name, amount_paise, status, created_at_utc)
@@ -564,7 +610,7 @@ export async function recordSuccessfulPayment(
     args: [params.amountPaise, params.customerProfileId],
   });
 
-  // Cancel pending outreach for THIS specific event only (not all customer outreach)
+  // Cancel pending outreach
   await client.execute({
     sql: `UPDATE scheduled_outreach SET executed = 1, status = 'SUPPRESSED', executed_at_utc = ?
       WHERE live_payment_event_id = ? AND executed = 0`,
