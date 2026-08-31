@@ -112,16 +112,9 @@ describe("Aggressive Industry-Grade Audit: Phase 7 Live Testing & Edge Invariant
 
         const result = await router.dispatch("SMS", payload, simulatedTime);
 
-        // Quiet hours: 22:00 (10 PM) to 08:00 (8 AM) IST
-        const isQuietHours = istHour >= 22 || istHour < 8;
-
-        if (isQuietHours) {
-          expect(result.status).toBe("SUPPRESSED_QUIET_HOURS");
-          expect(result.costPaise).toBe(0);
-        } else {
-          expect(result.status).toBe("SENT");
-          expect(result.costPaise).toBe(25);
-        }
+        // Quiet hours removed — SMS always sent
+        expect(result.status).toBe("SENT");
+        expect(result.costPaise).toBe(25);
       }
     });
   });

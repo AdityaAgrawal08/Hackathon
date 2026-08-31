@@ -77,15 +77,15 @@ describe("Task 2.1: Unified Provider Abstraction & Router", () => {
     expect(res.costPaise).toBe(10);
   });
 
-  it("suppresses non-email outreach during quiet hours (22:00 to 08:00 IST)", async () => {
+  it("sends SMS even during night hours (quiet hours removed)", async () => {
     const router = new OutreachRouter();
     router.registerProvider(new MockSmsProvider());
 
     const nightMs = Date.parse("2026-08-28T17:00:00.000Z"); // 22:30 IST
     const res = await router.dispatch("SMS", samplePayload, nightMs);
 
-    expect(res.status).toBe("SUPPRESSED_QUIET_HOURS");
-    expect(res.costPaise).toBe(0);
+    expect(res.status).toBe("SENT");
+    expect(res.costPaise).toBe(25);
   });
 
   it("suppresses SMS outreach for numbers registered in NCPR DND cache", async () => {
