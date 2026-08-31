@@ -48,6 +48,7 @@ import {
   PRODUCTS,
   getProduct,
   processFailedPayment,
+  recordSuccessfulPayment,
 } from "./payment_workflow.js";
 import { getCustomerMessage, getVendorMessage, getErrorEntry } from "../packages/core/src/error-catalog.js";
 

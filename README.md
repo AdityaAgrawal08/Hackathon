@@ -63,7 +63,7 @@ ARBITER detects failed Razorpay payments via real webhooks, diagnoses root cause
 - **Webhook Deduplication** — Zero duplicate events from Razorpay retries
 - **Vendor Dashboard** — Real-time SSE feed, suspicious activity queue, approve/reject workflow
 - **Immutable Audit Trail** — Every decision logged with SHA-256 hashes
-- **489 Tests** — Unit, integration, E2E, concurrency stress, security audit
+- **493 Tests** — Unit, integration, E2E, concurrency stress, security audit
 
 ---
 
@@ -155,7 +155,7 @@ pnpm vitest run tests/app/e2e_integration.test.ts
 
 ### Test Coverage
 
-- **78 test files, 489 tests** — all passing
+- **78 test files, 493 tests** — all passing
 - E2E payment workflow (store → Razorpay → webhook → outreach)
 - Dashboard command center (analytics, alerts, SSE)
 - Concurrency stress (10 parallel order creations)
@@ -196,6 +196,35 @@ pnpm vitest run tests/app/e2e_integration.test.ts
 | **AI Judgment** | ML (logreg) + Rules (policy pack) + GenAI (templates) clearly separated |
 | **Failure & Concurrency Resilience** | Zero double-debits via idempotency guards, webhook dedup |
 | **The Bar** | 100-event Monte Carlo benchmark with real data proving revenue lift |
+
+---
+
+## Deployment (Render)
+
+ARBITER includes a `render.yaml` for one-click Render deployment.
+
+### Quick Deploy
+
+1. Push to GitHub
+2. Go to [render.com](https://render.com) → New → Blueprint
+3. Connect your repo — Render auto-detects `render.yaml`
+4. Set environment variables in Render dashboard (secrets are not synced from `render.yaml`):
+   - `RZP_TEST_KEY_ID`, `RZP_TEST_KEY_SECRET`, `RZP_WEBHOOK_SECRET`
+   - `BREVO_API_KEY`, `MSG91_AUTH_KEY`
+   - `ARBITER_DB_PATH` (Turso URL), `ARBITER_DB_TOKEN` (Turso token)
+   - `ADMIN_SECRET_KEY`
+5. Deploy — build runs `pnpm install + db:migrate`, start runs `pnpm start`
+
+### Environment Variables
+
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `ARBITER_DB_PATH` | Turso/libSQL URL or local SQLite path | Yes |
+| `ARBITER_DB_TOKEN` | Turso auth token | If using Turso |
+| `RZP_TEST_KEY_ID` | Razorpay test key ID | Yes |
+| `RZP_TEST_KEY_SECRET` | Razorpay test key secret | Yes |
+| `BREVO_API_KEY` | Brevo transactional email API key | For email outreach |
+| `MSG91_AUTH_KEY` | MSG91 SMS API key | For SMS outreach |
 
 ---
 
