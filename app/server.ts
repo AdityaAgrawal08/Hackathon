@@ -83,28 +83,6 @@ if (msg91Template) {
 
 const webhookLimiter = rateLimit({ windowMs: 60_000, limit: RATE_LIMIT_WEBHOOKS_PER_MIN, standardHeaders: true });
 
-// Round-robin error injection for demo (cycles through all 5 failure classes)
-const DEMO_ERROR_CODES = [
-  "BAD_REQUEST_PAYMENT_ACCOUNT_INSUFFICIENT_BALANCE",  // SOFT_RETRYABLE
-  "CARD_EXPIRED",                                       // HARD_METHOD_DEAD
-  "GATEWAY_TIMEOUT",                                    // NETWORK_TIMEOUT
-  "SUSPECTED_FRAUD",                                    // RISK_FLAGGED
-  "BAD_REQUEST_PAYMENT_UPI_COLLECT_EXPIRED",            // SOFT_RETRYABLE
-  "MANDATE_REVOKED",                                    // HARD_METHOD_DEAD
-  "ISSUER_TIMEOUT",                                     // NETWORK_TIMEOUT
-  "RISK_BLOCKED",                                       // RISK_FLAGGED
-  "INSUFFICIENT_FUNDS",                                 // SOFT_RETRYABLE
-  "BAD_REQUEST_PAYMENT_CARD_INVALID",                   // HARD_METHOD_DEAD
-  "BANK_DOWNTIME_NETWORK_ERROR",                        // NETWORK_TIMEOUT
-  "UNKNOWN",                                            // UNKNOWN
-];
-let demoErrorIndex = 0;
-function nextDemoError(): string {
-  const code = DEMO_ERROR_CODES[demoErrorIndex % DEMO_ERROR_CODES.length];
-  demoErrorIndex++;
-  return code;
-}
-
 // Simplified human-readable error reasons — user sees this, not raw codes
 function getSimplifiedReason(code: string, failureClass: string): string {
   return getCustomerMessage(code);
