@@ -21,6 +21,7 @@
     .stat-value.red { color: #ef4444; }
     .stat-value.blue { color: #3b82f6; }
     .stat-value.yellow { color: #eab308; }
+    .stat-value.purple { color: #a855f7; }
     .section { margin-bottom: 32px; }
     .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
     .section-title { font-size: 18px; font-weight: 600; }
@@ -50,6 +51,16 @@
     .alert-card .alert-actions { display: flex; gap: 8px; }
     .empty-state { text-align: center; padding: 40px; color: #64748b; }
     .live-dot { width: 8px; height: 8px; background: #22c55e; border-radius: 50%; display: inline-block; margin-right: 8px; animation: pulse 2s infinite; }
+    .filter-row { display: flex; gap: 10px; align-items: center; margin-bottom: 16px; }
+    .filter-row select { background: #1e293b; color: #e2e8f0; border: 1px solid #334155; border-radius: 8px; padding: 8px 12px; font-size: 13px; cursor: pointer; }
+    .filter-row select:focus { outline: none; border-color: #3b82f6; }
+    .method-pill { display: inline-flex; align-items: center; gap: 6px; background: #0f172a; border: 1px solid #334155; border-radius: 6px; padding: 4px 10px; font-size: 13px; white-space: nowrap; }
+    .method-icon { font-size: 14px; }
+    .method-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-top: 12px; }
+    .method-card { background: #0f172a; border: 1px solid #334155; border-radius: 10px; padding: 16px; text-align: center; }
+    .method-card .mc-icon { font-size: 28px; margin-bottom: 6px; }
+    .method-card .mc-label { font-size: 12px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; }
+    .method-card .mc-value { font-size: 22px; font-weight: 700; margin-top: 4px; }
   </style>
 </head>
 <body>
@@ -62,6 +73,10 @@
   </div>
   <div class="container">
     <div class="stats" id="stats"></div>
+    <div class="section" id="method-section">
+      <div class="section-title" style="margin-bottom:8px;">Payment Methods</div>
+      <div class="method-grid" id="method-grid"></div>
+    </div>
 
     <div class="section" id="alerts-section" style="display:none;">
       <div class="section-header">
@@ -74,7 +89,16 @@
     <div class="section">
       <div class="section-header">
         <span class="section-title"><span class="live-dot"></span> Live Payment Feed</span>
-        <span class="badge badge-live">LIVE</span>
+        <div style="display:flex;align-items:center;gap:12px;">
+          <select id="method-filter" onchange="filterPayments()">
+            <option value="all">All Methods</option>
+            <option value="card">Card</option>
+            <option value="upi">UPI</option>
+            <option value="netbanking">Netbanking</option>
+            <option value="wallet">Wallet</option>
+          </select>
+          <span class="badge badge-live">LIVE</span>
+        </div>
       </div>
       <div class="table-container">
         <table>
@@ -84,6 +108,7 @@
               <th>Customer</th>
               <th>Product</th>
               <th>Amount</th>
+              <th>Payment Method</th>
               <th>Status</th>
               <th>Failure Class</th>
               <th>ML Probability</th>
@@ -107,6 +132,28 @@
       return d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     }
 
+    const METHOD_META = {
+      card:       { icon: '💳', label: 'Card' },
+      upi:        { icon: '📱', label: 'UPI' },
+      netbanking: { icon: '🏦', label: 'Netbanking' },
+      wallet:     { icon: '👛', label: 'Wallet' },
+    };
+    function formatMethod(p) {
+      const raw = (p.payment_method || '').toLowerCase();
+      if (raw === 'card') {
+        const net = p.card_network || '';
+        const last4 = p.card_last4 || '';
+        return `<span class="method-pill"><span class="method-icon">💳</span>${net ? net + ' ' : ''}${last4 ? '****' + last4 : ''}</span>`;
+      }
+      if (METHOD_META[raw]) {
+        const m = METHOD_META[raw];
+        return `<span class="method-pill"><span class="method-icon">${m.icon}</span>${m.label}</span>`;
+      }
+      return '<span class="method-pill" style="color:#64748b">—</span>';
+    }
+
+    let allPayments = [];
+
     async function loadAnalytics() {
       try {
         const res = await fetch('/api/vendor/analytics');
@@ -119,30 +166,49 @@
           <div class="stat-card"><div class="stat-label">At Risk</div><div class="stat-value yellow">${formatINR(data.atRiskPaise)}</div></div>
           <div class="stat-card"><div class="stat-label">Suspicious</div><div class="stat-value red">${data.suspiciousCount}</div></div>
         `;
+        const total = data.totalEvents || 1;
+        document.getElementById('method-grid').innerHTML = `
+          <div class="method-card"><div class="mc-icon">💳</div><div class="mc-label">Card</div><div class="mc-value blue">${data.methodCard}</div><div class="mc-label" style="margin-top:2px;">${((data.methodCard/total)*100).toFixed(0)}%</div></div>
+          <div class="method-card"><div class="mc-icon">📱</div><div class="mc-label">UPI</div><div class="mc-value green">${data.methodUpi}</div><div class="mc-label" style="margin-top:2px;">${((data.methodUpi/total)*100).toFixed(0)}%</div></div>
+          <div class="method-card"><div class="mc-icon">🏦</div><div class="mc-label">Netbanking</div><div class="mc-value yellow">${data.methodNetbanking}</div><div class="mc-label" style="margin-top:2px;">${((data.methodNetbanking/total)*100).toFixed(0)}%</div></div>
+          <div class="method-card"><div class="mc-icon">👛</div><div class="mc-label">Wallet</div><div class="mc-value purple">${data.methodWallet}</div><div class="mc-label" style="margin-top:2px;">${((data.methodWallet/total)*100).toFixed(0)}%</div></div>
+        `;
       } catch (e) {
         document.getElementById('stats').innerHTML = '<div class="stat-card"><div class="stat-label">Error</div><div class="stat-value red">Unable to load analytics</div></div>';
       }
     }
 
+    function filterPayments() {
+      const filter = document.getElementById('method-filter').value;
+      const tbody = document.getElementById('payments-body');
+      const filtered = filter === 'all' ? allPayments : allPayments.filter(p => (p.payment_method || '').toLowerCase() === filter);
+      renderPayments(filtered);
+    }
+
+    function renderPayments(data) {
+      const tbody = document.getElementById('payments-body');
+      const noPayments = document.getElementById('no-payments');
+      if (data.length === 0) { tbody.innerHTML = ''; noPayments.style.display = 'block'; return; }
+      noPayments.style.display = 'none';
+      tbody.innerHTML = data.map(p => `
+        <tr>
+          <td>${formatTime(p.created_at_utc)}</td>
+          <td>${p.customer_name || '—'}</td>
+          <td>${p.product_name || '—'}</td>
+          <td>${formatINR(p.amount_paise)}</td>
+          <td>${formatMethod(p)}</td>
+          <td><span class="status status-${p.status}">${p.status}</span></td>
+          <td>${p.failure_class || '—'}</td>
+          <td>${p.ml_probability ? (p.ml_probability * 100).toFixed(1) + '%' : '—'}</td>
+        </tr>
+      `).join('');
+    }
+
     async function loadPayments() {
       try {
         const res = await fetch('/api/vendor/payments');
-        const data = await res.json();
-        const tbody = document.getElementById('payments-body');
-        const noPayments = document.getElementById('no-payments');
-        if (data.length === 0) { noPayments.style.display = 'block'; return; }
-        noPayments.style.display = 'none';
-        tbody.innerHTML = data.map(p => `
-          <tr>
-            <td>${formatTime(p.created_at_utc)}</td>
-            <td>${p.customer_name || '—'}</td>
-            <td>${p.product_name || '—'}</td>
-            <td>${formatINR(p.amount_paise)}</td>
-            <td><span class="status status-${p.status}">${p.status}</span></td>
-            <td>${p.failure_class || '—'}</td>
-            <td>${p.ml_probability ? (p.ml_probability * 100).toFixed(1) + '%' : '—'}</td>
-          </tr>
-        `).join('');
+        allPayments = await res.json();
+        filterPayments();
       } catch (e) {
         document.getElementById('no-payments').style.display = 'block';
         document.getElementById('no-payments').textContent = 'Unable to load payment data';

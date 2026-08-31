@@ -40,6 +40,14 @@ export const FEATURE_NAMES = [
   "days_since_last_attempt_norm", // min(days_since_last_attempt, 30) / 30
   "high_value_tier", // 1 if amount >= ₹10,000, else 0
   "bank_rail_health_norm", // rolling health score of the bank rail (0..1, default 1.0)
+  // ── Payment method features (from Razorpay webhook) ──
+  "is_card", // 1 if payment method is card
+  "is_upi", // 1 if payment method is UPI
+  "is_netbanking", // 1 if payment method is netbanking
+  "is_wallet", // 1 if payment method is wallet
+  "is_emi", // 1 if EMI payment
+  "is_debit_card", // 1 if debit card (higher retry success than credit)
+  "is_international", // 1 if international card (different rules, higher risk)
 ] as const;
 
 
@@ -100,6 +108,11 @@ export interface FeatureInput {
   /** Count of this customer's failures strictly before this event. */
   priorFailureCount: number;
   customer?: FeatureCustomerContext | null;
+  // ── Payment method details (from Razorpay webhook, decision-time) ──
+  paymentMethod?: string;  // card, upi, netbanking, wallet, emi
+  cardType?: string;       // credit, debit
+  cardEmi?: boolean;       // true if EMI
+  isInternational?: boolean; // true if international card
 }
 
 export interface ComputedFeatures {
@@ -292,6 +305,16 @@ export function computeFeatures(input: FeatureInput): ComputedFeatures {
   const highValueTier = input.amountPaise >= 1_000_000 ? 1 : 0;
   const bankRailHealth = 1.0;
 
+  // ── Payment method features (decision-time, no leakage)
+  const method = (input.paymentMethod || "").toLowerCase();
+  const isCard = method === "card" ? 1 : 0;
+  const isUpi = method === "upi" ? 1 : 0;
+  const isNetbanking = method === "netbanking" ? 1 : 0;
+  const isWallet = method === "wallet" ? 1 : 0;
+  const isEmi = input.cardEmi ? 1 : 0;
+  const isDebitCard = isCard && (input.cardType || "").toLowerCase() === "debit" ? 1 : 0;
+  const isInternational = input.isInternational ? 1 : 0;
+
   const values = [
     ONEHOT_CLASSES.includes(cls as (typeof ONEHOT_CLASSES)[number]) &&
     cls === "SOFT_RETRYABLE"
@@ -312,6 +335,14 @@ export function computeFeatures(input: FeatureInput): ComputedFeatures {
     Math.min(1, daysSinceLastAttempt / 30),
     highValueTier,
     bankRailHealth,
+    // Payment method features
+    isCard,
+    isUpi,
+    isNetbanking,
+    isWallet,
+    isEmi,
+    isDebitCard,
+    isInternational,
   ];
 
 

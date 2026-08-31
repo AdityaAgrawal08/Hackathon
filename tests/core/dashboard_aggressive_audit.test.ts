@@ -116,7 +116,7 @@ describe("Aggressive Audit: Phase 5 Merchant Command Center & Governance Invaria
         expect(session).toBeDefined();
         expect(session.id).toMatch(/^prop_/);
         expect(session.diagnosis).toBeDefined();
-        expect(session.features.values.length).toBe(16);
+        expect(session.features.values.length).toBe(23);
         expect(session.decideOutput.chosen).toBeDefined();
       }
     });

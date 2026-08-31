@@ -58,6 +58,11 @@ export class BrevoEmailProvider implements OutreachProvider {
         merchantName: this.config.senderName || "ARBITER Store",
         instrumentDescription: payload.instrumentDescription || "Card / UPI",
         recoveryUrl,
+        method: payload.method,
+        last4: payload.last4,
+        network: payload.network,
+        vpa: payload.vpa,
+        bank: payload.bank,
       },
     );
 
@@ -66,6 +71,15 @@ export class BrevoEmailProvider implements OutreachProvider {
         ? `Payment Update: ${this.config.senderName} (${formattedAmount})`
         : `Action Required: Subscription Payment for ${this.config.senderName} (${formattedAmount})`;
 
+    // Build method-specific heading for the email
+    let methodSpecificText = "";
+    if (payload.method === "card" && payload.network && payload.last4) {
+      methodSpecificText = `Your ${payload.network} card ending in ${payload.last4} was declined`;
+    } else if (payload.method === "upi" && payload.vpa) {
+      methodSpecificText = `Your UPI payment (${payload.vpa}) was declined`;
+    } else if (payload.method === "netbanking" && payload.bank) {
+      methodSpecificText = `Your ${payload.bank} netbanking payment was declined`;
+    }
 
     const messageText = escapeHtml(rendered?.content || `Your payment of ${formattedAmount} needs attention.`);
 
@@ -78,6 +92,7 @@ export class BrevoEmailProvider implements OutreachProvider {
   </div>
   <div style="background: #ffffff; padding: 32px; border: 1px solid #e2e8f0; border-top: none; border-radius: 0 0 8px 8px;">
     <h2 style="font-size: 18px; color: #0f172a; margin-top: 0;">Payment Recovery Notice</h2>
+    ${methodSpecificText ? `<p style="font-size: 16px; color: #dc2626; font-weight: bold; margin: 0 0 12px 0;">${escapeHtml(methodSpecificText)}</p>` : ""}
     <p style="font-size: 15px; color: #475569;">${messageText}</p>
     <div style="margin: 32px 0; text-align: center;">
       <a href="${escapeHtml(recoveryUrl)}" style="background: #2563eb; color: #ffffff; padding: 14px 28px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">

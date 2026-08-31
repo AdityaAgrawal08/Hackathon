@@ -258,7 +258,7 @@ export async function simulateFailureTriage(
   const rawDiag = diagnoseFailure(preset.failureCode, diagClass);
   const diagnosis = { ...rawDiag, class: diagClass };
 
-  // 2. Task 1.2: 16-Dimensional ML Feature Extraction
+  // 2. Task 1.2: 23-Dimensional ML Feature Extraction
   const features = computeFeatures({
     failureCode: preset.failureCode,
     amountPaise: preset.amountPaise,
@@ -855,7 +855,7 @@ export async function runBatchBenchmark(dbClient?: Client) {
     const paydayDay = customer.paydayTrueDay || 28;
     const ltvPaise = (customer.priorSuccessCount || 1) * 50000;
 
-    // Run actual ARBITER 16-D Feature & ML Scorer pipeline
+    // Run actual ARBITER 23-D Feature & ML Scorer pipeline
     const features = computeFeatures({
       failureCode,
       amountPaise: amount,

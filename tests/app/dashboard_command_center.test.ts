@@ -1,12 +1,14 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import type { Server } from "node:http";
 import { app, dbClient } from "../../app/server.js";
+import { runMigrations } from "../../packages/core/src/db/migrate.js";
 
 describe("Vendor Dashboard Integration Tests", () => {
   let server: Server;
   let baseUrl: string;
 
   beforeAll(async () => {
+    await runMigrations(dbClient);
     await new Promise<void>((resolve) => {
       server = app.listen(0, "127.0.0.1", () => {
         const addr = server.address();

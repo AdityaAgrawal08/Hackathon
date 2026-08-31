@@ -55,6 +55,11 @@
     .timeline-dot.pending { background: #64748b; }
     .timeline-text { font-size: 13px; color: #94a3b8; }
     .timeline-text strong { color: #e2e8f0; }
+    .method-details { background: #0f172a; border: 1px solid #334155; border-radius: 12px; padding: 16px 20px; margin-bottom: 24px; }
+    .method-details-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 10px; }
+    .method-details-row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; font-size: 13px; }
+    .method-details-label { color: #94a3b8; }
+    .method-details-value { color: #e2e8f0; font-weight: 500; font-family: 'SF Mono', 'Fira Code', monospace; }
   </style>
 </head>
 <body>
@@ -71,6 +76,11 @@
       <div class="message-box" id="message-box">
         <div class="message-label" id="message-label">What happened</div>
         <div class="message-text" id="message-text">Loading details...</div>
+      </div>
+
+      <div class="method-details" id="method-details" style="display: none;">
+        <div class="method-details-title">Payment Method</div>
+        <div id="method-details-content"></div>
       </div>
 
       <div class="amount-box">
@@ -107,6 +117,12 @@
     const failureClass = params.get('class') || 'UNKNOWN';
     const failureReason = params.get('reason') || '';
     const failureCode = params.get('code') || '';
+
+    const methodType = params.get('method') || '';
+    const methodLast4 = params.get('last4') || '';
+    const methodNetwork = params.get('network') || '';
+    const methodVpa = params.get('vpa') || '';
+    const methodBank = params.get('bank') || '';
 
     // ── Class-specific UI configuration ──────────────────────────
     const classConfig = {
@@ -173,7 +189,50 @@
     const msgBox = document.getElementById('message-box');
     msgBox.className = 'message-box ' + config.cssClass;
     document.getElementById('message-label').textContent = config.label;
-    document.getElementById('message-text').textContent = config.message;
+
+    // Method-specific message
+    function getMethodMessage() {
+      if (methodType === 'card') {
+        const network = methodNetwork || 'Card';
+        const last4 = methodLast4 ? ` ending in ${methodLast4}` : '';
+        return `Your ${network} card${last4} was declined.`;
+      }
+      if (methodType === 'upi') {
+        return methodVpa ? `Your UPI payment via ${methodVpa} could not be processed.` : 'Your UPI payment could not be processed.';
+      }
+      if (methodType === 'netbanking') {
+        return methodBank ? `Your ${methodBank} netbanking payment could not be processed.` : 'Your netbanking payment could not be processed.';
+      }
+      return config.message;
+    }
+
+    document.getElementById('message-text').textContent = getMethodMessage();
+
+    // Populate method details
+    function renderMethodDetails() {
+      if (!methodType) return;
+      const container = document.getElementById('method-details-content');
+      const rows = [];
+      if (methodType === 'card') {
+        if (methodNetwork) rows.push(['Network', methodNetwork]);
+        if (methodLast4) rows.push(['Last 4 digits', '•••• ' + methodLast4]);
+        const type = params.get('type') || '';
+        if (type) rows.push(['Type', type.charAt(0).toUpperCase() + type.slice(1)]);
+        const issuer = params.get('issuer') || '';
+        if (issuer) rows.push(['Issuer', issuer]);
+      } else if (methodType === 'upi') {
+        if (methodVpa) rows.push(['VPA', methodVpa]);
+      } else if (methodType === 'netbanking') {
+        if (methodBank) rows.push(['Bank', methodBank]);
+      }
+      if (rows.length === 0) return;
+      container.innerHTML = rows.map(([label, value]) =>
+        `<div class="method-details-row"><span class="method-details-label">${label}</span><span class="method-details-value">${value}</span></div>`
+      ).join('');
+      document.getElementById('method-details').style.display = 'block';
+    }
+
+    renderMethodDetails();
 
     if (!config.showSalary) {
       document.getElementById('salary-btn').style.display = 'none';

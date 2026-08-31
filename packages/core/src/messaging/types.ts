@@ -31,6 +31,11 @@ export interface OutreachPayload {
   action?: string;
   rawErrorReason?: string;
   scheduledForUtc?: string;
+  method?: "card" | "upi" | "netbanking" | "wallet";
+  last4?: string;
+  network?: string;
+  vpa?: string;
+  bank?: string;
 }
 
 

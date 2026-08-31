@@ -3,6 +3,20 @@
  *
  * Dispatches recovery SMS notifications through MSG91 Flow API using
  * registered TRAI DLT templates and sender ID "ARBITR" on transactional Route 4.
+ *
+ * API Format (v5/flow/):
+ * {
+ *   "flow_id": "your_flow_id",
+ *   "sender": "ARBITR",
+ *   "route": "4",
+ *   "recipients": [
+ *     {
+ *       "mobiles": "919XXXXXXXXX",
+ *       "VAR1": "value",
+ *       "VAR2": "value"
+ *     }
+ *   ]
+ * }
  */
 import { formatINR, paise, isoUtc } from "@arbiter/shared";
 import type { FailureClassId } from "../../decide/catalog.js";
@@ -16,28 +30,13 @@ export interface MSG91Config {
   flowId?: string;
 }
 
-
-export const MSG91_DLT_TEMPLATES: Record<FailureClassId, { flowId: string; dltId: string }> = {
-  SOFT_RETRYABLE: {
-    flowId: "flow_insufficient_01",
-    dltId: "1407168923450011",
-  },
-  HARD_METHOD_DEAD: {
-    flowId: "flow_expired_02",
-    dltId: "1407168923450012",
-  },
-  NETWORK_TIMEOUT: {
-    flowId: "flow_bankdown_03",
-    dltId: "1407168923450013",
-  },
-  RISK_FLAGGED: {
-    flowId: "flow_risk_quarantine",
-    dltId: "1407168923450014",
-  },
-  UNKNOWN: {
-    flowId: "flow_generic_05",
-    dltId: "1407168923450015",
-  },
+// Single flow ID for all recovery SMS (user creates one flow on MSG91 panel)
+export const MSG91_DLT_TEMPLATES: Record<FailureClassId, { dltId: string }> = {
+  SOFT_RETRYABLE: { dltId: "1407168923450011" },
+  HARD_METHOD_DEAD: { dltId: "1407168923450012" },
+  NETWORK_TIMEOUT: { dltId: "1407168923450013" },
+  RISK_FLAGGED: { dltId: "1407168923450014" },
+  UNKNOWN: { dltId: "1407168923450015" },
 };
 
 export class MSG91SmsProvider implements OutreachProvider {
@@ -49,65 +48,81 @@ export class MSG91SmsProvider implements OutreachProvider {
     const isTest = process.env.NODE_ENV === "test" || process.env.VITEST === "true";
     this.config.authKey = (rawKey && !rawKey.includes("xxxxxx") && !isTest) ? rawKey : undefined;
     this.config.senderId = config.senderId || process.env.MSG91_SENDER_ID || "ARBITR";
-    this.config.dltTemplateId = config.dltTemplateId || process.env.MSG91_DLT_TEMPLATE_ID || "1407168923450011";
+    this.config.dltTemplateId = config.dltTemplateId || process.env.MSG91_DLT_TEMPLATE_ID;
     this.config.flowId = config.flowId || process.env.MSG91_FLOW_ID;
   }
-
-
-
 
   async send(payload: OutreachPayload): Promise<ProviderDispatchResult> {
     const nowUtc = isoUtc(Date.now());
     const template = MSG91_DLT_TEMPLATES[payload.failureClass] || MSG91_DLT_TEMPLATES.SOFT_RETRYABLE;
     const formattedAmount = formatINR(paise(payload.amountPaise));
 
-    // Clean phone number: remove "+", spaces, hyphens
+    // Clean phone: remove "+", spaces, hyphens — must be 91XXXXXXXXXX format
     const cleanPhone = (payload.recipient.phone || "").replace(/[^0-9]/g, "");
+    // Ensure country code prefix for Indian numbers
+    const phone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
 
-    const recipientObj = {
-      mobiles: cleanPhone,
-      name: payload.recipient.name || "Customer",
-      amount: formattedAmount,
-      merchant: "ARBITER Store",
-      method: payload.instrumentDescription || "Card / UPI",
-      url: payload.recoveryUrl,
-      dlt_te_id: template.dltId,
-    };
+    const customerName = payload.recipient.name || payload.recipient.customerName || "Customer";
+    const recoveryUrl = payload.recoveryUrl || payload.paymentLinkUrl || "";
 
-    const flowBody = {
-      template_id: this.config.flowId || template.flowId,
-      sender: this.config.senderId,
-      short_url: "0",
-      recipients: [recipientObj],
-      ...recipientObj,
-    };
+    // Flow ID from config (user must create this on MSG91 panel)
+    const flowId = this.config.flowId;
 
+    // Check if we can send for real
+    const hasAuthKey = !!this.config.authKey;
+    const hasFlowId = !!flowId && !flowId.startsWith("flow_");
 
-
-    const effectiveFlowId = this.config.flowId;
-    // Only treat as mock if NO flowId set at all. If user explicitly set one via env, use it.
-    const isUnsetFlowId = !effectiveFlowId;
-
-    // Simulated / dry-run mode when authKey is not configured or flowId is not registered in MSG91
-    if (!this.config.authKey || isUnsetFlowId) {
-      console.log(`[MSG91] SIMULATED SMS to ${cleanPhone} (authKey: ${this.config.authKey ? 'set' : 'missing'}, flowId: ${this.config.flowId || 'missing'})`);
+    if (!hasAuthKey || !hasFlowId) {
+      console.log(`[MSG91] SIMULATED SMS to ${phone} (authKey: ${hasAuthKey ? 'set' : 'missing'}, flowId: ${flowId || 'missing'})`);
       return {
         providerName: this.name,
         channel: this.channel,
         externalMessageId: `msg91_sim_${payload.proposalId}`,
         status: "SENT",
-        costPaise: 25, // ₹0.25 transactional SMS cost
+        costPaise: 25,
         dispatchedAtUtc: nowUtc,
-        rawResponse: { simulated: true, flowBody },
+        rawResponse: { simulated: true, flowId, phone },
       };
     }
 
+    // Build MSG91 Flow API v5 request
+    // Variables must match what's configured in the MSG91 flow template
+    // MSG91 uses ##variable_name## in flow, we pass values here
+    const recipientObj: Record<string, string> = {
+      mobiles: phone,
+      name: customerName,
+      amount: formattedAmount,
+      merchant: "ARBITER Store",
+      method: payload.instrumentDescription || "Card / UPI",
+      url: recoveryUrl,
+      failure_reason: payload.rawErrorReason || "Payment failed",
+      method_type: payload.method || "",
+      last4: payload.last4 || "",
+      network: payload.network || "",
+      vpa: payload.vpa || "",
+      bank: payload.bank || "",
+    };
+
+    // Add DLT template ID if available
+    if (this.config.dltTemplateId) {
+      recipientObj.dlt_te_id = this.config.dltTemplateId;
+    }
+
+    const flowBody = {
+      flow_id: flowId,
+      sender: this.config.senderId,
+      route: "4", // Transactional route for DLT-registered templates
+      short_url: "0",
+      recipients: [recipientObj],
+    };
+
+    console.log(`[MSG91] Sending SMS to ${phone} via flow ${flowId}`);
 
     try {
       const res = await fetch("https://api.msg91.com/api/v5/flow/", {
         method: "POST",
         headers: {
-          authkey: this.config.authKey,
+          authkey: this.config.authKey!,
           "Content-Type": "application/json",
         },
         body: JSON.stringify(flowBody),
@@ -117,9 +132,9 @@ export class MSG91SmsProvider implements OutreachProvider {
       const isSuccess = data.type === "success" || res.ok;
 
       if (!isSuccess) {
-        console.error(`[MSG91] FAILED to ${cleanPhone}: ${JSON.stringify(data)}`);
+        console.error(`[MSG91] FAILED to ${phone}: HTTP ${res.status} — ${JSON.stringify(data)}`);
       } else {
-        console.log(`[MSG91] SENT SMS to ${cleanPhone}: request_id=${data.request_id}`);
+        console.log(`[MSG91] SENT SMS to ${phone}: request_id=${data.request_id}`);
       }
 
       return {
@@ -134,6 +149,7 @@ export class MSG91SmsProvider implements OutreachProvider {
         errorMessage: isSuccess ? undefined : String(data.message || "Failed to dispatch SMS"),
       };
     } catch (err) {
+      console.error(`[MSG91] NETWORK ERROR to ${phone}: ${(err as Error).message}`);
       return {
         providerName: this.name,
         channel: this.channel,
