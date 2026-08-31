@@ -14,7 +14,14 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 if (existsSync(".env")) {
-  try { process.loadEnvFile(); } catch {}
+  try {
+    process.loadEnvFile();
+    console.log("[Config] .env loaded successfully");
+  } catch (err) {
+    console.error("[Config] Failed to load .env:", (err as Error).message);
+  }
+} else {
+  console.log("[Config] No .env file found — using environment variables only");
 }
 
 import { isoUtc, formatINR, paise } from "../packages/shared/src/index.js";
@@ -59,8 +66,20 @@ const dbUrl = (dbPath.startsWith("libsql:") || dbPath.startsWith("http:") || dbP
 export const dbClient: Client = createClient({ url: dbUrl, authToken: process.env.ARBITER_DB_TOKEN });
 
 const outreachRouter = new OutreachRouter();
-outreachRouter.registerProvider(new BrevoEmailProvider());
-outreachRouter.registerProvider(new MSG91SmsProvider());
+const brevoProvider = new BrevoEmailProvider();
+const msg91Provider = new MSG91SmsProvider();
+outreachRouter.registerProvider(brevoProvider);
+outreachRouter.registerProvider(msg91Provider);
+
+// Log provider status at startup
+const brevoKey = process.env.BREVO_API_KEY;
+const msg91Key = process.env.MSG91_AUTH_KEY;
+const msg91Flow = process.env.MSG91_FLOW_ID;
+console.log("[Providers] Brevo email:", brevoKey && !brevoKey.includes("xxxxxx") ? `CONFIGURED (${brevoKey.slice(0, 8)}...)` : "SIMULATED (no API key)");
+console.log("[Providers] MSG91 SMS:", msg91Key && !msg91Key.includes("xxxxxx") ? `CONFIGURED (${msg91Key.slice(0, 8)}...)` : "SIMULATED (no auth key)");
+if (msg91Flow && msg91Flow.startsWith("flow_")) {
+  console.log("[Providers] MSG91 flow ID looks like a placeholder:", msg91Flow, "— will use simulated mode");
+}
 
 const webhookLimiter = rateLimit({ windowMs: 60_000, limit: RATE_LIMIT_WEBHOOKS_PER_MIN, standardHeaders: true });
 
@@ -776,6 +795,33 @@ app.post("/api/recovery/triage", async (req: Request, res: Response) => {
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }
+});
+
+// ── Provider Status (diagnostic endpoint) ─────────────────────
+app.get("/api/providers/status", (_req: Request, res: Response) => {
+  const brevoKey = process.env.BREVO_API_KEY;
+  const msg91Key = process.env.MSG91_AUTH_KEY;
+  const msg91Flow = process.env.MSG91_FLOW_ID;
+  const now = new Date();
+  const istHour = (now.getUTCHours() + 5) % 24 + (now.getUTCMinutes() + 30) / 60;
+
+  res.json({
+    brevo: {
+      configured: !!brevoKey && !brevoKey.includes("xxxxxx"),
+      keyPreview: brevoKey ? brevoKey.slice(0, 8) + "..." : "not set",
+    },
+    msg91: {
+      configured: !!msg91Key && !msg91Key.includes("xxxxxx"),
+      keyPreview: msg91Key ? msg91Key.slice(0, 8) + "..." : "not set",
+      flowId: msg91Flow || "not set",
+      flowIdValid: msg91Flow && !msg91Flow.startsWith("flow_"),
+    },
+    quietHours: {
+      istHour: istHour.toFixed(1),
+      isSuppressed: istHour >= 22 || istHour < 8,
+      window: "22:00 - 08:00 IST",
+    },
+  });
 });
 
 app.post("/api/recovery/initiate", async (req: Request, res: Response) => {

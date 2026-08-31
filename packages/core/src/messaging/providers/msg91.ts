@@ -85,10 +85,12 @@ export class MSG91SmsProvider implements OutreachProvider {
 
 
     const effectiveFlowId = this.config.flowId;
-    const isMockOrUnsetFlowId = !effectiveFlowId || effectiveFlowId.startsWith("flow_");
+    // Only treat as mock if NO flowId set at all. If user explicitly set one via env, use it.
+    const isUnsetFlowId = !effectiveFlowId;
 
     // Simulated / dry-run mode when authKey is not configured or flowId is not registered in MSG91
-    if (!this.config.authKey || isMockOrUnsetFlowId) {
+    if (!this.config.authKey || isUnsetFlowId) {
+      console.log(`[MSG91] SIMULATED SMS to ${cleanPhone} (authKey: ${this.config.authKey ? 'set' : 'missing'}, flowId: ${this.config.flowId || 'missing'})`);
       return {
         providerName: this.name,
         channel: this.channel,
@@ -113,6 +115,12 @@ export class MSG91SmsProvider implements OutreachProvider {
 
       const data = (await res.json()) as Record<string, unknown>;
       const isSuccess = data.type === "success" || res.ok;
+
+      if (!isSuccess) {
+        console.error(`[MSG91] FAILED to ${cleanPhone}: ${JSON.stringify(data)}`);
+      } else {
+        console.log(`[MSG91] SENT SMS to ${cleanPhone}: request_id=${data.request_id}`);
+      }
 
       return {
         providerName: this.name,

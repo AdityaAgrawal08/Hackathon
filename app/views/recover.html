@@ -7,16 +7,30 @@
   <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
     .card { background: #1e293b; border: 1px solid #334155; border-radius: 16px; padding: 40px; max-width: 440px; width: 100%; text-align: center; }
     .logo { font-size: 24px; font-weight: 700; letter-spacing: 1px; margin-bottom: 32px; color: #f8fafc; }
     .icon { font-size: 48px; margin-bottom: 16px; }
     .title { font-size: 20px; font-weight: 600; margin-bottom: 8px; color: #f8fafc; }
-    .subtitle { font-size: 14px; color: #94a3b8; margin-bottom: 24px; line-height: 1.5; }
-    .error-box { background: #450a0a; border: 1px solid #7f1d1d; border-radius: 12px; padding: 16px; margin-bottom: 24px; text-align: left; }
-    .error-label { font-size: 11px; color: #fca5a5; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
-    .error-value { font-size: 13px; color: #fecaca; line-height: 1.4; }
-    .error-code { font-family: monospace; font-size: 11px; color: #f87171; background: #1c1917; padding: 2px 6px; border-radius: 4px; display: inline-block; margin-top: 6px; }
+    .subtitle { font-size: 14px; color: #94a3b8; margin-bottom: 24px; line-height: 1.6; }
+    .message-box { background: #0f172a; border-radius: 12px; padding: 20px; margin-bottom: 24px; text-align: left; }
+    .message-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+    .message-text { font-size: 14px; line-height: 1.6; }
+    .message-box.soft { border: 1px solid #166534; }
+    .message-box.soft .message-label { color: #4ade80; }
+    .message-box.soft .message-text { color: #bbf7d0; }
+    .message-box.hard { border: 1px solid #92400e; }
+    .message-box.hard .message-label { color: #fb923c; }
+    .message-box.hard .message-text { color: #fed7aa; }
+    .message-box.network { border: 1px solid #1e3a5f; }
+    .message-box.network .message-label { color: #60a5fa; }
+    .message-box.network .message-text { color: #bfdbfe; }
+    .message-box.risk { border: 1px solid #7f1d1d; }
+    .message-box.risk .message-label { color: #f87171; }
+    .message-box.risk .message-text { color: #fecaca; }
+    .message-box.unknown { border: 1px solid #555; }
+    .message-box.unknown .message-label { color: #9ca3af; }
+    .message-box.unknown .message-text { color: #d1d5db; }
     .amount-box { background: #0f172a; border: 1px solid #334155; border-radius: 12px; padding: 20px; margin-bottom: 24px; }
     .amount-label { font-size: 13px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; }
     .amount-value { font-size: 32px; font-weight: 700; color: #22c55e; margin-top: 4px; }
@@ -34,6 +48,13 @@
     .success-view .icon { color: #22c55e; }
     .success-view .title { color: #22c55e; }
     .banner-offline { background: #854d0e; color: #fef3c7; padding: 12px; border-radius: 8px; margin-bottom: 16px; font-size: 13px; display: none; }
+    .timeline { text-align: left; margin: 16px 0; }
+    .timeline-item { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 12px; }
+    .timeline-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 6px; flex-shrink: 0; }
+    .timeline-dot.done { background: #22c55e; }
+    .timeline-dot.pending { background: #64748b; }
+    .timeline-text { font-size: 13px; color: #94a3b8; }
+    .timeline-text strong { color: #e2e8f0; }
   </style>
 </head>
 <body>
@@ -43,21 +64,20 @@
 
     <!-- Failure View (default) -->
     <div id="failure-view">
-      <div class="icon">⚠</div>
-      <div class="title">Payment Recovery Portal</div>
-      <div class="subtitle" id="message">Your previous payment could not be processed. Please complete it now to avoid service interruption.</div>
+      <div class="icon" id="main-icon">⚠</div>
+      <div class="title" id="main-title">Payment Could Not Be Processed</div>
+      <div class="subtitle" id="main-subtitle"></div>
 
-      <div class="error-box" id="error-box">
-        <div class="error-label">What went wrong</div>
-        <div class="error-value" id="error-reason">Analyzing failure...</div>
-        <div class="error-code" id="error-code"></div>
+      <div class="message-box" id="message-box">
+        <div class="message-label" id="message-label">What happened</div>
+        <div class="message-text" id="message-text">Loading details...</div>
       </div>
 
       <div class="amount-box">
         <div class="amount-label">Amount Due</div>
         <div class="amount-value" id="amount">—</div>
       </div>
-      <button class="pay-btn" id="pay-btn" onclick="openCheckout()">Pay Now</button>
+      <button class="pay-btn" id="pay-btn" onclick="openCheckout()">Retry Payment Now</button>
       <button class="salary-btn" id="salary-btn" onclick="remindSalaryDay()">Remind Me on Salary Day</button>
       <div class="status" id="status"></div>
     </div>
@@ -84,28 +104,79 @@
     let orderData = null;
     let customerData = null;
 
-    // Display failure reason from URL params (passed from store page)
-    const failureReason = params.get('reason');
-    const failureClass = params.get('class');
-    const failureCode = params.get('code');
+    const failureClass = params.get('class') || 'UNKNOWN';
+    const failureReason = params.get('reason') || '';
+    const failureCode = params.get('code') || '';
 
-    if (failureReason) {
-      document.getElementById('error-reason').textContent = decodeURIComponent(failureReason);
-    }
-    if (failureCode) {
-      document.getElementById('error-code').textContent = decodeURIComponent(failureCode);
-    }
-    // Show class-specific messaging
-    if (failureClass) {
-      const classMessages = {
-        'SOFT_RETRYABLE': 'This appears to be a temporary issue. Try again now or we\'ll remind you on payday.',
-        'HARD_METHOD_DEAD': 'Your payment method may be expired or invalid. Consider using a different method.',
-        'NETWORK_TIMEOUT': 'A network timeout occurred. This is usually temporary — try again.',
-        'RISK_FLAGGED': 'This transaction was flagged for review. Please contact support if needed.',
-        'UNKNOWN': 'An unexpected error occurred. Please try again or contact support.',
-      };
-      const msg = classMessages[decodeURIComponent(failureClass)] || classMessages['UNKNOWN'];
-      document.getElementById('message').textContent = msg;
+    // ── Class-specific UI configuration ──────────────────────────
+    const classConfig = {
+      SOFT_RETRYABLE: {
+        icon: '⚡',
+        cssClass: 'soft',
+        label: 'Temporary Issue',
+        title: 'Payment Could Not Be Processed',
+        subtitle: 'This looks like a temporary hiccup — your card or account may have had a brief issue. You can retry right now.',
+        message: 'Your bank returned a temporary error. This usually resolves quickly. Try paying again, or we can remind you on your next payday.',
+        button: 'Retry Payment Now',
+        showSalary: true,
+      },
+      HARD_METHOD_DEAD: {
+        icon: '🚫',
+        cssClass: 'hard',
+        label: 'Payment Method Issue',
+        title: 'Your Payment Method Needs Attention',
+        subtitle: 'Your card or UPI account may be expired, blocked, or invalid. Please update your details.',
+        message: 'The payment method you used cannot process this transaction. This could mean your card expired, your UPI ID changed, or your bank blocked the charge.',
+        button: 'Try a Different Method',
+        showSalary: false,
+      },
+      NETWORK_TIMEOUT: {
+        icon: '⏳',
+        cssClass: 'network',
+        label: 'Connection Timeout',
+        title: 'Payment Timed Out',
+        subtitle: 'The payment took too long to process — this is usually a temporary network issue.',
+        message: 'Your bank or UPI provider didn\'t respond in time. This is often caused by slow internet or bank server load. Try again in a few minutes.',
+        button: 'Retry Payment',
+        showSalary: true,
+      },
+      RISK_FLAGGED: {
+        icon: '🔒',
+        cssClass: 'risk',
+        label: 'Security Review',
+        title: 'Payment Under Review',
+        subtitle: 'This transaction was flagged for a security check. This is a precaution to protect your account.',
+        message: 'Our system detected something unusual about this transaction. This is a standard security measure. If you believe this is an error, please contact support.',
+        button: 'Contact Support',
+        showSalary: false,
+      },
+      UNKNOWN: {
+        icon: '❓',
+        cssClass: 'unknown',
+        label: 'Unexpected Error',
+        title: 'Something Went Wrong',
+        subtitle: 'We couldn\'t determine why your payment failed. Please try again or contact support.',
+        message: 'An unexpected error occurred during payment processing. This could be a temporary issue with your bank or a system error.',
+        button: 'Try Again',
+        showSalary: true,
+      },
+    };
+
+    const config = classConfig[failureClass] || classConfig['UNKNOWN'];
+
+    // Apply class-specific UI
+    document.getElementById('main-icon').textContent = config.icon;
+    document.getElementById('main-title').textContent = config.title;
+    document.getElementById('main-subtitle').textContent = config.subtitle;
+    document.getElementById('pay-btn').textContent = config.button;
+
+    const msgBox = document.getElementById('message-box');
+    msgBox.className = 'message-box ' + config.cssClass;
+    document.getElementById('message-label').textContent = config.label;
+    document.getElementById('message-text').textContent = config.message;
+
+    if (!config.showSalary) {
+      document.getElementById('salary-btn').style.display = 'none';
     }
 
     async function loadOrder() {
@@ -122,7 +193,6 @@
                 break;
               }
             } catch {}
-            // If not found, try looking up by orderId
             try {
               const orderRes = await fetch('/api/payments/by-order/' + realEventId);
               if (orderRes.ok) {
@@ -139,8 +209,8 @@
             if (attempts < 5) await new Promise(r => setTimeout(r, 1000));
           }
           if (customerData?.customerName) {
-            document.getElementById('message').textContent =
-              `Hi ${customerData.customerName}, your payment for ${customerData.productName || 'your order'} could not be processed. Please complete it now.`;
+            document.getElementById('main-subtitle').textContent =
+              `Hi ${customerData.customerName}, ${config.subtitle.toLowerCase()}`;
           }
         }
 
@@ -160,7 +230,7 @@
           document.getElementById('amount').textContent = '₹' + (orderData.amountPaise / 100).toLocaleString('en-IN');
         }
       } catch {
-        document.getElementById('message').textContent = 'Unable to load payment details. Please try again.';
+        document.getElementById('main-subtitle').textContent = 'Unable to load payment details. Please try again.';
       }
     }
 
@@ -191,7 +261,6 @@
             });
             const verifyData = await verifyRes.json();
             if (verifyData.success) {
-              // Show success view
               document.getElementById('failure-view').style.display = 'none';
               document.getElementById('success-view').style.display = 'block';
               document.getElementById('paid-amount').textContent = '₹' + (orderData.amountPaise / 100).toLocaleString('en-IN');
@@ -208,7 +277,7 @@
         modal: {
           ondismiss: function() {
             btn.disabled = false;
-            btn.textContent = 'Pay Now';
+            btn.textContent = config.button;
           },
         },
       };
@@ -218,7 +287,7 @@
         document.getElementById('status').className = 'status status-error';
         document.getElementById('status').textContent = 'Payment failed: ' + (response.error.description || 'Please try again');
         btn.disabled = false;
-        btn.textContent = 'Pay Now';
+        btn.textContent = config.button;
       });
       rzp.open();
     }

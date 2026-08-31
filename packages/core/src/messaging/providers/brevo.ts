@@ -96,6 +96,7 @@ export class BrevoEmailProvider implements OutreachProvider {
 
     // If no API key is provided, execute deterministic simulated dispatch
     if (!this.config.apiKey) {
+      console.log(`[Brevo] SIMULATED email to ${payload.recipient.email} (no API key configured)`);
       return {
         providerName: this.name,
         channel: this.channel,
@@ -129,6 +130,7 @@ export class BrevoEmailProvider implements OutreachProvider {
 
       const data = (await res.json()) as Record<string, unknown>;
       if (!res.ok) {
+        console.error(`[Brevo] FAILED to ${payload.recipient.email}: ${res.status} ${data.code} ${data.message}`);
         return {
           providerName: this.name,
           channel: this.channel,
@@ -152,6 +154,7 @@ export class BrevoEmailProvider implements OutreachProvider {
         rawResponse: data,
       };
     } catch (err) {
+      console.error(`[Brevo] ERROR to ${payload.recipient.email}: ${(err as Error).message}`);
       return {
         providerName: this.name,
         channel: this.channel,
