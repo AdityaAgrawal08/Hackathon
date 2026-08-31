@@ -2,14 +2,13 @@
  * MSG91 Indian DLT SMS Provider (Task 2.3)
  *
  * Dispatches recovery SMS notifications through MSG91 Flow API using
- * registered TRAI DLT templates and sender ID "ARBITR" on transactional Route 4.
+ * registered TRAI DLT templates.
  *
- * API Format (v5/flow/):
+ * API Format (v5/flow):
+ * POST https://control.msg91.com/api/v5/flow
  * {
- *   "flow_id": "your_flow_id",
- *   "sender": "ARBITR",
- *   "route": "4",
- *   "short_url": "0",
+ *   "template_id": "your_template_id",
+ *   "short_url": "1",
  *   "recipients": [
  *     {
  *       "mobiles": "919XXXXXXXXX",
@@ -28,10 +27,10 @@ export interface MSG91Config {
   senderId?: string; // e.g. "ARBITR"
   webhookSecret?: string;
   dltTemplateId?: string;
-  flowId?: string;
+  templateId?: string;
 }
 
-// Single flow ID for all recovery SMS (user creates one flow on MSG91 panel)
+// DLT template IDs for reference (kept for backward compatibility)
 export const MSG91_DLT_TEMPLATES: Record<FailureClassId, { dltId: string }> = {
   SOFT_RETRYABLE: { dltId: "1407168923450011" },
   HARD_METHOD_DEAD: { dltId: "1407168923450012" },
@@ -49,36 +48,30 @@ export class MSG91SmsProvider implements OutreachProvider {
     const isTest = process.env.NODE_ENV === "test" || process.env.VITEST === "true";
     this.config.authKey = (rawKey && !rawKey.includes("xxxxxx") && !isTest) ? rawKey : undefined;
     this.config.senderId = config.senderId || process.env.MSG91_SENDER_ID || "ARBITR";
-    this.config.dltTemplateId = config.dltTemplateId || process.env.MSG91_DLT_TEMPLATE_ID;
-    this.config.flowId = config.flowId || process.env.MSG91_FLOW_ID;
+    // template_id: use MSG91_TEMPLATE_ID env, fallback to MSG91_DLT_TEMPLATE_ID
+    this.config.templateId = config.templateId || process.env.MSG91_TEMPLATE_ID || process.env.MSG91_DLT_TEMPLATE_ID;
 
-    console.log(`[MSG91] Constructor — authKey: ${this.config.authKey ? 'SET (' + this.config.authKey.slice(0, 8) + '...)' : 'MISSING'}, flowId: ${this.config.flowId || 'MISSING'}, senderId: ${this.config.senderId}`);
+    console.log(`[MSG91] Constructor — authKey: ${this.config.authKey ? 'SET (' + this.config.authKey.slice(0, 8) + '...)' : 'MISSING'}, templateId: ${this.config.templateId || 'MISSING'}`);
   }
 
   async send(payload: OutreachPayload): Promise<ProviderDispatchResult> {
     const nowUtc = isoUtc(Date.now());
-    const template = MSG91_DLT_TEMPLATES[payload.failureClass] || MSG91_DLT_TEMPLATES.SOFT_RETRYABLE;
     const formattedAmount = formatINR(paise(payload.amountPaise));
 
-    // Clean phone: remove "+", spaces, hyphens — must be 91XXXXXXXXXX format
-    const cleanPhone = (payload.recipient.phone || "").replace(/[^0-9]/g, "");
-    // Ensure country code prefix for Indian numbers
-    const phone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
+    // Phone: must be 91XXXXXXXXXX format (country code + 10 digits)
+    // User types only 10 digits, we prepend 91
+    const rawPhone = (payload.recipient.phone || "").replace(/[^0-9]/g, "");
+    const phone = rawPhone.length === 10 ? `91${rawPhone}` : rawPhone;
 
     const customerName = payload.recipient.name || payload.recipient.customerName || "Customer";
     const recoveryUrl = payload.recoveryUrl || payload.paymentLinkUrl || "";
 
-    // Flow ID from config (user must create this on MSG91 panel)
-    const flowId = this.config.flowId;
-
     // Check if we can send for real
     const hasAuthKey = !!this.config.authKey;
-    // FIXED: Do NOT reject flow IDs starting with "flow_" — that's how MSG91 names them!
-    // Only reject if flowId is undefined/empty or literally just "flow_" (placeholder)
-    const hasFlowId = !!flowId && flowId !== "flow_";
+    const hasTemplateId = !!this.config.templateId;
 
-    if (!hasAuthKey || !hasFlowId) {
-      const reason = !hasAuthKey ? "no authKey" : `invalid flowId="${flowId}"`;
+    if (!hasAuthKey || !hasTemplateId) {
+      const reason = !hasAuthKey ? "no authKey" : `no templateId`;
       console.log(`[MSG91] SIMULATED SMS to ${phone} — reason: ${reason}`);
       console.log(`[MSG91] SIMULATED body: ${JSON.stringify({ failureClass: payload.failureClass, amount: formattedAmount, recoveryUrl })}`);
       return {
@@ -88,13 +81,12 @@ export class MSG91SmsProvider implements OutreachProvider {
         status: "SENT",
         costPaise: 25,
         dispatchedAtUtc: nowUtc,
-        rawResponse: { simulated: true, flowId, phone, reason },
+        rawResponse: { simulated: true, templateId: this.config.templateId, phone, reason },
       };
     }
 
     // Build MSG91 Flow API v5 request
-    // Variables must match what's configured in the MSG91 flow template
-    // MSG91 uses ##variable_name## in flow, we pass values here
+    // Variables MUST match what's configured in the MSG91 flow template (case-sensitive)
     const recipientObj: Record<string, string> = {
       mobiles: phone,
       name: customerName,
@@ -110,28 +102,22 @@ export class MSG91SmsProvider implements OutreachProvider {
       bank: payload.bank || "",
     };
 
-    // Add DLT template ID if available
-    if (this.config.dltTemplateId) {
-      recipientObj.dlt_te_id = this.config.dltTemplateId;
-    }
-
     const flowBody = {
-      flow_id: flowId,
-      sender: this.config.senderId,
-      route: "4", // Transactional route for DLT-registered templates
-      short_url: "0",
+      template_id: this.config.templateId,
+      short_url: "1",
       recipients: [recipientObj],
     };
 
-    console.log(`[MSG91] SENDING SMS to ${phone} via flow ${flowId}`);
+    console.log(`[MSG91] SENDING SMS to ${phone} via template ${this.config.templateId}`);
     console.log(`[MSG91] Request body: ${JSON.stringify(flowBody, null, 2)}`);
 
     try {
-      const res = await fetch("https://api.msg91.com/api/v5/flow/", {
+      const res = await fetch("https://control.msg91.com/api/v5/flow", {
         method: "POST",
         headers: {
           authkey: this.config.authKey!,
           "Content-Type": "application/json",
+          accept: "application/json",
         },
         body: JSON.stringify(flowBody),
       });
