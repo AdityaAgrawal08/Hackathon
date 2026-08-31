@@ -283,26 +283,41 @@ export async function processFailedPayment(
         email: customer?.email ?? "",
       },
       amountPaise: input.amountPaise,
-      paymentLinkUrl: `${process.env.BASE_URL || "http://localhost:3000"}/pay/${eventId}`,
+      paymentLinkUrl: `${process.env.BASE_URL || "http://localhost:3000"}/recover/${eventId}`,
       language: "EN",
       rawErrorReason: input.failureCode,
       instrumentDescription: input.failureDescription,
     };
 
-    // Dispatch Email via Brevo
-    try {
-      const emailResult = await outreachRouter.dispatch("EMAIL", outreachPayload, nowMs);
-      dispatchResults.push(emailResult);
-    } catch (err) {
-      console.error("[Outreach] Email dispatch failed:", err);
+    console.log(`[Outreach] Dispatching for ${failureClass} | phone: ${outreachPayload.recipient.phone || '(none)'} | email: ${outreachPayload.recipient.email || '(none)'}`);
+
+    // Dispatch Email via Brevo (skip if no email)
+    if (outreachPayload.recipient.email) {
+      try {
+        const emailResult = await outreachRouter.dispatch("EMAIL", outreachPayload, nowMs);
+        dispatchResults.push(emailResult);
+        console.log(`[Outreach] EMAIL → ${emailResult.status} via ${emailResult.providerName}`);
+      } catch (err) {
+        console.error("[Outreach] Email dispatch failed:", err);
+      }
+    } else {
+      console.log("[Outreach] SKIPPED email: no email address on customer profile");
     }
 
-    // Dispatch SMS via MSG91
-    try {
-      const smsResult = await outreachRouter.dispatch("SMS", outreachPayload, nowMs);
-      dispatchResults.push(smsResult);
-    } catch (err) {
-      console.error("[Outreach] SMS dispatch failed:", err);
+    // Dispatch SMS via MSG91 (skip if no phone)
+    if (outreachPayload.recipient.phone) {
+      try {
+        const smsResult = await outreachRouter.dispatch("SMS", outreachPayload, nowMs);
+        dispatchResults.push(smsResult);
+        console.log(`[Outreach] SMS → ${smsResult.status} via ${smsResult.providerName}`);
+        if (smsResult.status.includes("SUPPRESSED")) {
+          console.log(`[Outreach] SMS suppressed: ${smsResult.errorMessage}`);
+        }
+      } catch (err) {
+        console.error("[Outreach] SMS dispatch failed:", err);
+      }
+    } else {
+      console.log("[Outreach] SKIPPED SMS: no phone number on customer profile");
     }
 
     // Schedule follow-ups

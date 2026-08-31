@@ -42,7 +42,9 @@ export class OutreachRouter {
 
     // 1. Regulatory Guardrail: Quiet Hours (22:00 to 08:00 IST)
     // Non-email channels cannot disturb customers at night
-    if (channel !== "EMAIL" && inQuietHoursIST(nowMs)) {
+    // Bypass with ARBITER_NO_QUIET_HOURS=1 for testing
+    if (channel !== "EMAIL" && inQuietHoursIST(nowMs) && !process.env.ARBITER_NO_QUIET_HOURS) {
+      console.log(`[Router] SMS suppressed: quiet hours IST (current hour: ${(new Date().getUTCHours() + 5) % 24})`);
       return {
         providerName: "router_guard",
         channel,

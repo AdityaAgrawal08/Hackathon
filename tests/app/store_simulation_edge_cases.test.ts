@@ -139,7 +139,7 @@ describe("Store & Payment Workflow Edge-Case Tests", () => {
     const res = await fetch(`${baseUrl}/recover/test-event-id`);
     expect(res.status).toBe(200);
     const html = await res.text();
-    expect(html).toContain("Payment Recovery Portal");
+    expect(html).toContain("Payment Could Not Be Processed");
     expect(html).toContain("checkout.razorpay.com");
   });
 });
