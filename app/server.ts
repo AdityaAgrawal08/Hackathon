@@ -48,8 +48,8 @@ import {
   PRODUCTS,
   getProduct,
   processFailedPayment,
-  recordSuccessfulPayment,
 } from "./payment_workflow.js";
+import { getCustomerMessage, getVendorMessage, getErrorEntry } from "../packages/core/src/error-catalog.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const app = express();
@@ -107,7 +107,6 @@ function nextDemoError(): string {
 
 // Simplified human-readable error reasons — user sees this, not raw codes
 function getSimplifiedReason(code: string, failureClass: string): string {
-  const { getCustomerMessage } = require("../packages/core/src/error-catalog.js");
   return getCustomerMessage(code);
 }
 
@@ -698,8 +697,6 @@ app.get("/api/vendor/analytics", async (_req: Request, res: Response) => {
 
 app.get("/api/vendor/failure-analysis", async (_req: Request, res: Response) => {
   try {
-    const { getVendorMessage, getRecommendedAction, getErrorEntry } = require("../packages/core/src/error-catalog.js");
-
     const failed = await dbClient.execute({
       sql: `SELECT failure_code, COUNT(*) as cnt, SUM(amount_paise) as total_amount
             FROM live_payment_events

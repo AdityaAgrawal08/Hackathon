@@ -250,7 +250,75 @@ export async function processFailedPayment(
   const isSuspicious = credResult.isSuspicious;
 
   // 7. Log to live_payment_events with ALL Razorpay webhook fields
+  // Dedup: same customer + same order = UPDATE existing row (retry), not INSERT new row
   const eventId = `evt_${nowMs}_${createHash("sha256").update(`${input.razorpayPaymentId}${nowMs}`).digest("hex").slice(0, 8)}`;
+
+  const existingRow = await client.execute({
+    sql: `SELECT id, retry_count FROM live_payment_events
+          WHERE customer_profile_id = ? AND razorpay_order_id = ? AND status = 'failed'
+          ORDER BY created_at_utc DESC LIMIT 1`,
+    args: [input.customerProfileId, input.razorpayOrderId],
+  });
+
+  if (existingRow.rows.length > 0) {
+    // RETRY: Update existing failed row with new method, new error, increment retry_count
+    const existingId = String(existingRow.rows[0].id);
+    const existingRetryCount = Number(existingRow.rows[0].retry_count || 0);
+    await client.execute({
+      sql: `UPDATE live_payment_events SET
+        razorpay_payment_id = ?,
+        failure_code = ?, failure_description = ?, failure_step = ?, failure_source = ?, failure_reason = ?,
+        failure_class = ?, ml_probability = ?, ml_action = ?,
+        payment_method = ?, card_last4 = ?, card_network = ?, card_issuer = ?, card_type = ?,
+        vpa = ?, bank_code = ?,
+        retry_count = ?,
+        created_at_utc = ?
+        WHERE id = ?`,
+      args: [
+        input.razorpayPaymentId,
+        input.failureCode, input.failureDescription, input.failureStep, input.failureSource, input.failureReason,
+        failureClass, probability, decideOutput.chosen.action,
+        input.paymentMethod || null, input.cardLast4 || null, input.cardNetwork || null,
+        input.cardIssuer || null, input.cardType || null,
+        input.vpa || null, input.bankCode || null,
+        existingRetryCount + 1,
+        nowUtc,
+        existingId,
+      ],
+    });
+    console.log(`[Workflow] Retry: updated event ${existingId} (retry #${existingRetryCount + 1}) for order ${input.razorpayOrderId}`);
+
+    // 8. Update customer profile
+    await client.execute({
+      sql: `UPDATE customer_profiles SET
+        total_attempts = total_attempts + 1,
+        total_failures = total_failures + 1,
+        last_failure_code = ?,
+        last_failure_at_utc = ?,
+        flagged_as_suspicious = ?,
+        risk_score_bp = MAX(risk_score_bp, ?)
+        WHERE id = ?`,
+      args: [
+        input.failureCode,
+        nowUtc,
+        isSuspicious ? 1 : 0,
+        isSuspicious ? 3000 : 0,
+        input.customerProfileId,
+      ],
+    });
+
+    return {
+      eventId: existingId,
+      failureClass,
+      action: decideOutput.chosen.action,
+      probability,
+      outreachResults: [],
+      isSuspicious,
+      suspicionReasons,
+    };
+  }
+
+  // FIRST ATTEMPT: Insert new row
   await client.execute({
     sql: `INSERT INTO live_payment_events
       (id, razorpay_payment_id, razorpay_order_id, customer_profile_id, product_name, amount_paise,
