@@ -1027,6 +1027,45 @@ app.get("/api/recovery/result/:proposalId", async (req: Request, res: Response) 
   }
 });
 
+// ── Get event + customer data from DB (for recovery page) ────────
+app.get("/api/events/:eventId", async (req: Request, res: Response) => {
+  try {
+    const rows = await dbClient.execute({
+      sql: `SELECT lpe.*, cp.name as customer_name, cp.phone as customer_phone, cp.email as customer_email
+            FROM live_payment_events lpe
+            LEFT JOIN customer_profiles cp ON cp.id = lpe.customer_profile_id
+            WHERE lpe.id = ?`,
+      args: [req.params.eventId],
+    });
+    if (rows.rows.length === 0) return res.status(404).json({ error: "Event not found" });
+    const row = rows.rows[0] as any;
+    res.json({
+      eventId: row.id,
+      razorpayPaymentId: row.razorpay_payment_id,
+      razorpayOrderId: row.razorpay_order_id,
+      customerProfileId: row.customer_profile_id,
+      customerName: row.customer_name || "",
+      phone: row.customer_phone || "",
+      email: row.customer_email || "",
+      productName: row.product_name || "",
+      amountPaise: row.amount_paise,
+      status: row.status,
+      failureClass: row.failure_class,
+      failureCode: row.failure_code,
+      failureDescription: row.failure_description,
+      paymentMethod: row.payment_method,
+      cardLast4: row.card_last4,
+      cardNetwork: row.card_network,
+      cardType: row.card_type,
+      vpa: row.vpa,
+      bankCode: row.bank_code,
+      createdAt: row.created_at_utc,
+    });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
 // ── Scheduled Outreach Sweeper ───────────────────────────────────
 async function sweepScheduledOutreach() {
   try {

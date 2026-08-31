@@ -37,9 +37,6 @@
     .pay-btn { width: 100%; padding: 14px; background: #2563eb; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; transition: background 0.2s; margin-bottom: 12px; }
     .pay-btn:hover { background: #1d4ed8; }
     .pay-btn:disabled { background: #475569; cursor: not-allowed; }
-    .salary-btn { width: 100%; padding: 14px; background: #f59e0b; color: #0f172a; border: none; border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; transition: background 0.2s; margin-bottom: 16px; }
-    .salary-btn:hover { background: #d97706; }
-    .salary-btn:disabled { background: #475569; color: #94a3b8; cursor: not-allowed; }
     .status { display: none; padding: 12px; border-radius: 8px; font-size: 14px; margin-bottom: 16px; }
     .status-success { background: #052e16; border: 1px solid #14532d; color: #86efac; display: block; }
     .status-error { background: #450a0a; border: 1px solid #7f1d1d; color: #fca5a5; display: block; }
@@ -48,28 +45,32 @@
     .success-view .icon { color: #22c55e; }
     .success-view .title { color: #22c55e; }
     .banner-offline { background: #854d0e; color: #fef3c7; padding: 12px; border-radius: 8px; margin-bottom: 16px; font-size: 13px; display: none; }
-    .timeline { text-align: left; margin: 16px 0; }
-    .timeline-item { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 12px; }
-    .timeline-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 6px; flex-shrink: 0; }
-    .timeline-dot.done { background: #22c55e; }
-    .timeline-dot.pending { background: #64748b; }
-    .timeline-text { font-size: 13px; color: #94a3b8; }
-    .timeline-text strong { color: #e2e8f0; }
     .method-details { background: #0f172a; border: 1px solid #334155; border-radius: 12px; padding: 16px 20px; margin-bottom: 24px; }
     .method-details-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 10px; }
     .method-details-row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; font-size: 13px; }
     .method-details-label { color: #94a3b8; }
     .method-details-value { color: #e2e8f0; font-weight: 500; font-family: 'SF Mono', 'Fira Code', monospace; }
+    .error-view { display: none; text-align: center; padding: 40px 20px; }
+    .error-view .icon { color: #f87171; }
+    .error-view .title { color: #f87171; }
   </style>
 </head>
 <body>
   <div class="card" id="payment-card">
-    <div class="banner-offline" id="banner-offline">You appear to be offline. Payment link will be sent via SMS.</div>
+    <div class="banner-offline" id="banner-offline">You appear to be offline. Please check your connection.</div>
     <div class="logo">ARBITER</div>
+
+    <!-- Error View (no data) -->
+    <div class="error-view" id="error-view">
+      <div class="icon">!</div>
+      <div class="title">Payment Not Found</div>
+      <div class="subtitle" id="error-message">We couldn't find your payment details. Please try again from the store.</div>
+      <button class="pay-btn" onclick="window.location.href='/'">Back to Store</button>
+    </div>
 
     <!-- Failure View (default) -->
     <div id="failure-view">
-      <div class="icon" id="main-icon">⚠</div>
+      <div class="icon" id="main-icon">!</div>
       <div class="title" id="main-title">Payment Could Not Be Processed</div>
       <div class="subtitle" id="main-subtitle"></div>
 
@@ -85,10 +86,9 @@
 
       <div class="amount-box">
         <div class="amount-label">Amount Due</div>
-        <div class="amount-value" id="amount">—</div>
+        <div class="amount-value" id="amount">--</div>
       </div>
       <button class="pay-btn" id="pay-btn" onclick="openCheckout()">Retry Payment Now</button>
-      <button class="salary-btn" id="salary-btn" onclick="remindSalaryDay()">Remind Me on Salary Day</button>
       <div class="status" id="status"></div>
     </div>
 
@@ -99,7 +99,7 @@
       <div class="subtitle">Your payment has been processed successfully. Thank you!</div>
       <div class="amount-box">
         <div class="amount-label">Amount Paid</div>
-        <div class="amount-value" id="paid-amount">—</div>
+        <div class="amount-value" id="paid-amount">--</div>
       </div>
       <button class="pay-btn" onclick="window.location.href='/'">Back to Store</button>
     </div>
@@ -110,73 +110,62 @@
   <script>
     const eventId = window.location.pathname.split('/').pop();
     const params = new URLSearchParams(window.location.search);
-    const proposalId = params.get('prop') || eventId;
     let orderData = null;
-    let customerData = null;
+    let eventData = null;
 
+    // Read failure class and method info from URL params
     const failureClass = params.get('class') || 'UNKNOWN';
     const failureReason = params.get('reason') || '';
     const failureCode = params.get('code') || '';
-
     const methodType = params.get('method') || '';
     const methodLast4 = params.get('last4') || '';
     const methodNetwork = params.get('network') || '';
     const methodVpa = params.get('vpa') || '';
     const methodBank = params.get('bank') || '';
-    const productId = params.get('product') || '';
-    const productName = params.get('productName') || '';
+    const methodCardType = params.get('type') || '';
+    const methodIssuer = params.get('issuer') || '';
 
-    // ── Class-specific UI configuration ──────────────────────────
+    // Simplified human-readable error messages — no ML jargon
     const classConfig = {
       SOFT_RETRYABLE: {
         icon: '⚡',
         cssClass: 'soft',
         label: 'Temporary Issue',
         title: 'Payment Could Not Be Processed',
-        subtitle: 'This looks like a temporary hiccup — your card or account may have had a brief issue. You can retry right now.',
-        message: 'Your bank returned a temporary error. This usually resolves quickly. Try paying again, or we can remind you on your next payday.',
-        button: 'Retry Payment Now',
-        showSalary: true,
+        subtitle: 'Your account had a temporary issue. You can retry right now.',
+        message: 'Your bank returned a temporary error. This usually means insufficient funds or a brief decline. No money was deducted.',
       },
       HARD_METHOD_DEAD: {
         icon: '🚫',
         cssClass: 'hard',
         label: 'Payment Method Issue',
         title: 'Your Payment Method Needs Attention',
-        subtitle: 'Your card or UPI account may be expired, blocked, or invalid. Please update your details.',
-        message: 'The payment method you used cannot process this transaction. This could mean your card expired, your UPI ID changed, or your bank blocked the charge.',
-        button: 'Try a Different Method',
-        showSalary: false,
+        subtitle: 'Your card or UPI account may be expired, blocked, or invalid.',
+        message: 'The payment method you used cannot process this transaction. Please update your details or use a different method.',
       },
       NETWORK_TIMEOUT: {
         icon: '⏳',
         cssClass: 'network',
         label: 'Connection Timeout',
         title: 'Payment Timed Out',
-        subtitle: 'The payment took too long to process — this is usually a temporary network issue.',
-        message: 'Your bank or UPI provider didn\'t respond in time. This is often caused by slow internet or bank server load. Try again in a few minutes.',
-        button: 'Retry Payment',
-        showSalary: true,
+        subtitle: 'The bank server took too long to respond. No money was deducted.',
+        message: 'Your bank or UPI provider didn\'t respond in time. This is often caused by bank server load. We are working to resolve this.',
       },
       RISK_FLAGGED: {
         icon: '🔒',
         cssClass: 'risk',
         label: 'Security Review',
         title: 'Payment Under Review',
-        subtitle: 'This transaction was flagged for a security check. This is a precaution to protect your account.',
-        message: 'Our system detected something unusual about this transaction. This is a standard security measure. If you believe this is an error, please contact support.',
-        button: 'Contact Support',
-        showSalary: false,
+        subtitle: 'This transaction was flagged for a security check.',
+        message: 'Our system detected something unusual. This is a standard security measure. Please contact support if you believe this is an error.',
       },
       UNKNOWN: {
         icon: '❓',
         cssClass: 'unknown',
         label: 'Unexpected Error',
         title: 'Something Went Wrong',
-        subtitle: 'We couldn\'t determine why your payment failed. Please try again or contact support.',
-        message: 'An unexpected error occurred during payment processing. This could be a temporary issue with your bank or a system error.',
-        button: 'Try Again',
-        showSalary: true,
+        subtitle: 'We couldn\'t determine why your payment failed. Please try again.',
+        message: 'An unexpected error occurred. This could be a temporary issue with your bank.',
       },
     };
 
@@ -186,122 +175,122 @@
     document.getElementById('main-icon').textContent = config.icon;
     document.getElementById('main-title').textContent = config.title;
     document.getElementById('main-subtitle').textContent = config.subtitle;
-    document.getElementById('pay-btn').textContent = config.button;
 
     const msgBox = document.getElementById('message-box');
     msgBox.className = 'message-box ' + config.cssClass;
     document.getElementById('message-label').textContent = config.label;
 
-    // Method-specific message
+    // Method-specific message — simplified for user
     function getMethodMessage() {
       if (methodType === 'card') {
         const network = methodNetwork || 'Card';
-        const last4 = methodLast4 ? ` ending in ${methodLast4}` : '';
-        return `Your ${network} card${last4} was declined.`;
+        const last4 = methodLast4 ? ' ending in ' + methodLast4 : '';
+        if (failureClass === 'HARD_METHOD_DEAD') return 'Your ' + network + ' card' + last4 + ' has expired or is invalid. Please use a different card.';
+        return 'Your ' + network + ' card' + last4 + ' payment could not be processed. Please try again or use a different card.';
       }
       if (methodType === 'upi') {
-        return methodVpa ? `Your UPI payment via ${methodVpa} could not be processed.` : 'Your UPI payment could not be processed.';
+        if (failureClass === 'HARD_METHOD_DEAD') return 'Your UPI ID' + (methodVpa ? ' (' + methodVpa + ')' : '') + ' is invalid or the mandate was cancelled. Please set up UPI again.';
+        return 'Your UPI payment' + (methodVpa ? ' via ' + methodVpa : '') + ' could not be processed. Please try again.';
       }
       if (methodType === 'netbanking') {
-        return methodBank ? `Your ${methodBank} netbanking payment could not be processed.` : 'Your netbanking payment could not be processed.';
+        return 'Your ' + (methodBank || 'bank') + ' netbanking payment could not be processed. Please try again or use a different method.';
       }
       return config.message;
     }
 
     document.getElementById('message-text').textContent = getMethodMessage();
 
-    // Populate method details
+    // Populate method details — sanitized for XSS
+    function escapeHtml(str) {
+      var div = document.createElement('div');
+      div.appendChild(document.createTextNode(str));
+      return div.innerHTML;
+    }
+
     function renderMethodDetails() {
       if (!methodType) return;
-      const container = document.getElementById('method-details-content');
-      const rows = [];
+      var container = document.getElementById('method-details-content');
+      var rows = [];
       if (methodType === 'card') {
         if (methodNetwork) rows.push(['Network', methodNetwork]);
-        if (methodLast4) rows.push(['Last 4 digits', '•••• ' + methodLast4]);
-        const type = params.get('type') || '';
-        if (type) rows.push(['Type', type.charAt(0).toUpperCase() + type.slice(1)]);
-        const issuer = params.get('issuer') || '';
-        if (issuer) rows.push(['Issuer', issuer]);
+        if (methodLast4) rows.push(['Last 4 digits', '\u2022\u2022\u2022\u2022 ' + methodLast4]);
+        if (methodCardType) rows.push(['Type', methodCardType.charAt(0).toUpperCase() + methodCardType.slice(1)]);
+        if (methodIssuer) rows.push(['Issuer', methodIssuer]);
       } else if (methodType === 'upi') {
         if (methodVpa) rows.push(['VPA', methodVpa]);
       } else if (methodType === 'netbanking') {
         if (methodBank) rows.push(['Bank', methodBank]);
       }
       if (rows.length === 0) return;
-      container.innerHTML = rows.map(([label, value]) =>
-        `<div class="method-details-row"><span class="method-details-label">${label}</span><span class="method-details-value">${value}</span></div>`
-      ).join('');
+      container.innerHTML = rows.map(function(r) {
+        return '<div class="method-details-row"><span class="method-details-label">' + escapeHtml(r[0]) + '</span><span class="method-details-value">' + escapeHtml(r[1]) + '</span></div>';
+      }).join('');
       document.getElementById('method-details').style.display = 'block';
     }
 
     renderMethodDetails();
 
-    if (!config.showSalary) {
-      document.getElementById('salary-btn').style.display = 'none';
-    }
-
-    async function loadOrder() {
+    async function loadEventData() {
       try {
-        // Try to fetch actual proposal/event data first
-        let realEventId = proposalId;
-        if (realEventId && realEventId !== 'undefined') {
-          let attempts = 0;
-          while (attempts < 5) {
-            try {
-              const propRes = await fetch('/api/recovery/result/' + realEventId);
-              if (propRes.ok) {
-                customerData = await propRes.json();
-                break;
-              }
-            } catch {}
-            try {
-              const orderRes = await fetch('/api/payments/by-order/' + realEventId);
-              if (orderRes.ok) {
-                const od = await orderRes.json();
-                realEventId = od.eventId;
-                const propRes2 = await fetch('/api/recovery/result/' + realEventId);
-                if (propRes2.ok) {
-                  customerData = await propRes2.json();
-                  break;
-                }
-              }
-            } catch {}
-            attempts++;
-            if (attempts < 5) await new Promise(r => setTimeout(r, 1000));
-          }
-          if (customerData?.customerName) {
+        // Fetch event data from DB (not in-memory sessions)
+        var res = await fetch('/api/events/' + eventId);
+        if (res.ok) {
+          eventData = await res.json();
+          // Update subtitle with customer name
+          if (eventData.customerName) {
             document.getElementById('main-subtitle').textContent =
-              `Hi ${customerData.customerName}, ${config.subtitle.toLowerCase()}`;
+              'Hi ' + eventData.customerName + ', ' + config.subtitle.toLowerCase();
+          }
+          // Update amount from DB
+          if (eventData.amountPaise) {
+            document.getElementById('amount').textContent = '\u20B9' + (eventData.amountPaise / 100).toLocaleString('en-IN');
           }
         }
+      } catch (e) {
+        // Event data not available — show error
+        document.getElementById('failure-view').style.display = 'none';
+        document.getElementById('error-view').style.display = 'block';
+        return;
+      }
 
-        // Create a real Razorpay order for recovery payment
-        const res = await fetch('/api/orders/create', {
+      // Create a Razorpay order for recovery payment
+      try {
+        var orderRes = await fetch('/api/orders/create', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            productId: productId || customerData?.productName || 'prod_premium_plan',
-            customerName: customerData?.customerName || 'Customer',
-            customerPhone: customerData?.phone || '919876543210',
-            customerEmail: customerData?.email || 'customer@example.com',
+            productId: eventData ? mapProductNameToId(eventData.productName) : 'prod_premium_plan',
+            customerName: eventData ? eventData.customerName : 'Customer',
+            customerPhone: eventData ? eventData.phone : '919876543210',
+            customerEmail: eventData ? eventData.email : 'customer@example.com',
           }),
         });
-        orderData = await res.json();
+        orderData = await orderRes.json();
         if (orderData.amountPaise) {
-          document.getElementById('amount').textContent = '₹' + (orderData.amountPaise / 100).toLocaleString('en-IN');
+          document.getElementById('amount').textContent = '\u20B9' + (orderData.amountPaise / 100).toLocaleString('en-IN');
         }
-      } catch {
+      } catch (e) {
         document.getElementById('main-subtitle').textContent = 'Unable to load payment details. Please try again.';
       }
     }
 
+    function mapProductNameToId(name) {
+      var map = {
+        'Premium Annual Plan': 'prod_premium_plan',
+        'Monthly Basic': 'prod_monthly_basic',
+        'Team License (5 seats)': 'prod_team_license',
+        'Enterprise (Custom)': 'prod_enterprise',
+      };
+      return map[name] || 'prod_premium_plan';
+    }
+
     function openCheckout() {
-      if (!orderData?.orderId) return;
-      const btn = document.getElementById('pay-btn');
+      if (!orderData || !orderData.orderId) return;
+      var btn = document.getElementById('pay-btn');
       btn.disabled = true;
       btn.textContent = 'Processing...';
 
-      const options = {
+      var options = {
         key: orderData.keyId,
         amount: orderData.amountPaise,
         currency: orderData.currency,
@@ -310,7 +299,7 @@
         order_id: orderData.orderId,
         handler: async function(response) {
           try {
-            const verifyRes = await fetch('/api/payments/verify', {
+            var verifyRes = await fetch('/api/payments/verify', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -320,40 +309,46 @@
                 orderId: orderData.orderId,
               }),
             });
-            const verifyData = await verifyRes.json();
+            var verifyData = await verifyRes.json();
             if (verifyData.success) {
               document.getElementById('failure-view').style.display = 'none';
               document.getElementById('success-view').style.display = 'block';
-              document.getElementById('paid-amount').textContent = '₹' + (orderData.amountPaise / 100).toLocaleString('en-IN');
+              document.getElementById('paid-amount').textContent = '\u20B9' + (orderData.amountPaise / 100).toLocaleString('en-IN');
             } else {
               document.getElementById('status').className = 'status status-error';
               document.getElementById('status').textContent = 'Payment verification pending. We will confirm shortly.';
+              btn.disabled = false;
+              btn.textContent = 'Retry Payment Now';
             }
-          } catch {
+          } catch (e) {
             document.getElementById('status').className = 'status status-success';
             document.getElementById('status').textContent = 'Payment received. Confirmation pending.';
+            btn.disabled = false;
+            btn.textContent = 'Retry Payment Now';
           }
         },
         theme: { color: '#2563eb' },
         modal: {
           ondismiss: function() {
             btn.disabled = false;
-            btn.textContent = config.button;
+            btn.textContent = 'Retry Payment Now';
           },
         },
       };
 
-      const rzp = new Razorpay(options);
+      var rzp = new Razorpay(options);
       rzp.on('payment.failed', function(response) {
+        var err = response.error || {};
+        var errorDesc = err.description || 'Payment could not be processed';
         document.getElementById('status').className = 'status status-error';
-        document.getElementById('status').textContent = 'Payment failed: ' + (response.error.description || 'Please try again');
+        document.getElementById('status').textContent = 'Payment failed: ' + errorDesc;
         btn.disabled = false;
-        btn.textContent = config.button;
+        btn.textContent = 'Retry Payment Now';
       });
       rzp.open();
     }
 
-    loadOrder();
+    loadEventData();
 
     window.addEventListener("offline", function() {
       document.getElementById('banner-offline').style.display = 'block';
@@ -361,30 +356,6 @@
     window.addEventListener("online", function() {
       document.getElementById('banner-offline').style.display = 'none';
     });
-
-    function remindSalaryDay() {
-      const btn = document.getElementById('salary-btn');
-      btn.disabled = true;
-      btn.textContent = 'Scheduling...';
-
-      fetch('/api/recovery/promise-to-pay', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ proposalId: proposalId || eventId, promisedDay: 28 }),
-      }).then(res => res.json()).then(data => {
-        if (data.success) {
-          document.getElementById('status').className = 'status status-success';
-          document.getElementById('status').textContent = 'We will remind you on your salary day (28th). Thank you!';
-        } else {
-          throw new Error(data.error || 'Failed');
-        }
-      }).catch(() => {
-        document.getElementById('status').className = 'status status-success';
-        document.getElementById('status').textContent = 'We will remind you on your salary day. Thank you!';
-        btn.disabled = false;
-        btn.textContent = 'Remind Me on Salary Day';
-      });
-    }
   </script>
 </body>
 </html>
