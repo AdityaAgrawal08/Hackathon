@@ -1,8 +1,8 @@
 # ARBITER — AI Revenue Recovery Engine
 
-**Razorpay Buildathon 2026 | Track 03: AI Revenue Recovery**
+**Intelligent payment failure recovery with ML-powered decisions and automated outreach.**
 
-ARBITER detects failed Razorpay payments via real webhooks, diagnoses root causes via ML, makes EV-optimized recovery decisions, and dispatches personalized outreach — proving measurable revenue recovery vs blind retries.
+ARBITER detects failed payments via real webhooks, diagnoses root causes via ML, makes EV-optimized recovery decisions, and dispatches personalized outreach — proving measurable revenue recovery vs blind retries.
 
 ---
 
@@ -10,8 +10,8 @@ ARBITER detects failed Razorpay payments via real webhooks, diagnoses root cause
 
 ```
 ┌─────────────┐     ┌──────────────┐     ┌─────────────────┐
-│  Store.html  │────▶│  Razorpay    │────▶│  Webhook        │
-│  Checkout.js │     │  Test Mode   │     │  /api/webhooks/ │
+│  Store.html  │────▶│  Payment     │────▶│  Webhook        │
+│  Checkout.js │     │  Gateway     │     │  /api/webhooks/ │
 └─────────────┘     └──────────────┘     └────────┬────────┘
                                                    │
                      ┌─────────────────────────────┘
@@ -56,11 +56,11 @@ ARBITER detects failed Razorpay payments via real webhooks, diagnoses root cause
 
 ## Key Features
 
-- **Real Razorpay Integration** — Checkout.js modal, webhook-driven pipeline, test mode
+- **Real Payment Gateway Integration** — Checkout.js modal, webhook-driven pipeline, test mode
 - **ML-Powered Decisions** — 16-dimensional feature vector, calibrated logistic regression, EV optimization
 - **Credibility Scoring** — 11-rule composite model detecting suspicious activity before outreach
 - **Smart Outreach** — Email (Brevo) + SMS (MSG91) with payday-timed scheduling
-- **Webhook Deduplication** — Zero duplicate events from Razorpay retries
+- **Webhook Deduplication** — Zero duplicate events from gateway retries
 - **Vendor Dashboard** — Real-time SSE feed, suspicious activity queue, approve/reject workflow
 - **Immutable Audit Trail** — Every decision logged with SHA-256 hashes
 - **493 Tests** — Unit, integration, E2E, concurrency stress, security audit
@@ -89,9 +89,9 @@ The server starts at `http://localhost:3000`.
 
 | Variable | Description |
 |----------|-------------|
-| `RZP_TEST_KEY_ID` | Razorpay test mode key ID |
-| `RZP_TEST_KEY_SECRET` | Razorpay test mode key secret |
-| `RZP_WEBHOOK_SECRET` | Razorpay webhook signing secret |
+| `RZP_TEST_KEY_ID` | Payment gateway test mode key ID |
+| `RZP_TEST_KEY_SECRET` | Payment gateway test mode key secret |
+| `RZP_WEBHOOK_SECRET` | Webhook signing secret |
 | `BREVO_API_KEY` | Brevo (Sendinblue) API key for email |
 | `MSG91_AUTH_KEY` | MSG91 auth key for SMS |
 
@@ -105,7 +105,7 @@ See `.env.example` for the full list.
 
 1. Open `http://localhost:3000` (Store)
 2. Select a product, fill in name/phone/email
-3. Razorpay Checkout.js modal opens
+3. Checkout.js modal opens
 4. In test mode, choose to simulate success or failure
 5. On failure, the ML pipeline runs automatically
 
@@ -113,8 +113,8 @@ See `.env.example` for the full list.
 
 When a payment fails, the webhook fires and triggers:
 
-1. **Error Extraction** — Razorpay error envelope parsed
-2. **Root-Cause Classification** — 40+ error codes mapped to 5 classes: `SOFT_RETRYABLE`, `HARD_METHOD_DEAD`, `NETWORK_TIMEOUT`, `RISK_FLAGGED`, `UNKNOWN`
+1. **Error Extraction** — Payment gateway error envelope parsed
+2. **Root-Cause Classification** — 70+ error codes mapped to 5 classes: `SOFT_RETRYABLE`, `HARD_METHOD_DEAD`, `NETWORK_TIMEOUT`, `RISK_FLAGGED`, `UNKNOWN`
 3. **Feature Extraction** — 16-dimensional vector (amount, timing, history, patterns)
 4. **ML Scoring** — Logistic regression with calibrated probability
 5. **EV Decision** — Expected-value optimization under policy constraints
@@ -156,7 +156,7 @@ pnpm vitest run tests/app/e2e_integration.test.ts
 ### Test Coverage
 
 - **78 test files, 493 tests** — all passing
-- E2E payment workflow (store → Razorpay → webhook → outreach)
+- E2E payment workflow (store → gateway → webhook → outreach)
 - Dashboard command center (analytics, alerts, SSE)
 - Concurrency stress (10 parallel order creations)
 - Security audit (input validation, webhook signature verification)
@@ -173,9 +173,9 @@ pnpm vitest run tests/app/e2e_integration.test.ts
 | `GET` | `/store` | Store page |
 | `GET` | `/dashboard` | Vendor dashboard |
 | `GET` | `/recover/:eventId` | Customer recovery page |
-| `POST` | `/api/orders/create` | Create Razorpay order |
+| `POST` | `/api/orders/create` | Create payment order |
 | `POST` | `/api/payments/verify` | Verify payment + HMAC |
-| `POST` | `/api/webhooks/razorpay` | Razorpay webhook (deduplicated) |
+| `POST` | `/api/webhooks/razorpay` | Payment webhook (deduplicated) |
 | `GET` | `/api/vendor/analytics` | Dashboard analytics |
 | `GET` | `/api/vendor/payments` | Payment feed |
 | `GET` | `/api/vendor/alerts` | Suspicious activity alerts |
@@ -188,22 +188,9 @@ pnpm vitest run tests/app/e2e_integration.test.ts
 
 ---
 
-## Buildathon Scoring Criteria
+## Deployment
 
-| Criterion | How ARBITER Addresses It |
-|-----------|--------------------------|
-| **Problem Taste & Depth** | Real Razorpay failure recovery, not generic retry logic |
-| **AI Judgment** | ML (logreg) + Rules (policy pack) + GenAI (templates) clearly separated |
-| **Failure & Concurrency Resilience** | Zero double-debits via idempotency guards, webhook dedup |
-| **The Bar** | 100-event Monte Carlo benchmark with real data proving revenue lift |
-
----
-
-## Deployment (Render)
-
-ARBITER includes a `render.yaml` for one-click Render deployment.
-
-### Quick Deploy
+### Render
 
 1. Push to GitHub
 2. Go to [render.com](https://render.com) → New → Blueprint
@@ -221,8 +208,8 @@ ARBITER includes a `render.yaml` for one-click Render deployment.
 |----------|-------------|----------|
 | `ARBITER_DB_PATH` | Turso/libSQL URL or local SQLite path | Yes |
 | `ARBITER_DB_TOKEN` | Turso auth token | If using Turso |
-| `RZP_TEST_KEY_ID` | Razorpay test key ID | Yes |
-| `RZP_TEST_KEY_SECRET` | Razorpay test key secret | Yes |
+| `RZP_TEST_KEY_ID` | Gateway test key ID | Yes |
+| `RZP_TEST_KEY_SECRET` | Gateway test key secret | Yes |
 | `BREVO_API_KEY` | Brevo transactional email API key | For email outreach |
 | `MSG91_AUTH_KEY` | MSG91 SMS API key | For SMS outreach |
 
@@ -230,4 +217,4 @@ ARBITER includes a `render.yaml` for one-click Render deployment.
 
 ## License
 
-Internal — Razorpay Buildathon 2026
+Internal
