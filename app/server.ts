@@ -640,6 +640,56 @@ app.get("/api/vendor/analytics", async (_req: Request, res: Response) => {
   }
 });
 
+app.get("/api/vendor/failure-analysis", async (_req: Request, res: Response) => {
+  try {
+    const FAILURE_REASONS: Record<string, { humanReason: string; recommendedAction: string }> = {
+      INSUFFICIENT_FUNDS: { humanReason: "Customer's account had insufficient funds", recommendedAction: "Ask the customer to top up their account and retry" },
+      BAD_REQUEST_PAYMENT_ACCOUNT_INSUFFICIENT_BALANCE: { humanReason: "Customer's account had insufficient funds", recommendedAction: "Ask the customer to top up their account and retry" },
+      CARD_EXPIRED: { humanReason: "Customer's card has expired", recommendedAction: "Customer should update their card details with their bank" },
+      BAD_REQUEST_PAYMENT_CARD_EXPIRED: { humanReason: "Customer's card has expired", recommendedAction: "Customer should update their card details with their bank" },
+      BAD_REQUEST_PAYMENT_CARD_INVALID: { humanReason: "Invalid card details entered", recommendedAction: "Customer should re-enter correct card number, expiry and CVV" },
+      GATEWAY_TIMEOUT: { humanReason: "Bank server was slow or unavailable", recommendedAction: "Retry the payment after a few minutes" },
+      ISSUER_TIMEOUT: { humanReason: "Bank server was slow or unavailable", recommendedAction: "Retry the payment after a few minutes" },
+      NETWORK_TIMEOUT: { humanReason: "Bank server was slow or unavailable", recommendedAction: "Retry the payment after a few minutes" },
+      SUSPECTED_FRAUD: { humanReason: "Transaction flagged as potentially fraudulent", recommendedAction: "Contact your bank to verify and clear the transaction" },
+      RISK_BLOCKED: { humanReason: "Transaction flagged as potentially fraudulent", recommendedAction: "Contact your bank to verify and clear the transaction" },
+      BAD_REQUEST_PAYMENT_UPI_COLLECT_EXPIRED: { humanReason: "UPI payment request expired", recommendedAction: "Customer should retry the UPI payment within the time limit" },
+      BAD_REQUEST_PAYMENT_OTP_VALIDATION_FAILED: { humanReason: "Customer entered wrong OTP", recommendedAction: "Customer should retry with the correct OTP" },
+      MANDATE_REVOKED: { humanReason: "Customer cancelled their auto-pay mandate", recommendedAction: "Customer needs to re-authorise the auto-pay mandate" },
+    };
+    const DEFAULT_REASON = { humanReason: "Payment could not be processed", recommendedAction: "Customer should retry or try a different payment method" };
+
+    const failed = await dbClient.execute({
+      sql: `SELECT failure_code, COUNT(*) as cnt, SUM(amount_paise) as total_amount
+            FROM live_payment_events
+            WHERE status = 'failed'
+            GROUP BY failure_code
+            ORDER BY cnt DESC`,
+      args: [],
+    });
+
+    const totalFailures = failed.rows.reduce((sum, r) => sum + Number(r.cnt), 0);
+
+    const analysis = failed.rows.map((row) => {
+      const code = String(row.failure_code || "UNKNOWN");
+      const count = Number(row.cnt);
+      const mapped = FAILURE_REASONS[code] || DEFAULT_REASON;
+      return {
+        code,
+        count,
+        percentage: totalFailures > 0 ? Number(((count / totalFailures) * 100).toFixed(1)) : 0,
+        humanReason: mapped.humanReason,
+        recommendedAction: mapped.recommendedAction,
+        totalAmountPaise: Number(row.total_amount || 0),
+      };
+    });
+
+    res.json({ totalFailures, analysis });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
 app.post("/api/vendor/decision", async (req: Request, res: Response) => {
   try {
     const { eventId, decision } = req.body;
