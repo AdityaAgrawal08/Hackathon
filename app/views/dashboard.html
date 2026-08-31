@@ -429,19 +429,49 @@
 
     function getActionBadge(p) {
       if (p.status === 'captured') return '';
-      // AI Action: if suspicious → Needs Review; otherwise → show outreach timing
-      if (p.vendor_decision === 'approved') return '<span class="action-badge" style="background:#052e16;color:#86efac">✓ Approved</span>';
-      if (p.vendor_decision === 'rejected') return '<span class="action-badge" style="background:#450a0a;color:#fca5a5">✕ Rejected</span>';
+
+      // Suspicious + needs vendor review
       if (p.is_suspicious || (p.ml_action && p.ml_action.includes('HUMAN'))) {
-        return '<span class="action-badge" style="background:#7f1d1d;color:#fca5a5;cursor:pointer" onclick="showAlerts()">👁 Needs Review</span>';
+        if (p.vendor_decision === 'approved') return '<span class="action-badge" style="background:#052e16;color:#86efac">✓ Vendor Approved</span>';
+        if (p.vendor_decision === 'rejected') return '<span class="action-badge" style="background:#450a0a;color:#fca5a5">✕ Vendor Rejected</span>';
+        return '<span class="action-badge" style="background:#7f1d1d;color:#fca5a5;cursor:pointer" onclick="showAlerts()">👁 Needs Vendor Review</span>';
       }
-      const action = ACTION_LABELS[p.ml_action];
-      if (action) return `<span class="action-badge">${action}</span>`;
-      // Default: show outreach timing based on failure class
-      if (p.failure_class === 'SOFT_RETRYABLE') return '<span class="action-badge">⏰ Retry in 2hrs</span>';
-      if (p.failure_class === 'NETWORK_TIMEOUT') return '<span class="action-badge">⏳ Auto-retry soon</span>';
-      if (p.failure_class === 'HARD_METHOD_DEAD') return '<span class="action-badge">🔄 Use different method</span>';
-      return '<span class="action-badge">📧 Email sent</span>';
+
+      // Show REAL outreach schedule from scheduled_outreach table
+      if (p.next_outreach_utc && p.next_outreach_channel) {
+        const nextTime = new Date(p.next_outreach_utc);
+        const now = new Date();
+        const diffMs = nextTime - now;
+        const diffHrs = Math.round(diffMs / (1000 * 60 * 60));
+        const diffMins = Math.round(diffMs / (1000 * 60));
+        const channel = p.next_outreach_channel === 'SMS' ? '📱 SMS' : '📧 Email';
+
+        if (diffMs > 0) {
+          if (diffMins < 60) return `<span class="action-badge" style="background:#1e3a5f;color:#93c5fd">${channel} in ${diffMins}m</span>`;
+          if (diffHrs < 24) return `<span class="action-badge" style="background:#1e3a5f;color:#93c5fd">${channel} in ${diffHrs}h</span>`;
+          return `<span class="action-badge" style="background:#1e3a5f;color:#93c5fd">${channel} in ${diffHrs}h</span>`;
+        } else {
+          return `<span class="action-badge" style="background:#713f12;color:#fde68a">⏰ ${channel} overdue</span>`;
+        }
+      }
+
+      // Outreach was dispatched but no next scheduled — check last outreach status
+      if (p.last_outreach_status === 'FAILED' || p.last_outreach_status === 'BOUNCED') {
+        return `<span class="action-badge" style="background:#7f1d1d;color:#fca5a5">⚠ ${p.last_outreach_channel || 'Outreach'} failed</span>`;
+      }
+
+      // All outreach exhausted
+      if (p.outreach_dispatched && !p.next_outreach_utc) {
+        return '<span class="action-badge" style="background:#374151;color:#9ca3af">All outreach sent</span>';
+      }
+
+      // Hard method dead — needs different payment method
+      if (p.failure_class === 'HARD_METHOD_DEAD') return '<span class="action-badge" style="background:#7f1d1d;color:#fca5a5">🔄 Use different method</span>';
+
+      // Outreach not yet dispatched
+      if (!p.outreach_dispatched) return '<span class="action-badge" style="background:#713f12;color:#fde68a">⏳ Queued for outreach</span>';
+
+      return '<span class="action-badge" style="background:#374151;color:#9ca3af">—</span>';
     }
 
     function showCustomerDetails(p) {
