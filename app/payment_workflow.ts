@@ -218,7 +218,7 @@ export async function processFailedPayment(
     nowMs,
     policy,
     attemptsSoFar: customer?.total_failures ?? 0,
-    ltvPaise: (customer?.total_successes ?? 0) * 50000,
+    ltvPaise: (customer?.total_successes ?? 0) * input.amountPaise,
     churnRiskBp: (customer?.total_failures ?? 0) > 2 ? 4000 : 1000,
   });
 

@@ -337,6 +337,12 @@ app.post("/api/payments/failed", async (req: Request, res: Response) => {
 
     if (!razorpay_order_id) return res.status(400).json({ error: "razorpay_order_id required" });
 
+    // Server-side amount validation — reject obviously invalid amounts
+    const validatedAmount = Number(amountPaise);
+    if (isNaN(validatedAmount) || validatedAmount <= 0 || validatedAmount > 10000000) {
+      return res.status(400).json({ error: "Invalid amount" });
+    }
+
     // Use the REAL error code from Razorpay — never overwrite with demo codes
     const failureCode = error_code || "UNKNOWN";
     const paymentId = razorpay_payment_id || `pay_client_${Date.now()}`;
@@ -840,6 +846,19 @@ app.get("/api/sse/:channel", (req: Request, res: Response) => {
   });
 });
 
+// Periodic SSE dead client cleanup (every 60s)
+setInterval(() => {
+  const now = Date.now();
+  for (const [ch, clients] of sseClients) {
+    for (const c of clients) {
+      if (now - c.connectedAt > 300000) { // 5 min max
+        try { c.res.end(); } catch {}
+        clients.delete(c);
+      }
+    }
+  }
+}, 60000);
+
 // ── Payment Status SSE (for result page) ─────────────────────────
 app.get("/api/status/:token", (req: Request, res: Response) => {
   const { token } = req.params;
@@ -1001,7 +1020,7 @@ app.post("/api/recovery/promise-to-pay", async (req: Request, res: Response) => 
     const { proposalId, promisedDay, contactPreference } = req.body || {};
     if (!proposalId || !promisedDay) return res.status(400).json({ error: "proposalId and promisedDay required" });
 
-    const result = await recordPromiseToPay(proposalId, promisedDay, contactPreference || "SMS", dbClient);
+    const result = await recordPromiseToPay(proposalId, promisedDay, dbClient);
     res.json({ success: true, ...result });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
