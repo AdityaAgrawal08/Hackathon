@@ -107,37 +107,8 @@ function nextDemoError(): string {
 
 // Simplified human-readable error reasons — user sees this, not raw codes
 function getSimplifiedReason(code: string, failureClass: string): string {
-  const reasons: Record<string, string> = {
-    // SOFT_RETRYABLE
-    INSUFFICIENT_FUNDS: "Your account has insufficient funds. Please add money and try again.",
-    BAD_REQUEST_PAYMENT_ACCOUNT_INSUFFICIENT_BALANCE: "Your account has insufficient funds. Please add money and try again.",
-    BAD_REQUEST_PAYMENT_UPI_COLLECT_EXPIRED: "The UPI request expired. Please try again.",
-    BAD_REQUEST_PAYMENT_OTP_VALIDATION_FAILED: "OTP verification failed. Please try again.",
-    TEMPORARY_DECLINE: "Your bank temporarily declined the payment. Please try again in a few minutes.",
-    NO_MANDATE_RESPONSE: "Your UPI mandate did not respond. Please try again.",
-    // HARD_METHOD_DEAD
-    CARD_EXPIRED: "Your card has expired. Please use a different card or update your card details.",
-    BAD_REQUEST_PAYMENT_CARD_EXPIRED: "Your card has expired. Please use a different card or update your card details.",
-    BAD_REQUEST_PAYMENT_CARD_INVALID: "Your card details are invalid. Please check and try again.",
-    BAD_REQUEST_PAYMENT_MANDATE_REVOKED: "Your UPI mandate has been cancelled. Please set it up again.",
-    BAD_REQUEST_PAYMENT_UPI_INVALID_VPA: "The UPI ID entered is invalid. Please check and try again.",
-    MANDATE_REVOKED: "Your UPI mandate has been cancelled. Please set it up again.",
-    TOKEN_INVALID: "Your saved payment method is no longer valid. Please use a different method.",
-    // NETWORK_TIMEOUT
-    GATEWAY_TIMEOUT: "The bank server took too long to respond. No money was deducted. Please try again.",
-    GATEWAY_ERROR: "There was a temporary issue with the bank. No money was deducted. Please try again.",
-    BANK_DOWNTIME_NETWORK_ERROR: "Your bank is currently experiencing issues. No money was deducted. Please try again later.",
-    BAD_REQUEST_PAYMENT_TIMED_OUT: "The payment timed out. No money was deducted. Please try again.",
-    ISSUER_TIMEOUT: "Your bank did not respond in time. No money was deducted. Please try again.",
-    NETWORK_ERROR: "A network error occurred. No money was deducted. Please try again.",
-    // RISK_FLAGGED
-    SUSPECTED_FRAUD: "This transaction was flagged for security review. Please contact support.",
-    BAD_REQUEST_PAYMENT_FRAUD_IDENTIFIED: "This transaction was flagged for security review. Please contact support.",
-    RISK_BLOCKED: "This transaction was blocked for security reasons. Please contact support.",
-    // UNKNOWN
-    BAD_REQUEST_PAYMENT_DECLINED_BY_BANK: "Your bank declined the payment. Please try a different payment method.",
-  };
-  return reasons[code] || "Payment could not be processed. Please try again or contact support.";
+  const { getCustomerMessage } = require("../packages/core/src/error-catalog.js");
+  return getCustomerMessage(code);
 }
 
 // ── SSE ──────────────────────────────────────────────────────────
@@ -333,7 +304,7 @@ app.post("/api/payments/verify", async (req: Request, res: Response) => {
 app.post("/api/payments/failed", async (req: Request, res: Response) => {
   try {
     const { razorpay_order_id, razorpay_payment_id, error_code, error_description, error_step, error_source, error_reason,
-            customerId, productId, productName, amountPaise } = req.body;
+            customerId, productId, productName, amountPaise, paymentMethod } = req.body;
 
     if (!razorpay_order_id) return res.status(400).json({ error: "razorpay_order_id required" });
 
@@ -368,6 +339,15 @@ app.post("/api/payments/failed", async (req: Request, res: Response) => {
     // Validate customerProfileId — must not be empty
     const validCustomerId = customerId || "";
 
+    // Extract method details from Razorpay JS SDK error metadata
+    const method = paymentMethod?.type || paymentMethod?.method || "";
+    const cardLast4 = paymentMethod?.last4 || "";
+    const cardNetwork = paymentMethod?.network || paymentMethod?.card_network || "";
+    const cardIssuer = paymentMethod?.issuer || paymentMethod?.card_issuer || "";
+    const cardType = paymentMethod?.card_type || paymentMethod?.type === "card" ? (paymentMethod?.card_type || "") : "";
+    const vpa = paymentMethod?.vpa || "";
+    const bankCode = paymentMethod?.bank || paymentMethod?.bank_name || "";
+
     // Use processFailedPayment to run full ML pipeline
     const result = await processFailedPayment(dbClient, {
       razorpayPaymentId: paymentId,
@@ -381,6 +361,13 @@ app.post("/api/payments/failed", async (req: Request, res: Response) => {
       customerProfileId: validCustomerId,
       productName: productName || "",
       nowMs: Date.now(),
+      paymentMethod: method,
+      cardLast4,
+      cardNetwork,
+      cardIssuer,
+      cardType,
+      vpa,
+      bankCode,
     }, outreachRouter);
 
     // Broadcast to vendor dashboard
@@ -711,22 +698,7 @@ app.get("/api/vendor/analytics", async (_req: Request, res: Response) => {
 
 app.get("/api/vendor/failure-analysis", async (_req: Request, res: Response) => {
   try {
-    const FAILURE_REASONS: Record<string, { humanReason: string; recommendedAction: string }> = {
-      INSUFFICIENT_FUNDS: { humanReason: "Customer's account had insufficient funds", recommendedAction: "Ask the customer to top up their account and retry" },
-      BAD_REQUEST_PAYMENT_ACCOUNT_INSUFFICIENT_BALANCE: { humanReason: "Customer's account had insufficient funds", recommendedAction: "Ask the customer to top up their account and retry" },
-      CARD_EXPIRED: { humanReason: "Customer's card has expired", recommendedAction: "Customer should update their card details with their bank" },
-      BAD_REQUEST_PAYMENT_CARD_EXPIRED: { humanReason: "Customer's card has expired", recommendedAction: "Customer should update their card details with their bank" },
-      BAD_REQUEST_PAYMENT_CARD_INVALID: { humanReason: "Invalid card details entered", recommendedAction: "Customer should re-enter correct card number, expiry and CVV" },
-      GATEWAY_TIMEOUT: { humanReason: "Bank server was slow or unavailable", recommendedAction: "Retry the payment after a few minutes" },
-      ISSUER_TIMEOUT: { humanReason: "Bank server was slow or unavailable", recommendedAction: "Retry the payment after a few minutes" },
-      NETWORK_TIMEOUT: { humanReason: "Bank server was slow or unavailable", recommendedAction: "Retry the payment after a few minutes" },
-      SUSPECTED_FRAUD: { humanReason: "Transaction flagged as potentially fraudulent", recommendedAction: "Contact your bank to verify and clear the transaction" },
-      RISK_BLOCKED: { humanReason: "Transaction flagged as potentially fraudulent", recommendedAction: "Contact your bank to verify and clear the transaction" },
-      BAD_REQUEST_PAYMENT_UPI_COLLECT_EXPIRED: { humanReason: "UPI payment request expired", recommendedAction: "Customer should retry the UPI payment within the time limit" },
-      BAD_REQUEST_PAYMENT_OTP_VALIDATION_FAILED: { humanReason: "Customer entered wrong OTP", recommendedAction: "Customer should retry with the correct OTP" },
-      MANDATE_REVOKED: { humanReason: "Customer cancelled their auto-pay mandate", recommendedAction: "Customer needs to re-authorise the auto-pay mandate" },
-    };
-    const DEFAULT_REASON = { humanReason: "Payment could not be processed", recommendedAction: "Customer should retry or try a different payment method" };
+    const { getVendorMessage, getRecommendedAction, getErrorEntry } = require("../packages/core/src/error-catalog.js");
 
     const failed = await dbClient.execute({
       sql: `SELECT failure_code, COUNT(*) as cnt, SUM(amount_paise) as total_amount
@@ -742,13 +714,13 @@ app.get("/api/vendor/failure-analysis", async (_req: Request, res: Response) => 
     const analysis = failed.rows.map((row) => {
       const code = String(row.failure_code || "UNKNOWN");
       const count = Number(row.cnt);
-      const mapped = FAILURE_REASONS[code] || DEFAULT_REASON;
+      const entry = getErrorEntry(code);
       return {
         code,
         count,
         percentage: totalFailures > 0 ? Number(((count / totalFailures) * 100).toFixed(1)) : 0,
-        humanReason: mapped.humanReason,
-        recommendedAction: mapped.recommendedAction,
+        humanReason: entry.vendorMessage,
+        recommendedAction: entry.recommendedAction,
         totalAmountPaise: Number(row.total_amount || 0),
       };
     });
