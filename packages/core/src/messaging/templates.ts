@@ -55,9 +55,9 @@ const TEMPLATES_BY_CLASS: Record<FailureClassId, Partial<Record<OutreachChannel,
       templateId: "1407168923450011",
       dltRegistered: true,
       en: (ctx) =>
-        `Your payment of ${formatINR(paise(ctx.amountPaise))} for ${ctx.merchantName} failed due to low balance (${ctx.instrumentDescription}). Complete now: ${ctx.recoveryUrl} - ARBITER`,
+        `ARBITER: Your ${formatINR(paise(ctx.amountPaise))} payment failed due to insufficient funds. Retry now: ${ctx.recoveryUrl}`,
       hi: (ctx) =>
-        `Aapka ${ctx.merchantName} ka ${formatINR(paise(ctx.amountPaise))} payment low balance ke karan fail hua. Abhi complete karein: ${ctx.recoveryUrl} - ARBITER`,
+        `ARBITER: ${formatINR(paise(ctx.amountPaise))} ka payment balance kam hone se fail hua. Abhi retry karein: ${ctx.recoveryUrl}`,
     },
     VOICE_IVR: {
       templateId: "ivr_script_insufficient_hi_v1",
@@ -71,9 +71,9 @@ const TEMPLATES_BY_CLASS: Record<FailureClassId, Partial<Record<OutreachChannel,
       templateId: "email_insufficient_v1",
       dltRegistered: false,
       en: (ctx) =>
-        `Hi ${ctx.customerName},\n\nWe couldn't process your payment of ${formatINR(paise(ctx.amountPaise))} for ${ctx.merchantName} on ${ctx.instrumentDescription} due to insufficient balance.\n\nClick here to securely retry with an alternate card or UPI: ${ctx.recoveryUrl}\n\nBest regards,\n${ctx.merchantName}`,
+        `Hi ${ctx.customerName},\n\nYour payment of ${formatINR(paise(ctx.amountPaise))} for ${ctx.merchantName} could not be processed because of insufficient balance in your ${ctx.instrumentDescription}.\n\nWhat happened:\nYour account did not have enough funds to complete this transaction. No money was deducted.\n\nWhat to do:\nPlease retry with a different card or UPI, or ensure your account has sufficient balance.\n\nClick here to retry securely:\n${ctx.recoveryUrl}\n\nIf you have already paid, please ignore this message.\n\nBest regards,\nARBITER Recovery Team`,
       hi: (ctx) =>
-        `Namaste ${ctx.customerName},\n\nLow balance ki wajah se ${ctx.merchantName} ka ${formatINR(paise(ctx.amountPaise))} payment process nahi ho paya.\n\nNaye payment method se retry karne ke liye click karein: ${ctx.recoveryUrl}\n\nDhanyawad,\n${ctx.merchantName}`,
+        `Namaste ${ctx.customerName},\n\n${ctx.merchantName} ke liye ${formatINR(paise(ctx.amountPaise))} ka payment aapke ${ctx.instrumentDescription} mein balance kam hone ki wajah se process nahi ho paya.\n\nKya hua:\nAapke account mein is transaction ke liye paise kam the. Koi paisa nahi kata hai.\n\nKya karein:\nKripya kisi aur card ya UPI se retry karein, ya apne account mein paise daalein.\n\nYahan click karke abhi retry karein:\n${ctx.recoveryUrl}\n\nAgar aapne pehle se payment kar di hai, toh kripya is sandesh ko ignore karein.\n\nDhanyawad,\nARBITER Recovery Team`,
     },
   },
   HARD_METHOD_DEAD: {
@@ -90,9 +90,9 @@ const TEMPLATES_BY_CLASS: Record<FailureClassId, Partial<Record<OutreachChannel,
       templateId: "1407168923450012",
       dltRegistered: true,
       en: (ctx) =>
-        `Your card/mandate for ${ctx.merchantName} (${formatINR(paise(ctx.amountPaise))}) has expired. Update your payment method to avoid service interruption: ${ctx.recoveryUrl} - ARBITER`,
+        `ARBITER: Your card/mandate for ${formatINR(paise(ctx.amountPaise))} has expired or been revoked. Update now: ${ctx.recoveryUrl}`,
       hi: (ctx) =>
-        `${ctx.merchantName} ke liye aapka card expire ho gaya hai (${formatINR(paise(ctx.amountPaise))}). Service continue rakhne ke liye update karein: ${ctx.recoveryUrl} - ARBITER`,
+        `ARBITER: ${formatINR(paise(ctx.amountPaise))} ka payment method expire ho gaya hai. Abhi update karein: ${ctx.recoveryUrl}`,
     },
     VOICE_IVR: {
       templateId: "ivr_script_expired_hi_v1",
@@ -106,9 +106,9 @@ const TEMPLATES_BY_CLASS: Record<FailureClassId, Partial<Record<OutreachChannel,
       templateId: "email_card_expired_v1",
       dltRegistered: false,
       en: (ctx) =>
-        `Hi ${ctx.customerName},\n\nYour payment method (${ctx.instrumentDescription}) for ${ctx.merchantName} has expired.\n\nPlease update your payment details or set up UPI AutoPay here: ${ctx.recoveryUrl}\n\nBest regards,\n${ctx.merchantName}`,
+        `Hi ${ctx.customerName},\n\nYour payment method for ${ctx.merchantName} (${formatINR(paise(ctx.amountPaise))}) has expired or been revoked.\n\nWhat happened:\nYour ${ctx.instrumentDescription} is no longer valid for payments. This could be because the card expired, the UPI mandate was cancelled, or the saved method was removed.\n\nWhat to do:\nPlease update your payment method or set up a new one to avoid service interruption.\n\nClick here to update your payment method:\n${ctx.recoveryUrl}\n\nIf you have already updated your details, please ignore this message.\n\nBest regards,\nARBITER Recovery Team`,
       hi: (ctx) =>
-        `Namaste ${ctx.customerName},\n\n${ctx.merchantName} ke liye aapka card (${ctx.instrumentDescription}) expire ho chuka hai.\n\nNaya payment method update karne ke liye click karein: ${ctx.recoveryUrl}`,
+        `Namaste ${ctx.customerName},\n\n${ctx.merchantName} ke liye aapka payment method (${formatINR(paise(ctx.amountPaise))}) expire ya revoke ho chuka hai.\n\nKya hua:\nAapka ${ctx.instrumentDescription} ab payments ke liye valid nahi hai. Card expire hone, UPI mandate cancel hone, ya saved method delete hone ki wajah se ho sakta hai.\n\nKya karein:\nKripya apna payment method update karein ya naya set karein taaki service mein koi rukawat na aaye.\n\nYahan click karke apna payment method update karein:\n${ctx.recoveryUrl}\n\nAgar aapne pehle se details update kar di hain, toh kripya is sandesh ko ignore karein.\n\nDhanyawad,\nARBITER Recovery Team`,
     },
   },
   NETWORK_TIMEOUT: {
@@ -124,18 +124,18 @@ const TEMPLATES_BY_CLASS: Record<FailureClassId, Partial<Record<OutreachChannel,
       templateId: "1407168923450013",
       dltRegistered: true,
       en: (ctx) =>
-        `Bank network delay detected on your payment to ${ctx.merchantName}. Retry instantly via alternate UPI: ${ctx.recoveryUrl} - ARBITER`,
+        `ARBITER: Bank server issue detected for your ${formatINR(paise(ctx.amountPaise))} payment. We are resolving this. No money was deducted. Retry: ${ctx.recoveryUrl}`,
       hi: (ctx) =>
-        `Bank network issue detected. ${ctx.merchantName} ka payment alternate UPI se complete karein: ${ctx.recoveryUrl} - ARBITER`,
+        `ARBITER: ${formatINR(paise(ctx.amountPaise))} payment mein bank server issue aaya. Hum isse resolve kar rahe hain. Koi paisa nahi kata. Retry: ${ctx.recoveryUrl}`,
     },
     VOICE_IVR: null,
     EMAIL: {
       templateId: "email_bank_down_v1",
       dltRegistered: false,
       en: (ctx) =>
-        `Hi ${ctx.customerName},\n\nYour bank (${ctx.instrumentDescription}) had a temporary network glitch during your payment of ${formatINR(paise(ctx.amountPaise))} for ${ctx.merchantName}.\n\nYou can pay securely with any alternate bank UPI or card here: ${ctx.recoveryUrl}`,
+        `Hi ${ctx.customerName},\n\nYour payment of ${formatINR(paise(ctx.amountPaise))} for ${ctx.merchantName} could not be completed due to a temporary bank server issue.\n\nWhat happened:\n${ctx.instrumentDescription} experienced a temporary network delay. This is not an issue with your account. No money has been deducted from your bank.\n\nWhat to do:\nYou can wait and we will automatically retry the payment. Or, you can pay immediately using a different bank or UPI:\n\nClick here to retry now:\n${ctx.recoveryUrl}\n\nWe are actively working to resolve the bank connectivity issue. You do not need to take any action if you prefer to wait.\n\nBest regards,\nARBITER Recovery Team`,
       hi: (ctx) =>
-        `Namaste ${ctx.customerName},\n\nBank network issue ki wajah se payment complete nahi ho paya.\n\nDusre payment method se try karne ke liye click karein: ${ctx.recoveryUrl}`,
+        `Namaste ${ctx.customerName},\n\n${ctx.merchantName} ke liye ${formatINR(paise(ctx.amountPaise))} ka payment temporary bank server issue ki wajah se process nahi ho paya.\n\nKya hua:\n${ctx.instrumentDescription} mein temporary network delay aaya. Yeh aapke account ki galti nahi hai. Aapke bank se koi paisa nahi kata hai.\n\nKya karein:\nAap intezar kar sakte hain — hum payment automatically retry karenge. Ya, aap turant kisi aur bank ya UPI se payment kar sakte hain:\n\nYahan click karke abhi retry karein:\n${ctx.recoveryUrl}\n\nHum bank connectivity issue ko actively resolve kar rahe hain. Agar aap wait karna chahte hain toh koi action lene ki zaroorat nahi hai.\n\nDhanyawad,\nARBITER Recovery Team`,
     },
   },
   RISK_FLAGGED: {
@@ -154,7 +154,7 @@ const TEMPLATES_BY_CLASS: Record<FailureClassId, Partial<Record<OutreachChannel,
 
 /**
  * Render a compliant, localized recovery message locally.
- * Returns null for RISK_FLAGGED or UNKNOWN classes (prohibited from auto-outreach).
+ * Returns null for RISK_FLAGGED class (prohibited from auto-outreach).
  */
 export function renderComplianceMessage(
   failureClass: FailureClassId,

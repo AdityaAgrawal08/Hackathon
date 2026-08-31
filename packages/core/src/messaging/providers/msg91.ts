@@ -9,6 +9,7 @@
  *   "flow_id": "your_flow_id",
  *   "sender": "ARBITR",
  *   "route": "4",
+ *   "short_url": "0",
  *   "recipients": [
  *     {
  *       "mobiles": "919XXXXXXXXX",
@@ -50,6 +51,8 @@ export class MSG91SmsProvider implements OutreachProvider {
     this.config.senderId = config.senderId || process.env.MSG91_SENDER_ID || "ARBITR";
     this.config.dltTemplateId = config.dltTemplateId || process.env.MSG91_DLT_TEMPLATE_ID;
     this.config.flowId = config.flowId || process.env.MSG91_FLOW_ID;
+
+    console.log(`[MSG91] Constructor — authKey: ${this.config.authKey ? 'SET (' + this.config.authKey.slice(0, 8) + '...)' : 'MISSING'}, flowId: ${this.config.flowId || 'MISSING'}, senderId: ${this.config.senderId}`);
   }
 
   async send(payload: OutreachPayload): Promise<ProviderDispatchResult> {
@@ -70,10 +73,14 @@ export class MSG91SmsProvider implements OutreachProvider {
 
     // Check if we can send for real
     const hasAuthKey = !!this.config.authKey;
-    const hasFlowId = !!flowId && !flowId.startsWith("flow_");
+    // FIXED: Do NOT reject flow IDs starting with "flow_" — that's how MSG91 names them!
+    // Only reject if flowId is undefined/empty or literally just "flow_" (placeholder)
+    const hasFlowId = !!flowId && flowId !== "flow_";
 
     if (!hasAuthKey || !hasFlowId) {
-      console.log(`[MSG91] SIMULATED SMS to ${phone} (authKey: ${hasAuthKey ? 'set' : 'missing'}, flowId: ${flowId || 'missing'})`);
+      const reason = !hasAuthKey ? "no authKey" : `invalid flowId="${flowId}"`;
+      console.log(`[MSG91] SIMULATED SMS to ${phone} — reason: ${reason}`);
+      console.log(`[MSG91] SIMULATED body: ${JSON.stringify({ failureClass: payload.failureClass, amount: formattedAmount, recoveryUrl })}`);
       return {
         providerName: this.name,
         channel: this.channel,
@@ -81,7 +88,7 @@ export class MSG91SmsProvider implements OutreachProvider {
         status: "SENT",
         costPaise: 25,
         dispatchedAtUtc: nowUtc,
-        rawResponse: { simulated: true, flowId, phone },
+        rawResponse: { simulated: true, flowId, phone, reason },
       };
     }
 
@@ -116,7 +123,8 @@ export class MSG91SmsProvider implements OutreachProvider {
       recipients: [recipientObj],
     };
 
-    console.log(`[MSG91] Sending SMS to ${phone} via flow ${flowId}`);
+    console.log(`[MSG91] SENDING SMS to ${phone} via flow ${flowId}`);
+    console.log(`[MSG91] Request body: ${JSON.stringify(flowBody, null, 2)}`);
 
     try {
       const res = await fetch("https://api.msg91.com/api/v5/flow/", {
@@ -132,9 +140,11 @@ export class MSG91SmsProvider implements OutreachProvider {
       const isSuccess = data.type === "success" || res.ok;
 
       if (!isSuccess) {
-        console.error(`[MSG91] FAILED to ${phone}: HTTP ${res.status} — ${JSON.stringify(data)}`);
+        console.error(`[MSG91] FAILED to ${phone}: HTTP ${res.status}`);
+        console.error(`[MSG91] Response: ${JSON.stringify(data)}`);
       } else {
         console.log(`[MSG91] SENT SMS to ${phone}: request_id=${data.request_id}`);
+        console.log(`[MSG91] Full response: ${JSON.stringify(data)}`);
       }
 
       return {

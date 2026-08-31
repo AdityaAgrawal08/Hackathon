@@ -77,8 +77,12 @@ const msg91Key = process.env.MSG91_AUTH_KEY;
 const msg91Flow = process.env.MSG91_FLOW_ID;
 console.log("[Providers] Brevo email:", brevoKey && !brevoKey.includes("xxxxxx") ? `CONFIGURED (${brevoKey.slice(0, 8)}...)` : "SIMULATED (no API key)");
 console.log("[Providers] MSG91 SMS:", msg91Key && !msg91Key.includes("xxxxxx") ? `CONFIGURED (${msg91Key.slice(0, 8)}...)` : "SIMULATED (no auth key)");
-if (msg91Flow && msg91Flow.startsWith("flow_")) {
-  console.log("[Providers] MSG91 flow ID looks like a placeholder:", msg91Flow, "— will use simulated mode");
+// MSG91 flow IDs can legitimately start with "flow_" (e.g. flow_insufficient_01)
+// Only flag if it's literally just "flow_" with no suffix
+if (msg91Flow && msg91Flow === "flow_") {
+  console.log("[Providers] MSG91 flow ID is placeholder 'flow_' — will use simulated mode");
+} else if (msg91Flow) {
+  console.log("[Providers] MSG91 flow ID:", msg91Flow, "— REAL mode");
 }
 
 const webhookLimiter = rateLimit({ windowMs: 60_000, limit: RATE_LIMIT_WEBHOOKS_PER_MIN, standardHeaders: true });
