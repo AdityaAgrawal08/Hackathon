@@ -343,6 +343,12 @@ export async function processFailedPayment(
       language: "EN",
       rawErrorReason: input.failureCode,
       instrumentDescription: input.failureDescription,
+      // Payment method details for personalized outreach
+      method: input.paymentMethod || "",
+      last4: input.cardLast4 || "",
+      network: input.cardNetwork || "",
+      vpa: input.vpa || "",
+      bank: input.bankCode || "",
     };
 
     console.log(`[Outreach] Dispatching for ${failureClass} | phone: ${outreachPayload.recipient.phone || '(none)'} | email: ${outreachPayload.recipient.email || '(none)'}`);

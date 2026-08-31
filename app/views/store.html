@@ -214,6 +214,15 @@
           const errorSource = err.source || '';
           const errorReason = err.reason || '';
 
+          // Extract payment method details from error metadata
+          const errMetadata = err.metadata || {};
+          const paymentMethod = errMetadata.payment_method || {};
+          const methodType = paymentMethod.type || '';
+          const methodLast4 = paymentMethod.last4 || '';
+          const methodNetwork = paymentMethod.network || paymentMethod.card_network || '';
+          const methodVpa = paymentMethod.vpa || '';
+          const methodBank = paymentMethod.bank || paymentMethod.bank_name || '';
+
           showError('Payment failed: ' + errorDesc);
           payBtn.disabled = false;
           payBtn.innerHTML = 'Pay <span class="amount">' + '₹' + (selectedProduct.pricePaise / 100).toLocaleString('en-IN') + '</span>';
@@ -234,15 +243,28 @@
                 productId: selectedProduct.id,
                 productName: selectedProduct.name,
                 amountPaise: data.amountPaise,
+                paymentMethod: {
+                  type: methodType,
+                  last4: methodLast4,
+                  network: methodNetwork,
+                  vpa: methodVpa,
+                  bank: methodBank,
+                },
               }),
             });
             const failData = await failRes.json();
             if (failData.eventId) {
-              // Pass failure details to recovery page via URL params
+              const methodParams = {};
+              if (methodType) methodParams.method = methodType;
+              if (methodLast4) methodParams.last4 = methodLast4;
+              if (methodNetwork) methodParams.network = methodNetwork;
+              if (methodVpa) methodParams.vpa = methodVpa;
+              if (methodBank) methodParams.bank = methodBank;
               const params = new URLSearchParams({
                 reason: failData.failureDescription || errorDesc,
                 class: failData.failureClass || 'UNKNOWN',
                 code: failData.failureCode || errorCode,
+                ...methodParams,
               });
               window.location.href = '/recover/' + failData.eventId + '?' + params.toString();
             }

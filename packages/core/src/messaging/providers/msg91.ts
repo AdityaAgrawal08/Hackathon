@@ -96,6 +96,11 @@ export class MSG91SmsProvider implements OutreachProvider {
       method: payload.instrumentDescription || "Card / UPI",
       url: recoveryUrl,
       failure_reason: payload.rawErrorReason || "Payment failed",
+      method_type: payload.method || "",
+      last4: payload.last4 || "",
+      network: payload.network || "",
+      vpa: payload.vpa || "",
+      bank: payload.bank || "",
     };
 
     // Add DLT template ID if available

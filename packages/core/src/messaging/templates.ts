@@ -18,6 +18,11 @@ export interface MessageTokenContext {
   merchantName: string;
   instrumentDescription: string; // e.g. "HDFC Bank ending in 4120"
   recoveryUrl: string;
+  method?: "card" | "upi" | "netbanking" | "wallet";
+  last4?: string; // Last 4 digits of card
+  network?: string; // e.g. "Visa", "Mastercard", "RuPay"
+  vpa?: string; // UPI VPA
+  bank?: string; // Bank name
 }
 
 export interface RenderedMessage {

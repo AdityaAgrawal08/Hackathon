@@ -571,7 +571,8 @@ app.post("/api/webhooks/razorpay", webhookLimiter, async (req: Request, res: Res
 app.get("/api/vendor/payments", async (_req: Request, res: Response) => {
   try {
     const result = await dbClient.execute({
-      sql: `SELECT lpe.*, cp.name as customer_name, cp.phone as customer_phone, cp.email as customer_email
+      sql: `SELECT lpe.*, cp.name as customer_name, cp.phone as customer_phone, cp.email as customer_email,
+              lpe.payment_method, lpe.card_last4, lpe.card_network, lpe.card_issuer
             FROM live_payment_events lpe
             JOIN customer_profiles cp ON cp.id = lpe.customer_profile_id
             ORDER BY lpe.created_at_utc DESC LIMIT 50`,
@@ -608,7 +609,12 @@ app.get("/api/vendor/analytics", async (_req: Request, res: Response) => {
               SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as total_failures,
               SUM(CASE WHEN status = 'captured' THEN amount_paise ELSE 0 END) as recovered_paise,
               SUM(CASE WHEN status = 'failed' THEN amount_paise ELSE 0 END) as at_risk_paise,
-              SUM(CASE WHEN vendor_notified = 1 THEN 1 ELSE 0 END) as suspicious_count
+              SUM(CASE WHEN vendor_notified = 1 THEN 1 ELSE 0 END) as suspicious_count,
+              SUM(CASE WHEN payment_method = 'card' THEN 1 ELSE 0 END) as method_card,
+              SUM(CASE WHEN payment_method = 'upi' THEN 1 ELSE 0 END) as method_upi,
+              SUM(CASE WHEN payment_method = 'netbanking' THEN 1 ELSE 0 END) as method_netbanking,
+              SUM(CASE WHEN payment_method = 'wallet' THEN 1 ELSE 0 END) as method_wallet,
+              SUM(CASE WHEN payment_method IS NULL OR payment_method = '' THEN 1 ELSE 0 END) as method_other
             FROM live_payment_events`,
       args: [],
     });
@@ -620,6 +626,11 @@ app.get("/api/vendor/analytics", async (_req: Request, res: Response) => {
       recoveredPaise: Number(row?.recovered_paise || 0),
       atRiskPaise: Number(row?.at_risk_paise || 0),
       suspiciousCount: Number(row?.suspicious_count || 0),
+      methodCard: Number(row?.method_card || 0),
+      methodUpi: Number(row?.method_upi || 0),
+      methodNetbanking: Number(row?.method_netbanking || 0),
+      methodWallet: Number(row?.method_wallet || 0),
+      methodOther: Number(row?.method_other || 0),
       successRate: row?.total_events > 0
         ? ((Number(row.total_successes) / Number(row.total_events)) * 100).toFixed(1) + "%"
         : "0.0%",
