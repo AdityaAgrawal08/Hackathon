@@ -208,7 +208,7 @@
           modal: {
             ondismiss: function() {
               payBtn.disabled = false;
-              payBtn.innerHTML = 'Pay <span class="amount">' + '₹' + (selectedProduct.pricePaise / 100).toLocaleString('en-IN') + '</span>';
+              payBtn.textContent = 'Pay ' + formatINR(selectedProduct.pricePaise);
             },
           },
         };
@@ -231,9 +231,26 @@
           const methodVpa = paymentMethod.vpa || '';
           const methodBank = paymentMethod.bank || paymentMethod.bank_name || '';
 
-          showError('Payment failed: ' + errorDesc);
+          var simplifiedReason = '';
+          if (errorCode === 'insufficient_funds' || errorCode === 'CARD_INSUFFICIENT_FUNDS') {
+            simplifiedReason = ' — Your account has insufficient funds. Add money and retry.';
+          } else if (errorCode === 'CARD_EXPIRED') {
+            simplifiedReason = ' — Your card has expired. Please use a different card.';
+          } else if (errorCode === 'BAD_EXPIRY' || errorCode === 'INVALID_EXPIRY') {
+            simplifiedReason = ' — Invalid card expiry date. Please check and retry.';
+          } else if (errorCode.includes('NETWORK') || errorCode.includes('TIMEOUT') || errorCode === 'SERVER_ERROR') {
+            simplifiedReason = ' — No money deducted. Bank server issue. Try again shortly.';
+          } else if (errorCode.includes('RISK') || errorCode === 'FRAUD_REJECTED') {
+            simplifiedReason = ' — Transaction flagged for security review. Contact support.';
+          } else if (errorCode.includes('UPI') || errorCode.includes('VPA')) {
+            simplifiedReason = ' — UPI issue. Check your UPI ID and try again.';
+          } else {
+            simplifiedReason = ' — Please try again or use a different payment method.';
+          }
+
+          showError('Payment failed: ' + errorDesc + simplifiedReason);
           payBtn.disabled = false;
-          payBtn.innerHTML = 'Pay <span class="amount">' + '₹' + (selectedProduct.pricePaise / 100).toLocaleString('en-IN') + '</span>';
+          payBtn.textContent = 'Pay ' + formatINR(selectedProduct.pricePaise);
 
           // Report failure to server and redirect to recovery page
           try {
@@ -279,14 +296,15 @@
               window.location.href = '/recover/' + failData.eventId + '?' + params.toString();
             }
           } catch (e) {
-            window.location.href = '/recover/' + data.orderId;
+            showError('Payment failed. Redirecting to recovery...');
+            setTimeout(function() { window.location.href = '/recover/'; }, 1500);
           }
         });
         rzp.open();
       } catch (err) {
         showError(err.message);
         payBtn.disabled = false;
-        payBtn.innerHTML = 'Pay <span class="amount">' + '₹' + (selectedProduct.pricePaise / 100).toLocaleString('en-IN') + '</span>';
+        payBtn.textContent = 'Pay ' + formatINR(selectedProduct.pricePaise);
       }
     });
 

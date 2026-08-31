@@ -36,7 +36,7 @@ describe("Phase 3: Interactive Payment Flow Integration Tests", () => {
     expect(res.headers.get("content-type")).toContain("text/html");
     const html = await res.text();
     expect(html).toContain("Payment Could Not Be Processed");
-    expect(html).toContain("Remind Me on Salary Day");
+    expect(html).toContain("Retry Payment Now");
 
     const resToken = await fetch(`${baseUrl}/pay/${activeSession.recoveryToken}`);
     expect(resToken.status).toBe(200);

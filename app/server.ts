@@ -105,6 +105,41 @@ function nextDemoError(): string {
   return code;
 }
 
+// Simplified human-readable error reasons — user sees this, not raw codes
+function getSimplifiedReason(code: string, failureClass: string): string {
+  const reasons: Record<string, string> = {
+    // SOFT_RETRYABLE
+    INSUFFICIENT_FUNDS: "Your account has insufficient funds. Please add money and try again.",
+    BAD_REQUEST_PAYMENT_ACCOUNT_INSUFFICIENT_BALANCE: "Your account has insufficient funds. Please add money and try again.",
+    BAD_REQUEST_PAYMENT_UPI_COLLECT_EXPIRED: "The UPI request expired. Please try again.",
+    BAD_REQUEST_PAYMENT_OTP_VALIDATION_FAILED: "OTP verification failed. Please try again.",
+    TEMPORARY_DECLINE: "Your bank temporarily declined the payment. Please try again in a few minutes.",
+    NO_MANDATE_RESPONSE: "Your UPI mandate did not respond. Please try again.",
+    // HARD_METHOD_DEAD
+    CARD_EXPIRED: "Your card has expired. Please use a different card or update your card details.",
+    BAD_REQUEST_PAYMENT_CARD_EXPIRED: "Your card has expired. Please use a different card or update your card details.",
+    BAD_REQUEST_PAYMENT_CARD_INVALID: "Your card details are invalid. Please check and try again.",
+    BAD_REQUEST_PAYMENT_MANDATE_REVOKED: "Your UPI mandate has been cancelled. Please set it up again.",
+    BAD_REQUEST_PAYMENT_UPI_INVALID_VPA: "The UPI ID entered is invalid. Please check and try again.",
+    MANDATE_REVOKED: "Your UPI mandate has been cancelled. Please set it up again.",
+    TOKEN_INVALID: "Your saved payment method is no longer valid. Please use a different method.",
+    // NETWORK_TIMEOUT
+    GATEWAY_TIMEOUT: "The bank server took too long to respond. No money was deducted. Please try again.",
+    GATEWAY_ERROR: "There was a temporary issue with the bank. No money was deducted. Please try again.",
+    BANK_DOWNTIME_NETWORK_ERROR: "Your bank is currently experiencing issues. No money was deducted. Please try again later.",
+    BAD_REQUEST_PAYMENT_TIMED_OUT: "The payment timed out. No money was deducted. Please try again.",
+    ISSUER_TIMEOUT: "Your bank did not respond in time. No money was deducted. Please try again.",
+    NETWORK_ERROR: "A network error occurred. No money was deducted. Please try again.",
+    // RISK_FLAGGED
+    SUSPECTED_FRAUD: "This transaction was flagged for security review. Please contact support.",
+    BAD_REQUEST_PAYMENT_FRAUD_IDENTIFIED: "This transaction was flagged for security review. Please contact support.",
+    RISK_BLOCKED: "This transaction was blocked for security reasons. Please contact support.",
+    // UNKNOWN
+    BAD_REQUEST_PAYMENT_DECLINED_BY_BANK: "Your bank declined the payment. Please try a different payment method.",
+  };
+  return reasons[code] || "Payment could not be processed. Please try again or contact support.";
+}
+
 // ── SSE ──────────────────────────────────────────────────────────
 interface SSEClient { res: Response; id: string; connectedAt: number; }
 const sseClients = new Map<string, Set<SSEClient>>();
@@ -297,26 +332,53 @@ app.post("/api/payments/verify", async (req: Request, res: Response) => {
 // ── Client-Side Payment Failure (immediate redirect to recovery) ─
 app.post("/api/payments/failed", async (req: Request, res: Response) => {
   try {
-    const { razorpay_order_id, error_code, error_description, error_step, error_source, error_reason,
+    const { razorpay_order_id, razorpay_payment_id, error_code, error_description, error_step, error_source, error_reason,
             customerId, productId, productName, amountPaise } = req.body;
 
     if (!razorpay_order_id) return res.status(400).json({ error: "razorpay_order_id required" });
 
-    // Round-robin error injection: cycle through all failure classes for demo
-    // This ensures the dashboard shows a variety of failure types, not just one
-    const demoErrorCode = nextDemoError();
+    // Server-side amount validation — reject obviously invalid amounts
+    const validatedAmount = Number(amountPaise);
+    if (isNaN(validatedAmount) || validatedAmount <= 0 || validatedAmount > 10000000) {
+      return res.status(400).json({ error: "Invalid amount" });
+    }
+
+    // Use the REAL error code from Razorpay — never overwrite with demo codes
+    const failureCode = error_code || "UNKNOWN";
+    const paymentId = razorpay_payment_id || `pay_client_${Date.now()}`;
+
+    // Deduplication: check if this payment_id already has an event
+    const existingEvent = await dbClient.execute({
+      sql: "SELECT id FROM live_payment_events WHERE razorpay_payment_id = ? LIMIT 1",
+      args: [paymentId],
+    });
+    if (existingEvent.rows.length > 0) {
+      const existingId = String(existingEvent.rows[0].id);
+      console.log(`[Payments] Dedup: payment ${paymentId} already has event ${existingId}`);
+      return res.json({
+        eventId: existingId,
+        failureClass: "UNKNOWN",
+        action: "NO_ACTION",
+        failureCode,
+        failureDescription: error_description || "Payment already recorded",
+        duplicate: true,
+      });
+    }
+
+    // Validate customerProfileId — must not be empty
+    const validCustomerId = customerId || "";
 
     // Use processFailedPayment to run full ML pipeline
     const result = await processFailedPayment(dbClient, {
-      razorpayPaymentId: `pay_client_${Date.now()}`,
+      razorpayPaymentId: paymentId,
       razorpayOrderId: razorpay_order_id,
       amountPaise: amountPaise || 0,
-      failureCode: demoErrorCode,
-      failureDescription: error_description || `Simulated failure: ${demoErrorCode}`,
+      failureCode,
+      failureDescription: error_description || `Payment failed: ${failureCode}`,
       failureStep: error_step || "payment_authorization",
       failureSource: error_source || "customer",
-      failureReason: error_reason || demoErrorCode,
-      customerProfileId: customerId || "",
+      failureReason: error_reason || failureCode,
+      customerProfileId: validCustomerId,
       productName: productName || "",
       nowMs: Date.now(),
     }, outreachRouter);
@@ -326,29 +388,34 @@ app.post("/api/payments/failed", async (req: Request, res: Response) => {
       type: "PAYMENT_FAILED",
       status: "failed",
       eventId: result.eventId,
-      customerProfileId: customerId,
+      customerProfileId: validCustomerId,
       failureClass: result.failureClass,
       probability: result.probability,
       action: result.action,
+      amountPaise,
+      productName,
     });
 
     if (result.isSuspicious) {
       broadcastSSE("vendor:alerts", {
         type: "SUSPICIOUS_ACTIVITY",
         eventId: result.eventId,
-        customerProfileId: customerId,
+        customerProfileId: validCustomerId,
         reasons: result.suspicionReasons,
-        amountPaise: amountPaise,
-        failureCode: error_code,
+        amountPaise,
+        failureCode,
       });
     }
+
+    // Simplified human-readable reason for the user
+    const simplifiedReason = getSimplifiedReason(failureCode, result.failureClass);
 
     res.json({
       eventId: result.eventId,
       failureClass: result.failureClass,
       action: result.action,
-      failureCode: demoErrorCode,
-      failureDescription: `Payment could not be processed. Reason: ${demoErrorCode.replace(/_/g, ' ').toLowerCase()}`,
+      failureCode,
+      failureDescription: simplifiedReason,
     });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
@@ -540,6 +607,8 @@ app.post("/api/webhooks/razorpay", webhookLimiter, async (req: Request, res: Res
               paymentMethod: payment.method,
               cardLast4: card.last4,
               cardNetwork: card.network,
+              amountPaise: payment.amount,
+              productName: payment.productName || "",
             });
 
             if (result.isSuspicious) {
@@ -777,6 +846,19 @@ app.get("/api/sse/:channel", (req: Request, res: Response) => {
   });
 });
 
+// Periodic SSE dead client cleanup (every 60s)
+setInterval(() => {
+  const now = Date.now();
+  for (const [ch, clients] of sseClients) {
+    for (const c of clients) {
+      if (now - c.connectedAt > 300000) { // 5 min max
+        try { c.res.end(); } catch {}
+        clients.delete(c);
+      }
+    }
+  }
+}, 60000);
+
 // ── Payment Status SSE (for result page) ─────────────────────────
 app.get("/api/status/:token", (req: Request, res: Response) => {
   const { token } = req.params;
@@ -938,7 +1020,7 @@ app.post("/api/recovery/promise-to-pay", async (req: Request, res: Response) => 
     const { proposalId, promisedDay, contactPreference } = req.body || {};
     if (!proposalId || !promisedDay) return res.status(400).json({ error: "proposalId and promisedDay required" });
 
-    const result = await recordPromiseToPay(proposalId, promisedDay, contactPreference || "SMS", dbClient);
+    const result = await recordPromiseToPay(proposalId, promisedDay, dbClient);
     res.json({ success: true, ...result });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
@@ -963,6 +1045,45 @@ app.get("/api/recovery/result/:proposalId", async (req: Request, res: Response) 
     res.json(result);
   } catch (err) {
     res.status(404).json({ error: "Result not found" });
+  }
+});
+
+// ── Get event + customer data from DB (for recovery page) ────────
+app.get("/api/events/:eventId", async (req: Request, res: Response) => {
+  try {
+    const rows = await dbClient.execute({
+      sql: `SELECT lpe.*, cp.name as customer_name, cp.phone as customer_phone, cp.email as customer_email
+            FROM live_payment_events lpe
+            LEFT JOIN customer_profiles cp ON cp.id = lpe.customer_profile_id
+            WHERE lpe.id = ?`,
+      args: [req.params.eventId],
+    });
+    if (rows.rows.length === 0) return res.status(404).json({ error: "Event not found" });
+    const row = rows.rows[0] as any;
+    res.json({
+      eventId: row.id,
+      razorpayPaymentId: row.razorpay_payment_id,
+      razorpayOrderId: row.razorpay_order_id,
+      customerProfileId: row.customer_profile_id,
+      customerName: row.customer_name || "",
+      phone: row.customer_phone || "",
+      email: row.customer_email || "",
+      productName: row.product_name || "",
+      amountPaise: row.amount_paise,
+      status: row.status,
+      failureClass: row.failure_class,
+      failureCode: row.failure_code,
+      failureDescription: row.failure_description,
+      paymentMethod: row.payment_method,
+      cardLast4: row.card_last4,
+      cardNetwork: row.card_network,
+      cardType: row.card_type,
+      vpa: row.vpa,
+      bankCode: row.bank_code,
+      createdAt: row.created_at_utc,
+    });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
   }
 });
 

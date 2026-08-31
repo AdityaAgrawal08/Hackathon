@@ -218,7 +218,7 @@ export async function processFailedPayment(
     nowMs,
     policy,
     attemptsSoFar: customer?.total_failures ?? 0,
-    ltvPaise: (customer?.total_successes ?? 0) * 50000,
+    ltvPaise: (customer?.total_successes ?? 0) * input.amountPaise,
     churnRiskBp: (customer?.total_failures ?? 0) > 2 ? 4000 : 1000,
   });
 
@@ -281,7 +281,7 @@ export async function processFailedPayment(
       probability,
       decideOutput.chosen.action,
       false,
-      isSuspicious,
+      0, // vendor_notified — false at INSERT time, set to 1 only when vendor is actually notified
       nowUtc,
       // New Razorpay webhook fields
       input.paymentMethod || null,
@@ -307,14 +307,12 @@ export async function processFailedPayment(
     sql: `UPDATE customer_profiles SET
       total_attempts = total_attempts + 1,
       total_failures = total_failures + 1,
-      total_amount_paise = total_amount_paise + ?,
       last_failure_code = ?,
       last_failure_at_utc = ?,
       flagged_as_suspicious = ?,
       risk_score_bp = MAX(risk_score_bp, ?)
       WHERE id = ?`,
     args: [
-      input.amountPaise,
       input.failureCode,
       nowUtc,
       isSuspicious ? 1 : 0,
@@ -330,7 +328,8 @@ export async function processFailedPayment(
   if (!isSuspicious) {
     // Immediate outreach via primary channels (Email + SMS only, no WhatsApp/Voice)
     // Build recovery URL with product info so customer's cart is restored
-    const recoveryUrl = new URL(`${process.env.BASE_URL || "http://localhost:3000"}/recover/${eventId}`);
+    const baseUrl = process.env.BASE_URL || `http://localhost:${process.env.PORT || "3000"}`;
+    const recoveryUrl = new URL(`/recover/${eventId}`, baseUrl);
     if (input.productName) {
       // Map product name back to product ID
       const productMap: Record<string, string> = {
@@ -347,6 +346,15 @@ export async function processFailedPayment(
     recoveryUrl.searchParams.set("class", failureClass);
     recoveryUrl.searchParams.set("code", input.failureCode);
     recoveryUrl.searchParams.set("reason", input.failureReason || input.failureDescription);
+
+    // Include payment method details in URL so recovery page can display them
+    if (input.paymentMethod) recoveryUrl.searchParams.set("method", input.paymentMethod);
+    if (input.cardLast4) recoveryUrl.searchParams.set("last4", input.cardLast4);
+    if (input.cardNetwork) recoveryUrl.searchParams.set("network", input.cardNetwork);
+    if (input.cardType) recoveryUrl.searchParams.set("type", input.cardType);
+    if (input.cardIssuer) recoveryUrl.searchParams.set("issuer", input.cardIssuer);
+    if (input.vpa) recoveryUrl.searchParams.set("vpa", input.vpa);
+    if (input.bankCode) recoveryUrl.searchParams.set("bank", input.bankCode);
 
     const outreachPayload: OutreachPayload = {
       proposalId: eventId,
@@ -409,23 +417,30 @@ export async function processFailedPayment(
       { channel: "EMAIL", delayMs: 72 * 60 * 60 * 1000 }, // +72 hours
     ];
 
-    for (const fu of followUpChannels) {
-      const scheduleId = `sch_${eventId}_${fu.channel}_${fu.delayMs}`;
-      const scheduledAt = isoUtc(nowMs + fu.delayMs);
-      await client.execute({
-        sql: `INSERT OR IGNORE INTO scheduled_outreach
-          (id, live_payment_event_id, customer_profile_id, channel, scheduled_at_utc)
-          VALUES (?, ?, ?, ?, ?)`,
-        args: [scheduleId, eventId, input.customerProfileId, fu.channel, scheduledAt],
-      });
-      scheduledOutreach.push({ channel: fu.channel, scheduledAtUtc: scheduledAt });
+    // Only schedule follow-ups if customer has contact info
+    const hasContact = !!(outreachPayload.recipient.phone || outreachPayload.recipient.email);
+    if (hasContact) {
+      for (const fu of followUpChannels) {
+        const scheduleId = `sch_${eventId}_${fu.channel}_${fu.delayMs}`;
+        const scheduledAt = isoUtc(nowMs + fu.delayMs);
+        await client.execute({
+          sql: `INSERT OR IGNORE INTO scheduled_outreach
+            (id, live_payment_event_id, customer_profile_id, channel, scheduled_at_utc)
+            VALUES (?, ?, ?, ?, ?)`,
+          args: [scheduleId, eventId, input.customerProfileId, fu.channel, scheduledAt],
+        });
+        scheduledOutreach.push({ channel: fu.channel, scheduledAtUtc: scheduledAt });
+      }
     }
 
-    // Mark outreach as dispatched
-    await client.execute({
-      sql: `UPDATE live_payment_events SET outreach_dispatched = 1 WHERE id = ?`,
-      args: [eventId],
-    });
+    // Mark outreach as dispatched only if messages were actually sent
+    const anyDispatched = dispatchResults.some(r => r.status === "SENT" || r.status === "DELIVERED" || r.status === "QUEUED");
+    if (anyDispatched) {
+      await client.execute({
+        sql: `UPDATE live_payment_events SET outreach_dispatched = 1 WHERE id = ?`,
+        args: [eventId],
+      });
+    }
   }
 
   return {
@@ -481,11 +496,11 @@ export async function recordSuccessfulPayment(
     args: [params.amountPaise, params.customerProfileId],
   });
 
-  // Cancel pending outreach for this customer
+  // Cancel pending outreach for THIS specific event only (not all customer outreach)
   await client.execute({
     sql: `UPDATE scheduled_outreach SET executed = 1, status = 'SUPPRESSED', executed_at_utc = ?
-      WHERE customer_profile_id = ? AND executed = 0`,
-    args: [nowUtc, params.customerProfileId],
+      WHERE live_payment_event_id = ? AND executed = 0`,
+    args: [nowUtc, eventId],
   });
 
   return eventId;

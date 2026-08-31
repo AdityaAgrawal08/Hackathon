@@ -1218,11 +1218,6 @@ export async function getRecoveryResult(
     }
   }
 
-  // Fallback to latest session in demo/sandbox if none specified
-  if (!session && recoverySessions.size > 0) {
-    session = Array.from(recoverySessions.values())[recoverySessions.size - 1];
-  }
-
   if (!session) return null;
 
   const isSettled = session.autonomyStatus === "EXECUTED";
