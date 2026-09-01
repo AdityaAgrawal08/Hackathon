@@ -73,9 +73,14 @@ export class BrevoEmailProvider implements OutreachProvider {
         ? `Payment Update: ${this.config.senderName} (${formattedAmount})`
         : `Action Required: Subscription Payment for ${this.config.senderName} (${formattedAmount})`;
 
-    // Build method-specific heading for the email
+    // Build heading from ACTUAL Razorpay error — not inferred from method
     let methodSpecificText = "";
-    if (payload.method === "card" && payload.network && payload.last4) {
+    if (payload.rawErrorReason || payload.instrumentDescription) {
+      const errCode = payload.rawErrorReason || "PAYMENT_FAILED";
+      const errDesc = payload.instrumentDescription || "Payment could not be processed";
+      // Show the actual Razorpay error: "Payment failed — <description> [CODE]"
+      methodSpecificText = `Payment failed — ${errDesc} [${errCode}]`;
+    } else if (payload.method === "card" && payload.network && payload.last4) {
       methodSpecificText = `Your ${payload.network} card ending in ${payload.last4} was declined`;
     } else if (payload.method === "upi" && payload.vpa) {
       methodSpecificText = `Your UPI payment (${payload.vpa}) was declined`;

@@ -152,7 +152,14 @@ const TEMPLATES_BY_CLASS: Record<FailureClassId, Partial<Record<OutreachChannel,
     WHATSAPP: null,
     SMS: null,
     VOICE_IVR: null,
-    EMAIL: null,
+    EMAIL: {
+      templateId: "email_unknown_v1",
+      dltRegistered: false,
+      en: (ctx) =>
+        `Hi ${ctx.customerName},\n\nYour payment of ${formatINR(paise(ctx.amountPaise))} for ${ctx.merchantName} could not be completed.\n\nWhat happened:\nYour payment could not be processed. This may be due to a temporary issue with your bank or payment method. No money has been deducted from your account.\n\nWhat to do:\nPlease try again using a different payment method, or retry after a few minutes. If the problem persists, contact our support team.\n\nClick here to retry securely:\n${ctx.recoveryUrl}\n\nIf you have already paid, please ignore this message.\n\nBest regards,\nARBITER Recovery Team`,
+      hi: (ctx) =>
+        `Namaste ${ctx.customerName},\n\n${ctx.merchantName} ke liye ${formatINR(paise(ctx.amountPaise))} ka payment process nahi ho paya.\n\nKya hua:\nAapka payment process nahi ho paya. Yeh aapke bank ya payment method ke temporary issue ki wajah se ho sakta hai. Aapke account se koi paisa nahi kata hai.\n\nKya karein:\nKripya kisi aur payment method se dobara try karein, ya kuch der baad retry karein. Agar problem bani rahe toh humari support team se sampark karein.\n\nYahan click karke dobara try karein:\n${ctx.recoveryUrl}\n\nAgar aapne pehle se payment kar di hai, toh kripya is sandesh ko ignore karein.\n\nDhanyawad,\nARBITER Recovery Team`,
+    },
   },
 };
 
