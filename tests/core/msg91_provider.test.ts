@@ -26,7 +26,7 @@ describe("Task 2.3: MSG91 Indian DLT SMS Provider", () => {
     expect(result.providerName).toBe("msg91");
     expect(result.channel).toBe("SMS");
     expect(result.status).toBe("SENT");
-    expect(result.costPaise).toBe(25); // ₹0.25
+    expect(result.costPaise).toBe(0); // Simulated — no real cost
     expect(result.externalMessageId).toContain("msg91_sim_");
 
     const raw = result.rawResponse as { simulated: boolean; phone: string };

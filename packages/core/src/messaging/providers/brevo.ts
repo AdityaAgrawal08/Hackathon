@@ -60,6 +60,8 @@ export class BrevoEmailProvider implements OutreachProvider {
         merchantName: this.config.senderName || "ARBITER Store",
         instrumentDescription: payload.instrumentDescription || "Card / UPI",
         recoveryUrl,
+        customerMessage: payload.customerMessage,
+        vendorMessage: payload.vendorMessage,
         method: payload.method,
         last4: payload.last4,
         network: payload.network,
@@ -125,9 +127,10 @@ export class BrevoEmailProvider implements OutreachProvider {
         channel: this.channel,
         externalMessageId: `brevo_sim_${payload.proposalId}`,
         status: "SENT",
-        costPaise: 10, // ₹0.10 transactional email cost
+        costPaise: 0,
         dispatchedAtUtc: nowUtc,
         rawResponse: { simulated: true, to: payload.recipient.email, subject, reason: simReason },
+        errorMessage: `SIMULATED: ${simReason}. Set BREVO_API_KEY for real delivery.`,
       };
     }
 

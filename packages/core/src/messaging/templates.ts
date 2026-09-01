@@ -18,11 +18,13 @@ export interface MessageTokenContext {
   merchantName: string;
   instrumentDescription: string; // e.g. "HDFC Bank ending in 4120"
   recoveryUrl: string;
+  customerMessage?: string; // from error catalog — transaction-specific
+  vendorMessage?: string;   // from error catalog — for vendor
   method?: "card" | "upi" | "netbanking" | "wallet";
-  last4?: string; // Last 4 digits of card
-  network?: string; // e.g. "Visa", "Mastercard", "RuPay"
-  vpa?: string; // UPI VPA
-  bank?: string; // Bank name
+  last4?: string;
+  network?: string;
+  vpa?: string;
+  bank?: string;
 }
 
 export interface RenderedMessage {
@@ -71,9 +73,9 @@ const TEMPLATES_BY_CLASS: Record<FailureClassId, Partial<Record<OutreachChannel,
       templateId: "email_insufficient_v1",
       dltRegistered: false,
       en: (ctx) =>
-        `Hi ${ctx.customerName},\n\nYour payment of ${formatINR(paise(ctx.amountPaise))} for ${ctx.merchantName} could not be processed because of insufficient balance in your ${ctx.instrumentDescription}.\n\nWhat happened:\nYour account did not have enough funds to complete this transaction. No money was deducted.\n\nWhat to do:\nPlease retry with a different card or UPI, or ensure your account has sufficient balance.\n\nClick here to retry securely:\n${ctx.recoveryUrl}\n\nIf you have already paid, please ignore this message.\n\nBest regards,\nARBITER Recovery Team`,
+        `Hi ${ctx.customerName},\n\nYour payment of ${formatINR(paise(ctx.amountPaise))} for ${ctx.merchantName} could not be completed.\n\n${ctx.customerMessage || 'Your account did not have enough funds to complete this transaction. No money was deducted.'}\n\nWhat to do:\nPlease retry with a different card or UPI, or ensure your account has sufficient balance.\n\nClick here to retry securely:\n${ctx.recoveryUrl}\n\nIf you have already paid, please ignore this message.\n\nBest regards,\nARBITER Recovery Team`,
       hi: (ctx) =>
-        `Namaste ${ctx.customerName},\n\n${ctx.merchantName} ke liye ${formatINR(paise(ctx.amountPaise))} ka payment aapke ${ctx.instrumentDescription} mein balance kam hone ki wajah se process nahi ho paya.\n\nKya hua:\nAapke account mein is transaction ke liye paise kam the. Koi paisa nahi kata hai.\n\nKya karein:\nKripya kisi aur card ya UPI se retry karein, ya apne account mein paise daalein.\n\nYahan click karke abhi retry karein:\n${ctx.recoveryUrl}\n\nAgar aapne pehle se payment kar di hai, toh kripya is sandesh ko ignore karein.\n\nDhanyawad,\nARBITER Recovery Team`,
+        `Namaste ${ctx.customerName},\n\n${ctx.merchantName} ke liye ${formatINR(paise(ctx.amountPaise))} ka payment process nahi ho paya.\n\n${ctx.customerMessage || 'Aapke account mein is transaction ke liye paise kam the. Koi paisa nahi kata hai.'}\n\nKya karein:\nKripya kisi aur card ya UPI se retry karein, ya apne account mein paise daalein.\n\nYahan click karke abhi retry karein:\n${ctx.recoveryUrl}\n\nAgar aapne pehle se payment kar di hai, toh kripya is sandesh ko ignore karein.\n\nDhanyawad,\nARBITER Recovery Team`,
     },
   },
   HARD_METHOD_DEAD: {
@@ -106,9 +108,9 @@ const TEMPLATES_BY_CLASS: Record<FailureClassId, Partial<Record<OutreachChannel,
       templateId: "email_card_expired_v1",
       dltRegistered: false,
       en: (ctx) =>
-        `Hi ${ctx.customerName},\n\nYour payment method for ${ctx.merchantName} (${formatINR(paise(ctx.amountPaise))}) has expired or been revoked.\n\nWhat happened:\nYour ${ctx.instrumentDescription} is no longer valid for payments. This could be because the card expired, the UPI mandate was cancelled, or the saved method was removed.\n\nWhat to do:\nPlease update your payment method or set up a new one to avoid service interruption.\n\nClick here to update your payment method:\n${ctx.recoveryUrl}\n\nIf you have already updated your details, please ignore this message.\n\nBest regards,\nARBITER Recovery Team`,
+        `Hi ${ctx.customerName},\n\nYour payment of ${formatINR(paise(ctx.amountPaise))} for ${ctx.merchantName} could not be completed.\n\n${ctx.customerMessage || 'Your payment method is no longer valid for payments.'}\n\nWhat to do:\nPlease update your payment method or set up a new one to avoid service interruption.\n\nClick here to update your payment method:\n${ctx.recoveryUrl}\n\nIf you have already updated your details, please ignore this message.\n\nBest regards,\nARBITER Recovery Team`,
       hi: (ctx) =>
-        `Namaste ${ctx.customerName},\n\n${ctx.merchantName} ke liye aapka payment method (${formatINR(paise(ctx.amountPaise))}) expire ya revoke ho chuka hai.\n\nKya hua:\nAapka ${ctx.instrumentDescription} ab payments ke liye valid nahi hai. Card expire hone, UPI mandate cancel hone, ya saved method delete hone ki wajah se ho sakta hai.\n\nKya karein:\nKripya apna payment method update karein ya naya set karein taaki service mein koi rukawat na aaye.\n\nYahan click karke apna payment method update karein:\n${ctx.recoveryUrl}\n\nAgar aapne pehle se details update kar di hain, toh kripya is sandesh ko ignore karein.\n\nDhanyawad,\nARBITER Recovery Team`,
+        `Namaste ${ctx.customerName},\n\n${ctx.merchantName} ke liye ${formatINR(paise(ctx.amountPaise))} ka payment process nahi ho paya.\n\n${ctx.customerMessage || 'Aapka payment method ab payments ke liye valid nahi hai.'}\n\nKya karein:\nKripya apna payment method update karein ya naya set karein taaki service mein koi rukawat na aaye.\n\nYahan click karke apna payment method update karein:\n${ctx.recoveryUrl}\n\nAgar aapne pehle se details update kar di hain, toh kripya is sandesh ko ignore karein.\n\nDhanyawad,\nARBITER Recovery Team`,
     },
   },
   // ──────────────────────────────────────────────────────────────────
@@ -137,9 +139,9 @@ const TEMPLATES_BY_CLASS: Record<FailureClassId, Partial<Record<OutreachChannel,
       templateId: "email_bank_down_v1",
       dltRegistered: false,
       en: (ctx) =>
-        `Hi ${ctx.customerName},\n\nYour payment of ${formatINR(paise(ctx.amountPaise))} for ${ctx.merchantName} could not be completed due to a temporary bank server issue.\n\nWhat happened:\n${ctx.instrumentDescription} experienced a temporary network delay. This is not an issue with your account. No money has been deducted from your bank.\n\nWhat we are doing:\nWe are actively working to resolve the bank connectivity issue. You do not need to take any action right now.\n\nWhat to do:\nWe will notify you via email and SMS as soon as the issue is resolved. If you prefer not to wait, you can pay immediately using a different bank or UPI:\n\nClick here to pay now via alternate method:\n${ctx.recoveryUrl}\n\nBest regards,\nARBITER Recovery Team`,
+        `Hi ${ctx.customerName},\n\nYour payment of ${formatINR(paise(ctx.amountPaise))} for ${ctx.merchantName} could not be completed.\n\n${ctx.customerMessage || 'Your bank or payment provider experienced a temporary issue. No money has been deducted from your account.'}\n\nWhat to do:\nPlease try again in a few minutes, or use a different payment method.\n\nClick here to retry:\n${ctx.recoveryUrl}\n\nIf you have already paid, please ignore this message.\n\nBest regards,\nARBITER Recovery Team`,
       hi: (ctx) =>
-        `Namaste ${ctx.customerName},\n\n${ctx.merchantName} ke liye ${formatINR(paise(ctx.amountPaise))} ka payment temporary bank server issue ki wajah se process nahi ho paya.\n\nKya hua:\n${ctx.instrumentDescription} mein temporary network delay aaya. Yeh aapke account ki galti nahi hai. Aapke bank se koi paisa nahi kata hai.\n\nHum kya kar rahe hain:\nHum bank connectivity issue ko actively resolve kar rahe hain. Aapko abhi kuch karne ki zaroorat nahi hai.\n\nKya karein:\nJab issue resolve hoga hum aapko email aur SMS se notify karenge. Agar aap wait nahi karna chahte toh kisi aur bank ya UPI se turant payment kar sakte hain:\n\nYahan click karke abhi alternate method se pay karein:\n${ctx.recoveryUrl}\n\nDhanyawad,\nARBITER Recovery Team`,
+        `Namaste ${ctx.customerName},\n\n${ctx.merchantName} ke liye ${formatINR(paise(ctx.amountPaise))} ka payment process nahi ho paya.\n\n${ctx.customerMessage || 'Aapke bank ya payment provider mein temporary issue aaya. Aapke account se koi paisa nahi kata hai.'}\n\nKya karein:\nKuch der baad dobara try karein, ya kisi aur payment method ka upyog karein.\n\nYahan click karke dobara try karein:\n${ctx.recoveryUrl}\n\nAgar aapne pehle se payment kar di hai, toh kripya is sandesh ko ignore karein.\n\nDhanyawad,\nARBITER Recovery Team`,
     },
   },
   RISK_FLAGGED: {
@@ -156,9 +158,9 @@ const TEMPLATES_BY_CLASS: Record<FailureClassId, Partial<Record<OutreachChannel,
       templateId: "email_unknown_v1",
       dltRegistered: false,
       en: (ctx) =>
-        `Hi ${ctx.customerName},\n\nYour payment of ${formatINR(paise(ctx.amountPaise))} for ${ctx.merchantName} could not be completed.\n\nWhat happened:\nYour payment could not be processed. This may be due to a temporary issue with your bank or payment method. No money has been deducted from your account.\n\nWhat to do:\nPlease try again using a different payment method, or retry after a few minutes. If the problem persists, contact our support team.\n\nClick here to retry securely:\n${ctx.recoveryUrl}\n\nIf you have already paid, please ignore this message.\n\nBest regards,\nARBITER Recovery Team`,
+        `Hi ${ctx.customerName},\n\nYour payment of ${formatINR(paise(ctx.amountPaise))} for ${ctx.merchantName} could not be completed.\n\n${ctx.customerMessage || 'Your payment could not be processed. This may be a temporary issue. No money has been deducted from your account.'}\n\nWhat to do:\nPlease try again using a different payment method, or retry after a few minutes.\n\nClick here to retry securely:\n${ctx.recoveryUrl}\n\nIf you have already paid, please ignore this message.\n\nBest regards,\nARBITER Recovery Team`,
       hi: (ctx) =>
-        `Namaste ${ctx.customerName},\n\n${ctx.merchantName} ke liye ${formatINR(paise(ctx.amountPaise))} ka payment process nahi ho paya.\n\nKya hua:\nAapka payment process nahi ho paya. Yeh aapke bank ya payment method ke temporary issue ki wajah se ho sakta hai. Aapke account se koi paisa nahi kata hai.\n\nKya karein:\nKripya kisi aur payment method se dobara try karein, ya kuch der baad retry karein. Agar problem bani rahe toh humari support team se sampark karein.\n\nYahan click karke dobara try karein:\n${ctx.recoveryUrl}\n\nAgar aapne pehle se payment kar di hai, toh kripya is sandesh ko ignore karein.\n\nDhanyawad,\nARBITER Recovery Team`,
+        `Namaste ${ctx.customerName},\n\n${ctx.merchantName} ke liye ${formatINR(paise(ctx.amountPaise))} ka payment process nahi ho paya.\n\n${ctx.customerMessage || 'Aapka payment process nahi ho paya. Yeh temporary issue ho sakta hai. Aapke account se koi paisa nahi kata hai.'}\n\nKya karein:\nKripya kisi aur payment method se dobara try karein, ya kuch der baad retry karein.\n\nYahan click karke dobara try karein:\n${ctx.recoveryUrl}\n\nAgar aapne pehle se payment kar di hai, toh kripya is sandesh ko ignore karein.\n\nDhanyawad,\nARBITER Recovery Team`,
     },
   },
 };

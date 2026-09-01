@@ -114,7 +114,7 @@ describe("E2E Payment Workflow", () => {
       const outreach = await getOutreachForEvent(result.eventId);
       const emailOutreach = outreach.find((o: any) => o.channel === "EMAIL");
       expect(emailOutreach).toBeTruthy();
-      expect(emailOutreach.status).toBe("SENT");
+      expect(emailOutreach.status).toBe("SENT_SIMULATED");
     });
   });
 
@@ -263,7 +263,7 @@ describe("E2E Payment Workflow", () => {
       const retryOutreach = await getOutreachForEvent(retry.eventId);
       const emailOutreach = retryOutreach.find((o: any) => o.channel === "EMAIL");
       expect(emailOutreach).toBeTruthy();
-      expect(emailOutreach.status).toBe("SENT");
+      expect(emailOutreach.status).toBe("SENT_SIMULATED");
     });
   });
 
