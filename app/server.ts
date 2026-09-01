@@ -233,6 +233,13 @@ app.post("/api/payments/verify", async (req: Request, res: Response) => {
 
     // Fetch payment details (gracefully handle missing API keys)
     let amountPaise = 0;
+    let paymentMethod = "";
+    let cardLast4 = "";
+    let cardNetwork = "";
+    let cardIssuer = "";
+    let cardType = "";
+    let vpa = "";
+    let bankCode = "";
     if (RZP_KEY_ID && RZP_KEY_SECRET && !RZP_KEY_ID.includes("xxxxxx")) {
       try {
         const auth = Buffer.from(`${RZP_KEY_ID}:${RZP_KEY_SECRET}`).toString("base64");
@@ -242,6 +249,15 @@ app.post("/api/payments/verify", async (req: Request, res: Response) => {
         if (payRes.ok) {
           const payData = (await payRes.json()) as any;
           amountPaise = payData?.amount || 0;
+          paymentMethod = payData?.method || "";
+          if (payData?.card) {
+            cardLast4 = payData.card.last4 || "";
+            cardNetwork = payData.card.network || "";
+            cardIssuer = payData.card.issuer || "";
+            cardType = payData.card.type || "";
+          }
+          if (payData?.vpa) vpa = payData.vpa;
+          if (payData?.bank) bankCode = payData.bank;
         }
       } catch {}
     }
@@ -256,6 +272,13 @@ app.post("/api/payments/verify", async (req: Request, res: Response) => {
         amountPaise,
         productName,
         nowMs: Date.now(),
+        paymentMethod,
+        cardLast4,
+        cardNetwork,
+        cardIssuer,
+        cardType,
+        vpa,
+        bankCode,
       });
     } catch (err) {
       console.error("Failed to record payment:", err);
@@ -314,9 +337,6 @@ app.post("/api/payments/failed", async (req: Request, res: Response) => {
       });
     }
 
-    // Validate customerProfileId — must not be empty
-    const validCustomerId = customerId || "";
-
     // Extract method details from Razorpay JS SDK error metadata
     let method = paymentMethod?.type || paymentMethod?.method || "";
     const cardLast4 = paymentMethod?.last4 || "";
@@ -339,6 +359,31 @@ app.post("/api/payments/failed", async (req: Request, res: Response) => {
         method = "netbanking";
       } else if (code.includes("WALLET")) {
         method = "wallet";
+      }
+    }
+
+    // Second dedup: if a recent failure exists for same customer+product (within 5 minutes),
+    // don't create a duplicate — the webhook or previous client call already created the row
+    const validCustomerId = customerId || "";
+    if (validCustomerId && productName) {
+      const recentFailure = await dbClient.execute({
+        sql: `SELECT id FROM live_payment_events
+              WHERE customer_profile_id = ? AND product_name = ? AND status = 'failed'
+              AND created_at_utc > datetime('now', '-5 minutes')
+              ORDER BY created_at_utc DESC LIMIT 1`,
+        args: [validCustomerId, productName],
+      });
+      if (recentFailure.rows.length > 0) {
+        const existingId = String(recentFailure.rows[0].id);
+        console.log(`[Payments] Client dedup: recent failure ${existingId} for ${validCustomerId}/${productName}`);
+        return res.json({
+          eventId: existingId,
+          failureClass: "UNKNOWN",
+          action: "NO_ACTION",
+          failureCode,
+          failureDescription: error_description || "Payment already recorded",
+          duplicate: true,
+        });
       }
     }
 
@@ -650,7 +695,10 @@ app.post("/api/webhooks/razorpay", webhookLimiter, async (req: Request, res: Res
 app.get("/api/vendor/payments", async (_req: Request, res: Response) => {
   try {
     const result = await dbClient.execute({
-      sql: `SELECT lpe.*, cp.name as customer_name, cp.phone as customer_phone, cp.email as customer_email,
+      sql: `SELECT lpe.*,
+              COALESCE(lpe.customer_name, cp.name) as customer_name,
+              COALESCE(lpe.customer_phone, cp.phone) as customer_phone,
+              COALESCE(lpe.customer_email, cp.email) as customer_email,
               lpe.payment_method, lpe.card_last4, lpe.card_network, lpe.card_issuer,
               cp.total_attempts, cp.total_successes, cp.total_failures,
               so_out.channel as next_outreach_channel, so_out.scheduled_at_utc as next_outreach_utc,

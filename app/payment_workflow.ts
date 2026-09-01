@@ -348,12 +348,14 @@ export async function processFailedPayment(
        payment_method, card_last4, card_network, card_issuer, card_type, card_emi,
        vpa, bank_code, is_international,
        acquirer_auth_code, acquirer_rrn,
-       razorpay_token_id, razorpay_contact, razorpay_email, razorpay_created_at)
+       razorpay_token_id, razorpay_contact, razorpay_email, razorpay_created_at,
+       customer_name, customer_phone, customer_email)
       VALUES (?, ?, ?, ?, ?, ?, 'failed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
               ?, ?, ?, ?, ?, ?,
               ?, ?, ?,
               ?, ?,
-              ?, ?, ?, ?)`,
+              ?, ?, ?, ?,
+              ?, ?, ?)`,
     args: [
       eventId,
       input.razorpayPaymentId,
@@ -388,6 +390,10 @@ export async function processFailedPayment(
       input.razorpayContact || null,
       input.razorpayEmail || null,
       input.razorpayCreatedAt || null,
+      // Snapshot customer data at transaction time
+      customer?.name || null,
+      customer?.phone || null,
+      customer?.email || null,
     ],
   });
 
@@ -608,10 +614,24 @@ export async function recordSuccessfulPayment(
     amountPaise: number;
     productName: string;
     nowMs: number;
+    paymentMethod?: string;
+    cardLast4?: string;
+    cardNetwork?: string;
+    cardIssuer?: string;
+    cardType?: string;
+    vpa?: string;
+    bankCode?: string;
   },
 ): Promise<string> {
   const nowUtc = isoUtc(params.nowMs);
   const eventId = `evt_${params.nowMs}_${createHash("sha256").update(`${params.razorpayPaymentId}${params.nowMs}`).digest("hex").slice(0, 8)}`;
+
+  // Fetch customer profile for snapshot
+  const custResult = await client.execute({
+    sql: `SELECT name, phone, email FROM customer_profiles WHERE id = ?`,
+    args: [params.customerProfileId],
+  });
+  const customer = custResult.rows[0] as any;
 
   // Step 7: If customer had a failed payment for this product, UPDATE it to 'captured'
   // (moves entry from failed view to successful view — no duplicate row)
@@ -632,9 +652,19 @@ export async function recordSuccessfulPayment(
         razorpay_order_id = ?,
         failure_code = NULL, failure_description = NULL, failure_class = NULL,
         ml_action = 'PAYMENT_RECEIVED',
-        retry_count = 0
+        retry_count = 0,
+        payment_method = COALESCE(?, payment_method),
+        card_last4 = COALESCE(?, card_last4),
+        card_network = COALESCE(?, card_network),
+        card_issuer = COALESCE(?, card_issuer),
+        card_type = COALESCE(?, card_type),
+        vpa = COALESCE(?, vpa),
+        bank_code = COALESCE(?, bank_code)
         WHERE id = ?`,
-      args: [params.razorpayPaymentId, params.razorpayOrderId, existingId],
+      args: [params.razorpayPaymentId, params.razorpayOrderId,
+        params.paymentMethod || null, params.cardLast4 || null, params.cardNetwork || null,
+        params.cardIssuer || null, params.cardType || null, params.vpa || null, params.bankCode || null,
+        existingId],
     });
     console.log(`[Workflow] Recovery: moved event ${existingId} from failed → captured for order ${params.razorpayOrderId}`);
 
@@ -661,8 +691,12 @@ export async function recordSuccessfulPayment(
   // No prior failed row: INSERT new successful row
   await client.execute({
     sql: `INSERT INTO live_payment_events
-      (id, razorpay_payment_id, razorpay_order_id, customer_profile_id, product_name, amount_paise, status, created_at_utc)
-      VALUES (?, ?, ?, ?, ?, ?, 'captured', ?)`,
+      (id, razorpay_payment_id, razorpay_order_id, customer_profile_id, product_name, amount_paise, status, created_at_utc,
+       payment_method, card_last4, card_network, card_issuer, card_type, vpa, bank_code,
+       customer_name, customer_phone, customer_email)
+      VALUES (?, ?, ?, ?, ?, ?, 'captured', ?,
+              ?, ?, ?, ?, ?, ?, ?,
+              ?, ?, ?)`,
     args: [
       eventId,
       params.razorpayPaymentId,
@@ -671,6 +705,16 @@ export async function recordSuccessfulPayment(
       params.productName,
       params.amountPaise,
       nowUtc,
+      params.paymentMethod || null,
+      params.cardLast4 || null,
+      params.cardNetwork || null,
+      params.cardIssuer || null,
+      params.cardType || null,
+      params.vpa || null,
+      params.bankCode || null,
+      customer?.name || null,
+      customer?.phone || null,
+      customer?.email || null,
     ],
   });
 
