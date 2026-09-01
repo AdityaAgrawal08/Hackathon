@@ -362,20 +362,21 @@ app.post("/api/payments/failed", async (req: Request, res: Response) => {
       }
     }
 
-    // Second dedup: if a recent failure exists for same customer+product (within 5 minutes),
-    // don't create a duplicate — the webhook or previous client call already created the row
+    // Second dedup: if a recent failure exists for same customer+product+ORDER (within 5 minutes),
+    // don't create a duplicate — this is the client handler and webhook for the same payment attempt.
+    // Retries (different order_id) are NOT deduped — they are independent transactions.
     const validCustomerId = customerId || "";
-    if (validCustomerId && productName) {
+    if (validCustomerId && productName && razorpay_order_id) {
       const recentFailure = await dbClient.execute({
         sql: `SELECT id FROM live_payment_events
-              WHERE customer_profile_id = ? AND product_name = ? AND status = 'failed'
+              WHERE customer_profile_id = ? AND product_name = ? AND razorpay_order_id = ? AND status = 'failed'
               AND created_at_utc > datetime('now', '-5 minutes')
               ORDER BY created_at_utc DESC LIMIT 1`,
-        args: [validCustomerId, productName],
+        args: [validCustomerId, productName, razorpay_order_id],
       });
       if (recentFailure.rows.length > 0) {
         const existingId = String(recentFailure.rows[0].id);
-        console.log(`[Payments] Client dedup: recent failure ${existingId} for ${validCustomerId}/${productName}`);
+        console.log(`[Payments] Client dedup: recent failure ${existingId} for order ${razorpay_order_id}`);
         return res.json({
           eventId: existingId,
           failureClass: "UNKNOWN",
