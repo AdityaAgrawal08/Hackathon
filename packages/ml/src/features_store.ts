@@ -6,12 +6,18 @@
  * vector for the same key throws (fail-closed provenance, I-3/I-4).
  */
 import type { Client } from "@libsql/client";
-import { FEATURE_VERSION } from "./features.js";
+import { FEATURE_VERSION, FEATURE_NAMES } from "./features.js";
 import { isoUtc } from "@arbiter/shared";
 
 export interface FeatureRecord {
   eventId: string;
   values: readonly number[];
+}
+
+export interface VersionedFeatureRecord {
+  eventId: string;
+  values: readonly number[];
+  version: string;
 }
 
 function vectorJson(values: readonly number[]): string {
@@ -45,7 +51,7 @@ export async function saveFeatures(
       continue;
     }
     await client.execute({
-      sql: `INSERT INTO features (id, event_id, feature_version, vector_json, computed_at_utc)
+      sql: `INSERT OR IGNORE INTO features (id, event_id, feature_version, vector_json, computed_at_utc)
             VALUES (?, ?, ?, ?, ?)`,
       args: [id, rec.eventId, FEATURE_VERSION, json, isoUtc(nowMs)],
     });
@@ -60,15 +66,35 @@ export async function loadFeatureVectors(
   client: Client,
   eventIds: readonly string[],
 ): Promise<Map<string, number[]>> {
+  const expectedDim = FEATURE_NAMES.length;
   const out = new Map<string, number[]>();
   for (const eventId of eventIds) {
-    const r = await client.execute({
-      sql: `SELECT vector_json FROM features
-            WHERE event_id = ? AND feature_version = ?`,
-      args: [eventId, FEATURE_VERSION],
+    // Try current version first, then fall back to any older version (bug #A-006)
+    const versions = [FEATURE_VERSION];
+    const allVersions = await client.execute({
+      sql: `SELECT DISTINCT feature_version FROM features WHERE event_id = ?`,
+      args: [eventId],
     });
-    if (r.rows.length > 0) {
-      out.set(eventId, JSON.parse(String(r.rows[0]!.vector_json)) as number[]);
+    for (const row of allVersions.rows) {
+      const v = String(row.feature_version);
+      if (!versions.includes(v)) versions.push(v);
+    }
+    for (const version of versions) {
+      const r = await client.execute({
+        sql: `SELECT vector_json FROM features WHERE event_id = ? AND feature_version = ?`,
+        args: [eventId, version],
+      });
+      if (r.rows.length > 0) {
+        const vec = JSON.parse(String(r.rows[0]!.vector_json)) as number[];
+        // Only pad short vectors from OLDER feature versions; return current-version vectors as-is
+        if (version !== FEATURE_VERSION && vec.length < expectedDim) {
+          const padded = [...vec, ...new Array(expectedDim - vec.length).fill(0)];
+          out.set(eventId, padded);
+        } else {
+          out.set(eventId, vec);
+        }
+        break;
+      }
     }
   }
   return out;

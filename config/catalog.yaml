@@ -1,0 +1,86 @@
+# ARBITER Intervention Catalog Configuration
+# Merchants can tune these multipliers without redeploying.
+# Each cell: failure_class × action → recovery multiplier on base ML score.
+# A 0 cell means the action can NEVER recover that class.
+
+version: catalog-v1
+
+# Partial collect fraction for B2B Smart Collect (§4.8)
+partial_collect_fraction: 0.3
+
+# Per-action contact cost in integer paise
+contact_cost_paise:
+  RETRY_NOW: 300
+  RETRY_PAYDAY: 300
+  ALTERNATE_UPI_LINK: 150
+  PARTIAL_COLLECT: 250
+  RECOVER_VIA_RAIL: 200
+  RECOVER_VOICE_HI: 800
+  RECOVER_WHATSAPP: 120
+  PROMISE_TO_PAY: 80
+  REMINDER_LINK: 100
+  HUMAN_REVIEW: 5000
+  NO_ACTION: 0
+
+# Action-conditioned recovery multipliers
+multipliers:
+  SOFT_RETRYABLE:
+    RETRY_NOW: 0.6
+    RETRY_PAYDAY: 1.4
+    ALTERNATE_UPI_LINK: 0.5
+    PARTIAL_COLLECT: 0.5
+    RECOVER_VIA_RAIL: 0.3
+    RECOVER_VOICE_HI: 0.8
+    RECOVER_WHATSAPP: 0.7
+    PROMISE_TO_PAY: 0.5
+    REMINDER_LINK: 0.7
+    HUMAN_REVIEW: 0.3
+    NO_ACTION: 0.02
+  HARD_METHOD_DEAD:
+    RETRY_NOW: 0.0
+    RETRY_PAYDAY: 0.0
+    ALTERNATE_UPI_LINK: 1.0
+    PARTIAL_COLLECT: 0.9
+    RECOVER_VIA_RAIL: 1.1
+    RECOVER_VOICE_HI: 0.5
+    RECOVER_WHATSAPP: 0.4
+    PROMISE_TO_PAY: 0.7
+    REMINDER_LINK: 0.6
+    HUMAN_REVIEW: 0.1
+    NO_ACTION: 0.0
+  NETWORK_TIMEOUT:
+    RETRY_NOW: 1.5
+    RETRY_PAYDAY: 0.4
+    ALTERNATE_UPI_LINK: 0.3
+    PARTIAL_COLLECT: 1.2
+    RECOVER_VIA_RAIL: 1.6
+    RECOVER_VOICE_HI: 0.6
+    RECOVER_WHATSAPP: 0.5
+    PROMISE_TO_PAY: 0.4
+    REMINDER_LINK: 0.2
+    HUMAN_REVIEW: 0.05
+    NO_ACTION: 0.05
+  RISK_FLAGGED:
+    RETRY_NOW: 0.0
+    RETRY_PAYDAY: 0.0
+    ALTERNATE_UPI_LINK: 0.0
+    PARTIAL_COLLECT: 0.1
+    RECOVER_VIA_RAIL: 0.0
+    RECOVER_VOICE_HI: 0.0
+    RECOVER_WHATSAPP: 0.0
+    PROMISE_TO_PAY: 0.2
+    REMINDER_LINK: 0.0
+    HUMAN_REVIEW: 1.0
+    NO_ACTION: 0.0
+  UNKNOWN:
+    RETRY_NOW: 0.1
+    RETRY_PAYDAY: 0.1
+    ALTERNATE_UPI_LINK: 0.1
+    PARTIAL_COLLECT: 0.3
+    RECOVER_VIA_RAIL: 0.1
+    RECOVER_VOICE_HI: 0.2
+    RECOVER_WHATSAPP: 0.2
+    PROMISE_TO_PAY: 0.2
+    REMINDER_LINK: 0.1
+    HUMAN_REVIEW: 1.0
+    NO_ACTION: 0.0

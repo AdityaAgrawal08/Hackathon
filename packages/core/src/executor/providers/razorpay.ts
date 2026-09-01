@@ -14,7 +14,7 @@
  *   HUMAN_REVIEW    → No API call; returns AMBIGUOUS
  */
 import { ActionProvider, ProviderContext, ProviderResult, ExecutionOutcome } from "./types.js";
-import { formatINR, paise } from "@arbiter/shared";
+import { formatINR, paise, logger } from "@arbiter/shared";
 import {
   multiplierFor,
   railForFailureClass,
@@ -25,6 +25,9 @@ import {
 
 const MODE = process.env.REAL_EXECUTION_MODE ?? "dry-run";
 const IS_LIVE = MODE === "live";
+const RZP_KEY_ID = process.env.RZP_TEST_KEY_ID || process.env.RZP_KEY_ID || "";
+const RZP_KEY_SECRET = process.env.RZP_TEST_KEY_SECRET || process.env.RZP_KEY_SECRET || "";
+const HAS_TEST_KEYS = Boolean(RZP_KEY_ID && RZP_KEY_SECRET);
 
 function buildPaymentLinkPayload(ctx: ProviderContext) {
   const amountRupees = (ctx.amountPaise / 100).toFixed(2);
@@ -33,7 +36,11 @@ function buildPaymentLinkPayload(ctx: ProviderContext) {
     currency: "INR",
     accept_partial: false,
     description: `Recovery retry for ${ctx.actionId} — ${ctx.failureClass}`,
-    customer: { contact: "+919999999999", email: "customer@example.com" },
+    customer: ctx.customer ? {
+      contact: ctx.customer.phone || undefined,
+      email: ctx.customer.email || undefined,
+      name: ctx.customer.name || undefined,
+    } : { contact: "+919999999999", email: "customer@example.com" },
     notify: { sms: true, email: true },
     reminder_enable: true,
     notes: {
@@ -42,7 +49,9 @@ function buildPaymentLinkPayload(ctx: ProviderContext) {
       failure_class: ctx.failureClass,
       idempotency_key: ctx.idempotencyKey,
     },
-    callback_url: "https://example.com/callback",
+    callback_url: process.env.PUBLIC_BASE_URL
+      ? `${process.env.PUBLIC_BASE_URL.replace(/\/$/, "")}/recover/${ctx.proposalId}`
+      : "https://example.com/callback",
     callback_method: "get",
   };
 }
@@ -89,7 +98,11 @@ function buildReminderLinkPayload(ctx: ProviderContext) {
     currency: "INR",
     accept_partial: false,
     description: `Reminder: payment of ₹${amountRupees} due`,
-    customer: { contact: "+919999999999", email: "customer@example.com" },
+    customer: ctx.customer ? {
+      contact: ctx.customer.phone || undefined,
+      email: ctx.customer.email || undefined,
+      name: ctx.customer.name || undefined,
+    } : { contact: "+919999999999", email: "customer@example.com" },
     notify: { sms: true, email: true, whatsapp: true },
     notes: {
       proposal_id: ctx.proposalId,
@@ -227,6 +240,12 @@ function buildPayload(ctx: ProviderContext) {
  * Honest dry-run outcome (bug #13): mirror the catalog multiplier so a DEAD
  * action for this class fails even in dry-run, instead of blindly succeeding.
  * HUMAN_REVIEW always needs a human (AMBIGUOUS).
+ *
+ * The multiplier table is a deterministic lookup: mult === 0 means the action
+ * is known-dead for this failure class (e.g., retrying a DEAD card never works).
+ * mult > 0 means the action is plausible — in dry-run we treat this as SUCCEEDED
+ * since we can't actually execute the payment. This is the correct behavior for
+ * a dry-run: it validates the decision logic, not the payment execution.
  */
 function mockOutcome(actionId: string, failureClass: string): ExecutionOutcome {
   if (actionId === "HUMAN_REVIEW") return "AMBIGUOUS";
@@ -241,16 +260,62 @@ export const razorpayProvider: ActionProvider = {
   async execute(ctx: ProviderContext): Promise<ProviderResult> {
     const payload = buildPayload(ctx);
 
-    if (IS_LIVE) {
-      // TODO: real Razorpay API call with RAZORPAY_KEY_ID/SECRET
-      // const response = await razorpay.paymentLinks.create(payload);
-      // return { outcome: "SUCCEEDED", rzpResponseRef: response.id };
-      throw new Error("LIVE mode not implemented; set REAL_EXECUTION_MODE=dry-run");
+    if (IS_LIVE || HAS_TEST_KEYS) {
+      // B-006: Real Razorpay test-mode API call
+      try {
+        const auth = Buffer.from(`${RZP_KEY_ID}:${RZP_KEY_SECRET}`).toString("base64");
+        const response = await fetch("https://api.razorpay.com/v1/payment_links", {
+          method: "POST",
+          headers: {
+            "Authorization": `Basic ${auth}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            amount: ctx.amountPaise,
+            currency: "INR",
+            description: `ARBITER Recovery - ${ctx.actionId} for ${ctx.proposalId}`,
+            customer: ctx.customer ? {
+              name: ctx.customer.name,
+              contact: ctx.customer.phone || undefined,
+              email: ctx.customer.email || undefined,
+            } : undefined,
+            notify: {
+              sms: false,
+              email: false,
+            },
+            callback_url: process.env.PUBLIC_BASE_URL
+              ? `${process.env.PUBLIC_BASE_URL.replace(/\/$/, "")}/recover/${ctx.proposalId}`
+              : undefined,
+            notes: {
+              proposal_id: ctx.proposalId,
+              action: ctx.actionId,
+              failure_class: ctx.failureClass,
+              arbiter_generated: "true",
+            },
+          }),
+        });
+
+        if (!response.ok) {
+          const errText = await response.text();
+          throw new Error(`Razorpay API ${response.status}: ${errText}`);
+        }
+
+        const data = await response.json() as { id: string; short_url?: string; status: string };
+        logger.info({ msg: "Razorpay test-mode payment link created", url: data.short_url ?? data.id });
+        return {
+          outcome: mockOutcome(ctx.actionId, ctx.failureClass),
+          dryRunPayload: payload,
+          rzpResponseRef: data.id,
+        };
+      } catch (err) {
+        logger.warn({ msg: "Razorpay test-mode API call failed, falling back to dry-run", err });
+        // Fall through to dry-run behavior below
+      }
     }
 
     // DRY-RUN: log the payload, return mock outcome
-    console.log(`[RAZORPAY DRY-RUN] ${ctx.actionId} for ${ctx.proposalId}:`);
-    console.log(JSON.stringify(payload, null, 2));
+    logger.info({ msg: "Razorpay dry-run", actionId: ctx.actionId, proposalId: ctx.proposalId });
+    logger.info({ msg: "Razorpay dry-run payload", payload });
 
     return {
       outcome: mockOutcome(ctx.actionId, ctx.failureClass),

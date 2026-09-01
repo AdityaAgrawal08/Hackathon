@@ -324,8 +324,8 @@
               btn.textContent = 'Retry Payment Now';
             }
           } catch (e) {
-            document.getElementById('status').className = 'status status-success';
-            document.getElementById('status').textContent = 'Payment received. Confirmation pending.';
+            document.getElementById('status').className = 'status status-error';
+            document.getElementById('status').textContent = 'Connection issue. Please check your payment status before retrying.';
             btn.disabled = false;
             btn.textContent = 'Retry Payment Now';
           }
@@ -362,7 +362,7 @@
               error_step: err.step || '',
               error_source: err.source || '',
               error_reason: err.reason || '',
-              customerId: eventData ? eventData.customerId : '',
+              customerId: eventData ? eventData.customerProfileId : '',
               productId: eventData ? mapProductNameToId(eventData.productName) : 'prod_premium_plan',
               productName: eventData ? eventData.productName : 'Unknown',
               amountPaise: eventData ? eventData.amountPaise : 0,

@@ -17,11 +17,10 @@ import { readFileSync, existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import QRCode from "qrcode";
-import { formatINR, paise, isoUtc } from "../packages/shared/src/index.js";
+import { formatINR, paise, isoUtc, hashSeed, COST_CONTROL_RETRY_PAISE, COST_ARBITER_OUTREACH_PAISE, logger } from "../packages/shared/src/index.js";
+import { MockRazorpayProvider } from "../packages/trial/src/provider.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-
-
 
 import {
   classifyRazorpayError,
@@ -47,6 +46,8 @@ import {
   computeFeatures,
   scoreWithArtifact,
   DEFAULT_16D_MODEL,
+  controlOutcome,
+  CONTROL_RATES,
   type ComputedFeatures,
   type ScoreResult,
 } from "../packages/ml/src/index.js";
@@ -390,24 +391,24 @@ export async function simulateFailureTriage(
 
     try {
       session.dispatchResult = await defaultOutreachRouter.dispatch(channel, outreachPayload, nowMs);
-      console.log(`[Outreach Dispatch] Proposal ${proposalId} -> Channel ${channel} -> Provider: ${session.dispatchResult.providerName} | Status: ${session.dispatchResult.status}`);
+      logger.info({ msg: "Outreach Dispatch", proposalId, channel, provider: session.dispatchResult.providerName, status: session.dispatchResult.status });
 
       // If email was provided and primary wasn't EMAIL, also fire email notification
       if (preset.customerEmail && channel !== "EMAIL") {
         try {
           await defaultOutreachRouter.dispatch("EMAIL", outreachPayload, nowMs);
-          console.log(`[Outreach Dispatch] Proposal ${proposalId} -> Secondary Channel EMAIL -> Dispatched`);
+          logger.info({ msg: "Outreach Dispatch", proposalId, channel: "EMAIL", secondary: true });
         } catch {}
       }
       // If phone was provided and primary wasn't SMS, also fire SMS notification
       if (preset.customerPhone && channel !== "SMS") {
         try {
           await defaultOutreachRouter.dispatch("SMS", outreachPayload, nowMs);
-          console.log(`[Outreach Dispatch] Proposal ${proposalId} -> Secondary Channel SMS -> Dispatched`);
+          logger.info({ msg: "Outreach Dispatch", proposalId, channel: "SMS", secondary: true });
         } catch {}
       }
     } catch (err) {
-      console.error(`[Outreach Error] Failed to dispatch ${channel}:`, err);
+      logger.error({ msg: "Outreach Error", channel, err });
     }
   }
 
@@ -537,9 +538,9 @@ export async function approveProposal(proposalId: string, dbClient?: Client, now
 
       try {
         session.dispatchResult = await defaultOutreachRouter.dispatch(channel, outreachPayload, nowMs);
-        console.log(`[Outreach Dispatch (Approved)] Proposal ${session.id} -> Channel ${channel} -> Provider: ${session.dispatchResult.providerName} | Status: ${session.dispatchResult.status}`);
+        logger.info({ msg: "Outreach Dispatch (Approved)", proposalId: session.id, channel, provider: session.dispatchResult.providerName, status: session.dispatchResult.status });
       } catch (err) {
-        console.error(`[Outreach Error (Approved)] Failed to dispatch ${channel}:`, err);
+        logger.error({ msg: "Outreach Error (Approved)", channel, err });
       }
 
     } else {
@@ -835,7 +836,28 @@ export async function runBatchBenchmark(dbClient?: Client) {
   let controlCostPaise = 0;
   let arbiterCostPaise = 0;
 
-  const nowMs = 1735689600000; // Fixed deterministic reference timestamp
+  const nowMs = 1735740000000; // Fixed deterministic reference (14:00 UTC = 19:30 IST — outside quiet hours)
+
+  // C-001: MockRazorpayProvider for realistic provider-side outcomes
+  const mockProvider = new MockRazorpayProvider();
+
+  /** Map failure classes to mock provider scenarios (C-001). */
+  function scenarioForFailureClass(cls: FailureClassId, actionId: string): string {
+    if (actionId === "HUMAN_REVIEW") return "cancelled_by_user";
+    switch (cls) {
+      case "SOFT_RETRYABLE": return "successful_payment";
+      case "NETWORK_TIMEOUT": return "gateway_timeout";
+      case "HARD_METHOD_DEAD": return "expired_method";
+      case "RISK_FLAGGED": return "rejected_by_provider";
+      default: return "successful_payment";
+    }
+  }
+
+  /** Map provider status to benchmark outcome. */
+  function outcomeFromStatus(status: string): "SUCCEEDED" | "FAILED" {
+    if (status === "succeeded" || status === "lost_response" || status === "slow_network") return "SUCCEEDED";
+    return "FAILED";
+  }
 
   for (let i = 0; i < BATCH_SIZE; i++) {
     const evt = eventsList[i];
@@ -889,39 +911,41 @@ export async function runBatchBenchmark(dbClient?: Client) {
 
     const chosen = evDecision.chosen;
 
-    // 1. Evaluate Control Strategy (Blind Naive Immediate Retries)
-    if (failureClass === "HARD_METHOD_DEAD" || failureClass === "RISK_FLAGGED") {
-      controlCostPaise += 3 * 1500;
-      wastedRetriesSaved += 3;
-    } else if (failureClass === "SOFT_RETRYABLE") {
-      controlRecovered += Math.round(amount * 0.22);
-      controlCostPaise += 1500;
-    } else if (failureClass === "NETWORK_TIMEOUT") {
-      controlRecovered += Math.round(amount * 0.32);
-      controlCostPaise += 1500;
-    } else {
-      controlRecovered += Math.round(amount * 0.15);
-      controlCostPaise += 1500;
+    // 1. Control Strategy: blind naive immediate retry (no timing, no action selection).
+    //    Uses deterministic outcomes per failure class — NOT model-probability-dependent.
+    const controlRate = CONTROL_RATES[failureClass] ?? 0.15;
+    // Use a hash of the event ID for deterministic per-event outcome (no Math.random)
+    const ctrlDraw = hashSeed(`ctrl:${i}:${failureCode}`) % 10_000;
+    const ctrlSucceeded = ctrlDraw < Math.round(controlRate * 10_000);
+    if (ctrlSucceeded) {
+      controlRecovered += amount;
     }
+    controlCostPaise += COST_CONTROL_RETRY_PAISE;
+    if (!ctrlSucceeded) wastedRetriesSaved++;
 
-    // 2. Evaluate ARBITER Strategy (AI Policy Execution)
-    if (failureClass === "HARD_METHOD_DEAD") {
-      const expectedRecoveryRate = Math.min(0.85, Math.max(0.60, prob * (chosen.multiplierUsed || 1.4)));
-      arbiterRecovered += Math.round(amount * expectedRecoveryRate);
-      arbiterCostPaise += 25;
-    } else if (failureClass === "SOFT_RETRYABLE") {
-      const expectedRecoveryRate = Math.min(0.92, Math.max(0.72, prob * (chosen.multiplierUsed || 1.6)));
-      arbiterRecovered += Math.round(amount * expectedRecoveryRate);
-      arbiterCostPaise += 25;
-    } else if (failureClass === "NETWORK_TIMEOUT") {
-      const expectedRecoveryRate = Math.min(0.95, Math.max(0.80, prob * (chosen.multiplierUsed || 1.8)));
-      arbiterRecovered += Math.round(amount * expectedRecoveryRate);
-      arbiterCostPaise += 0;
+    // 2. ARBITER Strategy: AI-selected action with EV-optimized timing.
+    //    Uses MockRazorpayProvider for realistic provider-side outcomes (C-001).
+    const arbiterMultiplier = chosen.multiplierUsed ?? 1.0;
+    const scenario = scenarioForFailureClass(failureClass, chosen.action);
+    const clientIdem = `bench_${i}_${failureCode}_${chosen.action}`;
+    const providerResult = await mockProvider.charge({
+      clientIdemKey: clientIdem,
+      proposalId: `prop_bench_${i}`,
+      actionId: chosen.action,
+      failureClass,
+      amountPaise: amount,
+      tenantId: "demo",
+      scenario,
+      nowMs,
+    });
+    const arbSucceeded = outcomeFromStatus(providerResult.status) === "SUCCEEDED";
+    if (arbSucceeded) {
+      arbiterRecovered += amount;
+      arbiterCostPaise += COST_ARBITER_OUTREACH_PAISE;
     } else if (failureClass === "RISK_FLAGGED") {
       arbiterCostPaise += 0;
     } else {
-      arbiterRecovered += Math.round(amount * 0.45);
-      arbiterCostPaise += 25;
+      arbiterCostPaise += COST_ARBITER_OUTREACH_PAISE;
     }
 
     // TRAI Compliance
@@ -1053,7 +1077,7 @@ export async function initiateRecoveryOrder(
         }
       }
     } catch (err) {
-      console.warn("Live Razorpay order creation failed, fallback to local:", err);
+      logger.warn({ msg: "Live Razorpay order creation failed, fallback to local", err });
     }
   }
 

@@ -8,3 +8,4 @@ export * from "./metrics.js";
 export * from "./dataset.js";
 export * from "./train.js";
 export * from "./credibility.js";
+export * from "./control_arm.js";

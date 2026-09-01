@@ -72,7 +72,7 @@
 
 <div class="container">
   <div class="header">
-    <h1 id="merchantTitle">SaaSify Pro</h1>
+    <h1 id="merchantTitle">ARBITER</h1>
     <span class="badge badge-pending" id="statusBadge">PENDING RECOVERY</span>
   </div>
 
@@ -288,7 +288,59 @@
   }
 
   async function retryPayment() {
-    window.location.href = sessionResult.recoveryUrl || `/pay/${sessionResult.recoveryToken}`;
+    // Fetch a fresh recovery order and open Razorpay checkout
+    try {
+      const res = await fetch("/api/recovery/initiate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ proposalId: sessionResult.proposalId })
+      });
+      const orderData = await res.json();
+      if (!orderData || !orderData.orderId) {
+        alert("Unable to create payment order. Please try again.");
+        return;
+      }
+      const options = {
+        key: orderData.keyId,
+        amount: orderData.amountPaise,
+        currency: orderData.currency,
+        name: 'ARBITER',
+        description: 'Payment Recovery',
+        order_id: orderData.orderId,
+        handler: async function(response) {
+          try {
+            const verifyRes = await fetch('/api/payments/verify', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_order_id: response.razorpay_order_id,
+                razorpay_signature: response.razorpay_signature,
+                orderId: orderData.orderId,
+              }),
+            });
+            const verifyData = await verifyRes.json();
+            if (verifyData.success) {
+              sessionResult.isSettled = true;
+              renderResult(sessionResult);
+            } else {
+              alert("Payment verification pending. We will confirm shortly.");
+            }
+          } catch (e) {
+            alert("Payment received. Confirmation pending.");
+          }
+        },
+        theme: { color: '#2563eb' },
+        modal: { ondismiss: function() {} },
+      };
+      const rzp = new Razorpay(options);
+      rzp.on('payment.failed', function(response) {
+        alert("Payment failed: " + (response.error?.description || "Please try again."));
+      });
+      rzp.open();
+    } catch (e) {
+      alert("Failed to initiate recovery. Please try again.");
+    }
   }
 
   async function schedulePaydayReminder() {

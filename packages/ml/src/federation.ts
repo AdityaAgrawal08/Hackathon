@@ -5,6 +5,12 @@
  * A neutral federated layer enables collective failure-pattern learning
  * without moving PII or competitor-sensitive data.
  *
+ * NOTE: This is a SIMULATED federated learning pipeline for demo/hackathon
+ * purposes. In production, each silo would run `trainAndEvaluate` locally
+ * and submit weight deltas via a secure aggregation protocol. The FedAvg
+ * algorithm and DP noise are real; the local training is simulated with
+ * deterministic RNG for reproducibility.
+ *
  * Flow (simulated for demo):
  *   1. Each "merchant silo" trains a local model on its own corpus.
  *   2. Silos send weight *deltas* (not raw data) to the coordinator.
@@ -90,10 +96,14 @@ export function federatedAverage(
     bias += s.bias * w;
   }
 
-  // Add DP noise to weights + bias (simplified: same scale for all)
+  // Add DP noise to weights + bias.
+  // Per-parameter sensitivity scaling: weights have sensitivity 1/n (normalized),
+  // bias has sensitivity 1 (unnormalized). Scale noise accordingly (bug #A-013).
   if (dpNoiseScale > 0) {
-    for (let i = 0; i < dim; i++) weights[i] += dpNoise(dpNoiseScale, rng);
-    bias += dpNoise(dpNoiseScale, rng);
+    const weightScale = dpNoiseScale / Math.sqrt(totalSamples || 1);
+    const biasScale = dpNoiseScale;
+    for (let i = 0; i < dim; i++) weights[i] += dpNoise(weightScale, rng);
+    bias += dpNoise(biasScale, rng);
   }
 
   return { weights, bias, globalSampleCount: totalSamples };

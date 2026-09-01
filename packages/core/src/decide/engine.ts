@@ -14,7 +14,7 @@ import {
   RAIL_HEALTH_THRESHOLD,
   RAIL_DEPENDENT_ACTIONS,
 } from "./window.js";
-import { formatINR, paise, percentBp, LTV_NORM_PAISE } from "@arbiter/shared";
+import { formatINR, paise, percentBp, LTV_NORM_PAISE, clamp01, clamp } from "@arbiter/shared";
 
 export interface DecideInput {
   probability: number;
@@ -68,13 +68,6 @@ export interface DecideOutput {
   chosen: RankedAction;
   refusals: RefusalRecord[];
   fallbackReason: string | null;
-}
-
-function clamp01(x: number): number {
-  return Math.min(1, Math.max(0, x));
-}
-function clamp(x: number, lo: number, hi: number): number {
-  return Math.min(hi, Math.max(lo, x));
 }
 
 function scheduleFor(action: ActionId, input: DecideInput): number | null {

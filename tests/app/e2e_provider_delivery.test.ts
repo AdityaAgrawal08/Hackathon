@@ -107,7 +107,7 @@ describe("Phase 7: Multi-Channel Provider Live Delivery & Synthesis Verification
 
     expect(result.providerName).toBe("twilio_voice");
     expect(result.externalMessageId).toMatch(/^twilio_/);
-    expect(result.costPaise).toBe(150); // 150 paise voice unit cost
+    expect(result.costPaise).toBe(800); // 800 paise voice cost (COST_VOICE_PAISE default)
 
     // Verify Interactive IVR TwiML structure with Amazon Polly.Aditi neural voice and Gather
     const ivrTwiml = (result.rawResponse as any)?.twiml;

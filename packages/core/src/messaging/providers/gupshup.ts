@@ -4,7 +4,8 @@
  * Dispatches Meta-approved WhatsApp HSM recovery messages via Gupshup Enterprise API
  * with local parameter isolation (zero PII leakage to third-party LLMs).
  */
-import { formatINR, paise, isoUtc } from "@arbiter/shared";
+import { createHmac } from "node:crypto";
+import { formatINR, paise, isoUtc, COST_WHATSAPP_PAISE, logger } from "@arbiter/shared";
 import type { OutreachPayload, OutreachProvider, ProviderDispatchResult } from "../types.js";
 import { renderComplianceMessage } from "../templates.js";
 
@@ -67,7 +68,7 @@ export class GupshupWhatsAppProvider implements OutreachProvider {
         channel: this.channel,
         externalMessageId: `gupshup_sim_${payload.proposalId}`,
         status: "SENT",
-        costPaise: 80, // ₹0.80 per WhatsApp business conversation
+        costPaise: COST_WHATSAPP_PAISE, // WhatsApp business conversation cost from config
         dispatchedAtUtc: nowUtc,
         rawResponse: {
           simulated: true,
@@ -127,7 +128,15 @@ export class GupshupWhatsAppProvider implements OutreachProvider {
     }
   }
 
-  verifyWebhookSignature(_rawBody: string | Buffer, _signatureHeader: string): boolean {
-    return true; // Gupshup webhook auth
+  verifyWebhookSignature(rawBody: string | Buffer, signatureHeader: string): boolean {
+    const secret = this.config.webhookSecret;
+    if (!secret) {
+      logger.warn({ msg: "Gupshup webhook secret not configured, webhook verification skipped" });
+      return false;
+    }
+    // Gupshup uses HMAC-SHA256 hex digest
+    const body = typeof rawBody === "string" ? rawBody : rawBody.toString("utf8");
+    const expected = createHmac("sha256", secret).update(body).digest("hex");
+    return expected === signatureHeader;
   }
 }

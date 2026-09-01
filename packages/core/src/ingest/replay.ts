@@ -5,7 +5,7 @@
  * webhook uses, minus HTTP/signature.
  */
 import type { Client } from "@libsql/client";
-import { isoUtc } from "@arbiter/shared";
+import { isoUtc, logger } from "@arbiter/shared";
 
 /**
  * Structural input shape — intentionally NOT the seed package's Corpus type,
@@ -110,7 +110,7 @@ export async function recordFailureEvent(
       args: [evt.id],
     }).catch((err: unknown) => {
       // Best-effort counter: if dedupe row is missing, log but don't block
-      console.error("replay: failed to increment swallow_count:", (err as Error).message);
+      logger.error({ msg: "replay: failed to increment swallow_count", err });
     });
     return "DUPLICATE";
   }

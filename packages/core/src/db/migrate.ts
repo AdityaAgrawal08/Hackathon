@@ -8,6 +8,7 @@ import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_DB_PATH, SQLITE_BUSY_TIMEOUT_MS } from "../constants.js";
+import { logger } from "@arbiter/shared";
 
 export const MIGRATIONS_DIR = resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -86,13 +87,13 @@ async function main() {
     url,
     authToken: process.env.ARBITER_DB_TOKEN,
   });
-  console.log(`Running migrations against database...`);
+  logger.info({ msg: "Running migrations against database" });
   try {
     const count = await runMigrations(client);
-    console.log(`Applied ${count} migrations successfully.`);
+    logger.info({ msg: "Migrations applied successfully", count });
     process.exit(0);
   } catch (err) {
-    console.error("Migration failed:", err);
+    logger.error({ msg: "Migration failed", err });
     process.exit(1);
   }
 }
@@ -100,7 +101,7 @@ async function main() {
 // CLI entry — skipped when imported by tests
 if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) {
   main().catch((err) => {
-    console.error("migrate failed:", err);
+    logger.error({ msg: "migrate failed", err });
     process.exit(1);
   });
 }

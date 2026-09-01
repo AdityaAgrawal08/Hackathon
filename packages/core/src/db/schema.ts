@@ -162,6 +162,7 @@ export const proposals = sqliteTable(
     state: text("state", { enum: PROPOSAL_STATES }).notNull().default("PROPOSED"),
     stateVersion: integer("state_version").notNull().default(0),
     dedupeKey: text("dedupe_key").notNull(), // event+model+policy (P4-B7)
+    featureVersion: text("feature_version").notNull().default("feat-v1"),
     createdAtUtc: text("created_at_utc").notNull(),
     updatedAtUtc: text("updated_at_utc").notNull(),
   },

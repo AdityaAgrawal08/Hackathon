@@ -9,7 +9,7 @@
  *    ground-truth salary day is NEVER an input (it exists only to score
  *    inference quality later).
  */
-import { hashSeed, LTV_NORM_PAISE } from "@arbiter/shared";
+import { hashSeed, LTV_NORM_PAISE, clamp01, clamp } from "@arbiter/shared";
 
 export const FEATURE_VERSION = "feat-v1";
 
@@ -66,13 +66,6 @@ export interface FeatureCustomerContext {
   optedOut?: boolean | null;
   /** §4.7 — fraction of prior promises-to-pay this customer kept (0..1). */
   promiseKeptRate?: number | null;
-}
-
-function clamp01(x: number): number {
-  return Math.min(1, Math.max(0, x));
-}
-function clamp(x: number, lo: number, hi: number): number {
-  return Math.min(hi, Math.max(lo, x));
 }
 
 /**

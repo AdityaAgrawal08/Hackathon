@@ -548,12 +548,17 @@
         const contact = p.customer_email || p.customer_phone || '—';
         const informed = p.outreach_dispatched ? (p.last_outreach_status === 'SENT_SIMULATED' ? '<span style="color:#93c5fd">Queued</span>' : '<span style="color:#86efac">Yes</span>') : '<span style="color:#64748b">No</span>';
         const action = getActionBadge(p);
+        const safeId = escapeHtml(p.id || '');
+        const safeName = escapeHtml(p.customer_name || '—');
+        const safeContact = escapeHtml(contact);
+        const safeProduct = escapeHtml(p.product_name || '—');
+        const safeAmount = formatINR(p.amount_paise);
         return `
-        <tr style="cursor:pointer" onclick='showCustomerDetails(${JSON.stringify(p).replace(/'/g, "&#39;")})'>
-          <td><strong>${escapeHtml(p.customer_name || '—')}</strong></td>
-          <td style="font-size:12px;color:#94a3b8">${escapeHtml(contact)}</td>
-          <td>${escapeHtml(p.product_name || '—')}</td>
-          <td><strong>${formatINR(p.amount_paise)}</strong></td>
+        <tr style="cursor:pointer" data-event-id="${safeId}">
+          <td><strong>${safeName}</strong></td>
+          <td style="font-size:12px;color:#94a3b8">${safeContact}</td>
+          <td>${safeProduct}</td>
+          <td><strong>${safeAmount}</strong></td>
           <td>${getMethodHTML(p)}</td>
           <td><div class="failure-reason">${getFailureReason(p)}</div></td>
           <td>${informed}</td>
@@ -788,7 +793,11 @@
       const container = document.getElementById('toast-container');
       const toast = document.createElement('div');
       toast.className = `toast ${type}`;
-      toast.innerHTML = `<span>${type === 'success' ? '✓' : '⚠'}</span> ${message}`;
+      const icon = type === 'success' ? '\u2713' : '\u26A0';
+      const span = document.createElement('span');
+      span.textContent = icon;
+      toast.appendChild(span);
+      toast.appendChild(document.createTextNode(' ' + message));
       container.appendChild(toast);
       setTimeout(() => toast.remove(), 3000);
     }
@@ -835,6 +844,15 @@
     loadPayments();
     loadAlerts();
     connectSSE();
+
+    // Event delegation for table row clicks (XSS-safe: no inline onclick)
+    document.getElementById('failed-body').addEventListener('click', function(e) {
+      const row = e.target.closest('tr[data-event-id]');
+      if (!row) return;
+      const eventId = row.getAttribute('data-event-id');
+      const payment = allPayments.find(p => p.id === eventId);
+      if (payment) showCustomerDetails(payment);
+    });
   </script>
 </body>
 </html>

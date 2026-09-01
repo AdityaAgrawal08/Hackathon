@@ -234,14 +234,14 @@ describe("Aggressive Codebase Fuzzing & Invariant Audit", () => {
       const twilio = new TwilioVoiceProvider();
       const res = await twilio.send(attackPayload);
       expect(res.status).toBe("QUEUED");
-      expect(res.costPaise).toBe(150);
+      expect(res.costPaise).toBe(800); // COST_VOICE_PAISE default
     });
 
     it("Gupshup WhatsApp Provider isolates tokens locally without PII leakage", async () => {
       const gupshup = new GupshupWhatsAppProvider();
       const res = await gupshup.send(attackPayload);
       expect(res.status).toBe("SENT");
-      expect(res.costPaise).toBe(80);
+      expect(res.costPaise).toBe(120); // COST_WHATSAPP_PAISE default
     });
   });
 });

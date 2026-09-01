@@ -58,7 +58,7 @@ describe("Task 2.4: Twilio Voice IVR Provider & TwiML Generator", () => {
     expect(result.providerName).toBe("twilio_voice");
     expect(result.channel).toBe("VOICE");
     expect(result.status).toBe("QUEUED");
-    expect(result.costPaise).toBe(150); // ₹1.50
+    expect(result.costPaise).toBe(800); // ₹8.00 (COST_VOICE_PAISE default)
     expect(result.externalMessageId).toContain("twilio_sim_");
   });
 });

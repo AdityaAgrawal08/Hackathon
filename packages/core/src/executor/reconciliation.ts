@@ -11,7 +11,7 @@
  * 4. Multi-worker sweeper coordination via atomic SQLite row claiming.
  */
 import type { Client } from "@libsql/client";
-import { isoUtc } from "@arbiter/shared";
+import { isoUtc, hashSeed } from "@arbiter/shared";
 import { MAX_RECONCILIATION_TTL_MS } from "../constants.js";
 import { canTransitionKnowledgeStatus, type KnowledgeStatus } from "./payment_state_machine.js";
 
@@ -38,11 +38,12 @@ export interface ReconcileResult {
 export const MAX_RECONCILIATION_DURATION_MS = MAX_RECONCILIATION_TTL_MS;
 export const BACKOFF_STEPS_MS = [2000, 4000, 8000, 16000, 32000, 60000];
 
-/** Calculate exponential backoff with +/- 20% randomized jitter to prevent thundering herd */
+/** Calculate exponential backoff with +/- 20% deterministic jitter (no Math.random — bug #A-007) */
 export function calculateBackoffMs(attemptIndex: number): number {
   const base = BACKOFF_STEPS_MS[Math.min(attemptIndex, BACKOFF_STEPS_MS.length - 1)] ?? 60000;
-  const jitter = 0.8 + 0.4 * Math.random();
-  return Math.floor(base * jitter);
+  // Deterministic jitter: use hashSeed so backoff is reproducible per attempt
+  const jitterFactor = 0.8 + 0.4 * ((hashSeed(`backoff:${attemptIndex}`) % 1000) / 1000);
+  return Math.floor(base * jitterFactor);
 }
 
 export async function reconcilePaymentIntent(
@@ -239,7 +240,7 @@ export async function sweepStuckIntents(
   client: Client,
   gateway: ReconcileGateway,
   nowMs: number,
-  workerId = `worker_${process.pid}_${Math.random().toString(36).slice(2, 8)}`,
+  workerId = `worker_${process.pid}_${(hashSeed(`worker:${nowMs}`) % 100000).toString(36).padStart(6, "0")}`,
 ): Promise<number> {
   const claimTime = isoUtc(nowMs);
   const staleThreshold = isoUtc(nowMs - 60000); // 1-minute claim timeout

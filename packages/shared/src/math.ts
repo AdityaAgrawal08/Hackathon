@@ -1,0 +1,15 @@
+/**
+ * Numeric utilities — clamping functions used across the codebase.
+ * Extracted from duplicate definitions in decide/engine.ts, features.ts,
+ * and rail_health.ts (C-002).
+ */
+
+/** Clamp a number to [0, 1]. */
+export function clamp01(x: number): number {
+  return Math.min(1, Math.max(0, x));
+}
+
+/** Clamp a number to [lo, hi]. */
+export function clamp(x: number, lo: number, hi: number): number {
+  return Math.min(hi, Math.max(lo, x));
+}

@@ -1,0 +1,82 @@
+# ARBITER Credibility Scoring Configuration
+# Merchants can tune rule thresholds without redeploying.
+
+version: credibility-v1
+
+# Base credibility score (benefit of the doubt)
+base_score: 0.80
+
+# Risk level thresholds (score >= threshold → risk level)
+risk_levels:
+  low: 0.75
+  medium: 0.50
+  high: 0.25
+
+# Suspicion threshold (score < threshold → suspicious)
+suspicion_threshold: 0.50
+
+# Rule adjustments (negative = less credible, positive = more credible)
+rules:
+  # Rule 1: First transaction
+  first_transaction:
+    adjustment: -0.15
+    reason: "First transaction from this customer"
+
+  # Rule 2: High amount with zero successes
+  high_amount_zero_success:
+    amount_threshold_paise: 5000000
+    adjustment: -0.20
+    reason_prefix: "High total attempted amount (₹"
+
+  # Rule 3: Account age < N days
+  young_account:
+    age_threshold_days: 1
+    adjustment: -0.10
+    reason: "Account created less than 24 hours ago"
+
+  # Rule 4: Multiple failures, zero successes
+  repeated_failure:
+    min_failures: 3
+    adjustment: -0.15
+    reason_suffix: " failed attempts with zero successful payments"
+
+  # Rule 5: Razorpay risk score elevated
+  elevated_risk_score:
+    threshold_bp: 3000
+    adjustment: -0.10
+    reason_prefix: "Razorpay risk score elevated ("
+
+  # Rule 6: RISK_FLAGGED by Razorpay
+  risk_flagged:
+    adjustment: -0.30
+    reason: "Razorpay flagged this transaction as high-risk"
+
+  # Rule 7: UNKNOWN failure on high-value transaction
+  unknown_high_value:
+    amount_threshold_paise: 1000000
+    adjustment: -0.15
+    reason: "Unknown failure on high-value transaction (> ₹10,000)"
+
+  # Rule 8: High ML recovery probability
+  ml_high_probability:
+    threshold: 0.7
+    adjustment: 0.10
+
+  # Rule 9: Low ML recovery probability
+  ml_low_probability:
+    threshold: 0.3
+    adjustment: -0.10
+    reason_prefix: "ML model assigns low recovery probability ("
+
+  # Rule 10: Top attribution is risk-related
+  ml_risk_attribution:
+    features: ["f_class_risk", "f_is_risk_flagged"]
+    adjustment: -0.10
+    reason_prefix: "ML top driver is risk-related feature ("
+
+  # Rule 11: Escalating failure amounts
+  escalating_amounts:
+    min_prior_failures: 2
+    escalation_factor: 2
+    adjustment: -0.10
+    reason: "Failure amounts show escalation pattern"

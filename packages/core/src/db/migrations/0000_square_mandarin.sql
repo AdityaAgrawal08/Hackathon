@@ -134,6 +134,7 @@ CREATE TABLE `proposals` (
 	`state` text DEFAULT 'PROPOSED' NOT NULL,
 	`state_version` integer DEFAULT 0 NOT NULL,
 	`dedupe_key` text NOT NULL,
+	`feature_version` text DEFAULT 'feat-v1' NOT NULL,
 	`created_at_utc` text NOT NULL,
 	`updated_at_utc` text NOT NULL,
 	FOREIGN KEY (`event_id`) REFERENCES `payment_events`(`id`) ON UPDATE no action ON DELETE no action,
