@@ -162,10 +162,10 @@
       UNKNOWN: {
         icon: '❓',
         cssClass: 'unknown',
-        label: 'Unexpected Error',
-        title: 'Something Went Wrong',
-        subtitle: 'We couldn\'t determine why your payment failed. Please try again.',
-        message: 'An unexpected error occurred. This could be a temporary issue with your bank.',
+        label: 'Payment Issue',
+        title: 'Payment Could Not Be Processed',
+        subtitle: 'We couldn\'t complete your payment. Please try again.',
+        message: 'Your payment could not be processed. This may be a temporary issue. No money was deducted.',
       },
     };
 
@@ -180,8 +180,11 @@
     msgBox.className = 'message-box ' + config.cssClass;
     document.getElementById('message-label').textContent = config.label;
 
-    // Method-specific message — simplified for user
+    // Use customer message from error catalog when available
     function getMethodMessage() {
+      // Prefer the customer message passed from the server (from error catalog)
+      if (failureReason) return failureReason;
+      // Fallback: method-specific messages
       if (methodType === 'card') {
         const network = methodNetwork || 'Card';
         const last4 = methodLast4 ? ' ending in ' + methodLast4 : '';
