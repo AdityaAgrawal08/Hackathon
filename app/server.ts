@@ -28,7 +28,11 @@ import { isoUtc, formatINR, paise, logger } from "../packages/shared/src/index.j
 import {
   runMigrations,
   RATE_LIMIT_WEBHOOKS_PER_MIN,
+  RATE_LIMIT_CHECKOUT_ORDERS_PER_MIN,
+  RATE_LIMIT_CHARGES_PER_MIN,
+  RATE_LIMIT_ADMIN_PER_MIN,
   DEFAULT_LOCAL_WEBHOOK_SECRET,
+  DEFAULT_LOCAL_ADMIN_SECRET,
 } from "../packages/core/src/index.js";
 
 import {
@@ -105,7 +109,32 @@ if (msg91Template) {
   logger.info({ msg: "[Providers] MSG91 template ID:", msg91Template: msg91Template, mode: "REAL" });
 }
 
-const webhookLimiter = rateLimit({ windowMs: 60_000, limit: RATE_LIMIT_WEBHOOKS_PER_MIN, standardHeaders: true });
+const webhookLimiter = rateLimit({ windowMs: 60_000, limit: RATE_LIMIT_WEBHOOKS_PER_MIN, standardHeaders: true, skip: () => isTest });
+const paymentLimiter = rateLimit({ windowMs: 60_000, limit: RATE_LIMIT_CHARGES_PER_MIN, standardHeaders: true, skip: () => isTest });
+const checkoutLimiter = rateLimit({ windowMs: 60_000, limit: RATE_LIMIT_CHECKOUT_ORDERS_PER_MIN, standardHeaders: true, skip: () => isTest });
+const adminLimiter = rateLimit({ windowMs: 60_000, limit: RATE_LIMIT_ADMIN_PER_MIN, standardHeaders: true, skip: () => isTest });
+const recoveryLimiter = rateLimit({ windowMs: 60_000, limit: RATE_LIMIT_CHARGES_PER_MIN, standardHeaders: true, skip: () => isTest });
+
+// G-002: Admin key enforcement — ENFORCE_ADMIN_KEY=true requires X-Admin-Key header
+const ENFORCE_ADMIN_KEY = String(process.env.ENFORCE_ADMIN_KEY ?? "false").toLowerCase() === "true";
+const ADMIN_SECRET_KEY = process.env.ADMIN_SECRET_KEY || DEFAULT_LOCAL_ADMIN_SECRET;
+
+function requireAdminKey(req: Request, res: Response, next: NextFunction): void {
+  if (!ENFORCE_ADMIN_KEY) {
+    next();
+    return;
+  }
+  const provided = String(req.headers["x-admin-key"] ?? req.headers["authorization"] ?? "");
+  const token = provided.startsWith("Bearer ") ? provided.slice(7) : provided;
+  // timingSafeEqual requires equal-length buffers — hash both first
+  const a = createHash("sha256").update(ADMIN_SECRET_KEY).digest();
+  const b = createHash("sha256").update(token).digest();
+  if (!timingSafeEqual(a, b)) {
+    res.status(401).json({ error: "Unauthorized: missing or invalid admin key" });
+    return;
+  }
+  next();
+}
 
 // Simplified human-readable error reasons — user sees this, not raw codes
 function getSimplifiedReason(code: string, failureClass: string): string {
@@ -147,7 +176,7 @@ app.get("/api/products", (_req, res) => {
 });
 
 // ── Create Razorpay Order + Upsert Customer ─────────────────────
-app.post("/api/orders/create", async (req: Request, res: Response) => {
+app.post("/api/orders/create", checkoutLimiter, async (req: Request, res: Response) => {
   try {
     const { productId, customerName, customerPhone, customerEmail } = req.body;
     if (!productId || !customerName || !customerPhone || !customerEmail) {
@@ -219,7 +248,7 @@ app.post("/api/orders/create", async (req: Request, res: Response) => {
 });
 
 // ── Verify Payment (called by frontend after Checkout.js success) ─
-app.post("/api/payments/verify", async (req: Request, res: Response) => {
+app.post("/api/payments/verify", paymentLimiter, async (req: Request, res: Response) => {
   try {
     const { razorpay_payment_id, razorpay_order_id, razorpay_signature, orderId } = req.body;
     if (!razorpay_payment_id || !razorpay_order_id || !razorpay_signature) {
@@ -333,7 +362,7 @@ app.post("/api/payments/verify", async (req: Request, res: Response) => {
 });
 
 // ── Client-Side Payment Failure (immediate redirect to recovery) ─
-app.post("/api/payments/failed", async (req: Request, res: Response) => {
+app.post("/api/payments/failed", paymentLimiter, async (req: Request, res: Response) => {
   try {
     const { razorpay_order_id, razorpay_payment_id, error_code, error_description, error_step, error_source, error_reason,
             customerId, productId, productName, amountPaise, paymentMethod } = req.body;
@@ -867,7 +896,7 @@ app.get("/api/vendor/failure-analysis", async (_req: Request, res: Response) => 
   }
 });
 
-app.post("/api/vendor/decision", async (req: Request, res: Response) => {
+app.post("/api/vendor/decision", adminLimiter, requireAdminKey, async (req: Request, res: Response) => {
   try {
     const { eventId, decision } = req.body;
     if (!eventId || !["approved", "rejected"].includes(decision)) {
@@ -999,7 +1028,25 @@ app.get("/api/status/:token", (req: Request, res: Response) => {
 });
 
 // ── Provider DLR Webhook Endpoints ───────────────────────────────
-app.post("/api/webhooks/providers/brevo", async (req: Request, res: Response) => {
+// G-004: DLR webhooks verify signatures when provider secrets are configured
+function extractSignature(req: Request): string {
+  const h = req.headers as Record<string, string | undefined>;
+  return String(h["x-webhook-signature"] ?? h["x-bravo-signature"] ?? h["x-msg91-signature"] ?? h["x-twilio-signature"] ?? h["authorization"] ?? "");
+}
+
+app.post("/api/webhooks/providers/brevo", webhookLimiter, async (req: Request, res: Response) => {
+  // G-004: Verify Brevo webhook signature when secret is configured
+  const sig = extractSignature(req);
+  if (process.env.BREVO_WEBHOOK_SECRET && sig) {
+    const rawBody = JSON.stringify(req.body);
+    const expected = createHmac("sha256", process.env.BREVO_WEBHOOK_SECRET).update(rawBody).digest("hex");
+    try {
+      if (!timingSafeEqual(Buffer.from(expected, "hex"), Buffer.from(sig, "hex"))) {
+        res.status(401).json({ error: "Invalid webhook signature" });
+        return;
+      }
+    } catch { /* hex parse failure → treat as invalid */ res.status(401).json({ error: "Invalid webhook signature" }); return; }
+  }
   try {
     const event = req.body;
     await dbClient.execute({
@@ -1015,7 +1062,19 @@ app.post("/api/webhooks/providers/brevo", async (req: Request, res: Response) =>
   } catch { res.json({ received: true }); }
 });
 
-app.post("/api/webhooks/providers/msg91", async (req: Request, res: Response) => {
+app.post("/api/webhooks/providers/msg91", webhookLimiter, async (req: Request, res: Response) => {
+  // G-004: Verify MSG91 webhook signature when auth key is configured
+  const sig = extractSignature(req);
+  if (process.env.MSG91_AUTH_KEY && sig) {
+    const rawBody = JSON.stringify(req.body);
+    const expected = createHmac("sha256", process.env.MSG91_AUTH_KEY).update(rawBody).digest("hex");
+    try {
+      if (!timingSafeEqual(Buffer.from(expected, "hex"), Buffer.from(sig, "hex"))) {
+        res.status(401).json({ error: "Invalid webhook signature" });
+        return;
+      }
+    } catch { res.status(401).json({ error: "Invalid webhook signature" }); return; }
+  }
   try {
     const event = req.body;
     await dbClient.execute({
@@ -1031,7 +1090,16 @@ app.post("/api/webhooks/providers/msg91", async (req: Request, res: Response) =>
   } catch { res.json({ received: true }); }
 });
 
-app.post("/api/webhooks/providers/gupshup", async (req: Request, res: Response) => {
+app.post("/api/webhooks/providers/gupshup", webhookLimiter, async (req: Request, res: Response) => {
+  // G-004: Verify Gupshup webhook signature when secret is configured
+  const sig = extractSignature(req);
+  if (process.env.GUPSHUP_WEBHOOK_SECRET && sig) {
+    const rawBody = JSON.stringify(req.body);
+    const expected = createHmac("sha256", process.env.GUPSHUP_WEBHOOK_SECRET).update(rawBody).digest("hex");
+    try {
+      if (expected !== sig) { res.status(401).json({ error: "Invalid webhook signature" }); return; }
+    } catch { res.status(401).json({ error: "Invalid webhook signature" }); return; }
+  }
   try {
     const event = req.body;
     await dbClient.execute({
@@ -1047,7 +1115,7 @@ app.post("/api/webhooks/providers/gupshup", async (req: Request, res: Response) 
   } catch { res.json({ received: true }); }
 });
 
-app.post("/api/webhooks/twilio/gather", async (req: Request, res: Response) => {
+app.post("/api/webhooks/twilio/gather", webhookLimiter, async (req: Request, res: Response) => {
   const { Digits } = req.body;
   if (Digits === "1" || Digits === 1) {
     res.setHeader("Content-Type", "text/xml");
@@ -1074,7 +1142,7 @@ app.get("/result", (_req: Request, res: Response) => {
   res.send(resultHtml);
 });
 
-app.post("/api/recovery/triage", async (req: Request, res: Response) => {
+app.post("/api/recovery/triage", recoveryLimiter, async (req: Request, res: Response) => {
   try {
     const { presetKey } = req.body || {};
     const base = getPublicBaseUrl();
@@ -1112,7 +1180,7 @@ app.get("/api/providers/status", (_req: Request, res: Response) => {
   });
 });
 
-app.post("/api/recovery/initiate", async (req: Request, res: Response) => {
+app.post("/api/recovery/initiate", recoveryLimiter, async (req: Request, res: Response) => {
   try {
     const { proposalId, preferredMethod } = req.body || {};
     const result = await initiateRecoveryOrder(proposalId, preferredMethod || "upi", dbClient);
@@ -1123,7 +1191,7 @@ app.post("/api/recovery/initiate", async (req: Request, res: Response) => {
   }
 });
 
-app.post("/api/recovery/promise-to-pay", async (req: Request, res: Response) => {
+app.post("/api/recovery/promise-to-pay", recoveryLimiter, async (req: Request, res: Response) => {
   try {
     const { proposalId, promisedDay, contactPreference } = req.body || {};
     if (!proposalId || !promisedDay) return res.status(400).json({ error: "proposalId and promisedDay required" });
@@ -1135,7 +1203,7 @@ app.post("/api/recovery/promise-to-pay", async (req: Request, res: Response) => 
   }
 });
 
-app.post("/api/recovery/complete", async (req: Request, res: Response) => {
+app.post("/api/recovery/complete", recoveryLimiter, async (req: Request, res: Response) => {
   try {
     const { proposalId } = req.body || {};
     if (!proposalId) return res.status(400).json({ error: "proposalId required" });
