@@ -459,6 +459,9 @@
         if (p.last_outreach_status === 'SENT') {
           return `<span class="action-badge" style="background:#052e16;color:#86efac">${channel} sent ${timeStr}${reviewTag}</span>`;
         }
+        if (p.last_outreach_status === 'SENT_SIMULATED') {
+          return `<span class="action-badge" style="background:#1e3a5f;color:#93c5fd">${channel} queued ${timeStr}${reviewTag}</span>`;
+        }
         if (p.last_outreach_status === 'FAILED' || p.last_outreach_status === 'BOMBED') {
           const error = p.last_outreach_error ? `: ${escapeHtml(p.last_outreach_error.substring(0, 30))}` : '';
           return `<span class="action-badge" style="background:#7f1d1d;color:#fca5a5">${channel} failed${error}${reviewTag}</span>`;
@@ -511,8 +514,14 @@
                           p.payment_method === 'netbanking' ? (p.bank_code || '—') : '—';
       const failureReason = getFailureReason(p);
       const informed = p.outreach_dispatched ? 'Yes — customer has been notified' : 'No — customer has not been informed';
-      const retryLink = p.status === 'failed' ? `<a href="/recover/${p.id}?class=${p.failure_class || 'UNKNOWN'}&code=${p.failure_code || ''}&reason=${encodeURIComponent(failureReason)}&product=${p.product_name || ''}&productName=${encodeURIComponent(p.product_name || '')}" target="_blank" style="color:#60a5fa;text-decoration:underline;font-size:13px;">Open Pay Again page</a>` : '';
+      const statusText = p.status === 'captured'
+        ? '<span style="color:#86efac">Payment successful</span>'
+        : '<span style="color:#fca5a5">Payment failed — awaiting retry</span>';
       content.innerHTML = `
+        <div style="grid-column:span 4;margin-bottom:12px;">
+          <div style="font-size:11px;color:#64748b;text-transform:uppercase;">Current Status</div>
+          <div style="font-size:14px;font-weight:500;margin-top:4px;">${statusText}</div>
+        </div>
         <div style="grid-column:span 4;margin-bottom:12px;">
           <div style="font-size:11px;color:#64748b;text-transform:uppercase;">What Happened</div>
           <div style="font-size:14px;color:#e2e8f0;font-weight:500;margin-top:4px;">${failureReason}</div>
@@ -523,8 +532,7 @@
         <div><div style="font-size:11px;color:#64748b;text-transform:uppercase;">Payment Method</div><div style="font-size:14px;color:#e2e8f0;font-weight:500;">${escapeHtml(methodDetail)}</div></div>
         <div><div style="font-size:11px;color:#64748b;text-transform:uppercase;">Amount</div><div style="font-size:14px;color:#e2e8f0;font-weight:500;">${formatINR(p.amount_paise)}</div></div>
         <div><div style="font-size:11px;color:#64748b;text-transform:uppercase;">Customer Informed</div><div style="font-size:14px;color:${p.outreach_dispatched ? '#86efac' : '#fca5a5'};font-weight:500;">${informed}</div></div>
-        <div><div style="font-size:11px;color:#64748b;text-transform:uppercase;">Recommended Action</div><div style="font-size:14px;color:#e2e8f0;font-weight:500;">${getActionBadge(p) || '—'}</div></div>
-        <div><div style="font-size:11px;color:#64748b;text-transform:uppercase;">Recovery Link</div><div style="font-size:14px;margin-top:4px;">${retryLink || '—'}</div></div>
+        <div><div style="font-size:11px;color:#64748b;text-transform:uppercase;">Transaction ID</div><div style="font-size:14px;color:#e2e8f0;font-weight:500;font-family:monospace;">${escapeHtml(p.id || '—')}</div></div>
       `;
       el.style.display = 'block';
     }
@@ -538,7 +546,7 @@
       empty.style.display = 'none';
       tbody.innerHTML = data.map(p => {
         const contact = p.customer_email || p.customer_phone || '—';
-        const informed = p.outreach_dispatched ? '<span style="color:#86efac">Yes</span>' : '<span style="color:#64748b">No</span>';
+        const informed = p.outreach_dispatched ? (p.last_outreach_status === 'SENT_SIMULATED' ? '<span style="color:#93c5fd">Queued</span>' : '<span style="color:#86efac">Yes</span>') : '<span style="color:#64748b">No</span>';
         const action = getActionBadge(p);
         return `
         <tr style="cursor:pointer" onclick='showCustomerDetails(${JSON.stringify(p).replace(/'/g, "&#39;")})'>

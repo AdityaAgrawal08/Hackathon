@@ -403,7 +403,7 @@ export async function processFailedPayment(
   if (!isSuspicious) {
     // Immediate outreach via primary channels (Email + SMS only, no WhatsApp/Voice)
     // Build recovery URL with product info so customer's cart is restored
-    const baseUrl = process.env.BASE_URL || `http://localhost:${process.env.PORT || "3000"}`;
+    const baseUrl = process.env.PUBLIC_BASE_URL || process.env.BASE_URL || `http://localhost:${process.env.PORT || "3000"}`;
     const recoveryUrl = new URL(`/recover/${eventId}`, baseUrl);
     if (input.productName) {
       // Map product name back to product ID
@@ -464,6 +464,9 @@ export async function processFailedPayment(
         dispatchResults.push(emailResult);
         console.log(`[Outreach] EMAIL → ${emailResult.status} via ${emailResult.providerName}`);
         // Store initial outreach result in scheduled_outreach for AI Action tracking
+        // Distinguish simulated from real delivery
+        const isSimulated = !!emailResult.errorMessage?.startsWith("SIMULATED:");
+        const deliveryStatus = isSimulated ? "SENT_SIMULATED" : (emailResult.status.includes("SENT") ? "SENT" : "FAILED");
         try {
           await client.execute({
             sql: `INSERT OR IGNORE INTO scheduled_outreach
@@ -472,7 +475,7 @@ export async function processFailedPayment(
             args: [
               `init_${eventId}_EMAIL`, eventId, input.customerProfileId,
               nowUtc, nowUtc,
-              emailResult.status.includes("SENT") ? "SENT" : "FAILED",
+              deliveryStatus,
               emailResult.errorMessage || null,
             ],
           });
@@ -506,6 +509,8 @@ export async function processFailedPayment(
           console.log(`[Outreach] SMS suppressed: ${smsResult.errorMessage}`);
         }
         // Store initial outreach result in scheduled_outreach for AI Action tracking
+        const isSmsSimulated = !!smsResult.errorMessage?.startsWith("SIMULATED:");
+        const smsDeliveryStatus = isSmsSimulated ? "SENT_SIMULATED" : (smsResult.status.includes("SENT") ? "SENT" : (smsResult.status.includes("SUPPRESSED") ? "SUPPRESSED" : "FAILED"));
         try {
           await client.execute({
             sql: `INSERT OR IGNORE INTO scheduled_outreach
@@ -514,7 +519,7 @@ export async function processFailedPayment(
             args: [
               `init_${eventId}_SMS`, eventId, input.customerProfileId,
               nowUtc, nowUtc,
-              smsResult.status.includes("SENT") ? "SENT" : (smsResult.status.includes("SUPPRESSED") ? "SUPPRESSED" : "FAILED"),
+              smsDeliveryStatus,
               smsResult.errorMessage || null,
             ],
           });

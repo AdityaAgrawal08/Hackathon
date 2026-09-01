@@ -54,7 +54,7 @@ describe("Phase 7: Multi-Channel Provider Live Delivery & Synthesis Verification
     expect(result.channel).toBe("EMAIL");
     expect(result.providerName).toBe("brevo");
     expect(result.externalMessageId).toMatch(/^brevo_/);
-    expect(result.costPaise).toBe(10); // 10 paise email unit cost
+    expect(result.costPaise).toBe(0); // simulated send
     expect(result.dispatchedAtUtc).toBeDefined();
   });
 
@@ -80,7 +80,7 @@ describe("Phase 7: Multi-Channel Provider Live Delivery & Synthesis Verification
     expect(result.channel).toBe("SMS");
     expect(result.providerName).toBe("msg91");
     expect(result.externalMessageId).toMatch(/^msg91_/);
-    expect(result.costPaise).toBe(25); // 25 paise DLT Route 4 interchange cost
+    expect(result.costPaise).toBe(0); // simulated send
     expect(result.dispatchedAtUtc).toBeDefined();
   });
 

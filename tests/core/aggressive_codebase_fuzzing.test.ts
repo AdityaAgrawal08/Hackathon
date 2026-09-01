@@ -220,14 +220,14 @@ describe("Aggressive Codebase Fuzzing & Invariant Audit", () => {
       const brevo = new BrevoEmailProvider();
       const res = await brevo.send(attackPayload);
       expect(res.status).toBe("SENT");
-      expect(res.costPaise).toBe(10);
+      expect(res.costPaise).toBe(0);
     });
 
     it("MSG91 Provider sanitizes phone numbers and handles Hindi locale", async () => {
       const msg91 = new MSG91SmsProvider();
       const res = await msg91.send(attackPayload);
       expect(res.status).toBe("SENT");
-      expect(res.costPaise).toBe(25);
+      expect(res.costPaise).toBe(0);
     });
 
     it("Twilio Voice Provider escapes TwiML and XML tags", async () => {

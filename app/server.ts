@@ -60,6 +60,29 @@ const WEBHOOK_SECRET = process.env.RZP_WEBHOOK_SECRET || DEFAULT_LOCAL_WEBHOOK_S
 const RZP_KEY_ID = process.env.RZP_TEST_KEY_ID || process.env.RZP_KEY_ID || "";
 const RZP_KEY_SECRET = process.env.RZP_TEST_KEY_SECRET || process.env.RZP_KEY_SECRET || "";
 
+// Public base URL for customer-facing links (emails, SMS, recovery pages).
+// MUST be set to an externally accessible URL in production.
+const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || process.env.BASE_URL || "";
+const isTest = process.env.NODE_ENV === "test" || process.env.VITEST === "true";
+const isProduction = process.env.NODE_ENV === "production";
+
+function getPublicBaseUrl(): string {
+  if (PUBLIC_BASE_URL) return PUBLIC_BASE_URL.replace(/\/$/, "");
+  if (isTest) return "http://localhost:3000";
+  // In production, fail loudly if not configured
+  if (isProduction) {
+    console.error("[Config] CRITICAL: PUBLIC_BASE_URL not set. Customer-facing links will use localhost.");
+    console.error("[Config] Set PUBLIC_BASE_URL=https://your-domain.com in your environment.");
+  }
+  return `http://localhost:${PORT}`;
+}
+
+// Validate at startup
+const _startUrl = getPublicBaseUrl();
+if (isProduction && _startUrl.includes("localhost")) {
+  console.error("[Config] WARNING: PUBLIC_BASE_URL resolves to localhost in production mode.");
+}
+
 const dbPath = process.env.ARBITER_DB_PATH || "data/arbiter.sqlite";
 const dbUrl = (dbPath.startsWith("libsql:") || dbPath.startsWith("http:") || dbPath.startsWith("https:") || dbPath.startsWith("file:"))
   ? dbPath
@@ -695,33 +718,43 @@ app.post("/api/webhooks/razorpay", webhookLimiter, async (req: Request, res: Res
 // ── Vendor Dashboard API ─────────────────────────────────────────
 app.get("/api/vendor/payments", async (_req: Request, res: Response) => {
   try {
+    // Customer-centric: show LATEST transaction per customer, not every transaction.
+    // A customer who succeeded after retries appears in success list, not failed.
     const result = await dbClient.execute({
-      sql: `SELECT lpe.*,
-              COALESCE(lpe.customer_name, cp.name) as customer_name,
-              COALESCE(lpe.customer_phone, cp.phone) as customer_phone,
-              COALESCE(lpe.customer_email, cp.email) as customer_email,
-              lpe.payment_method, lpe.card_last4, lpe.card_network, lpe.card_issuer,
-              cp.total_attempts, cp.total_successes, cp.total_failures,
+      sql: `WITH latest_per_customer AS (
+              SELECT lpe.*,
+                COALESCE(lpe.customer_name, cp.name) as customer_name,
+                COALESCE(lpe.customer_phone, cp.phone) as customer_phone,
+                COALESCE(lpe.customer_email, cp.email) as customer_email,
+                cp.total_attempts, cp.total_successes, cp.total_failures,
+                ROW_NUMBER() OVER (
+                  PARTITION BY lpe.customer_profile_id
+                  ORDER BY lpe.created_at_utc DESC
+                ) as rn
+              FROM live_payment_events lpe
+              JOIN customer_profiles cp ON cp.id = lpe.customer_profile_id
+            )
+            SELECT lpc.*,
               so_out.channel as next_outreach_channel, so_out.scheduled_at_utc as next_outreach_utc,
               so_last.channel as last_outreach_channel, so_last.executed_at_utc as last_outreach_utc,
               so_last.status as last_outreach_status, so_last.error_message as last_outreach_error
-            FROM live_payment_events lpe
-            JOIN customer_profiles cp ON cp.id = lpe.customer_profile_id
+            FROM latest_per_customer lpc
             LEFT JOIN (
               SELECT live_payment_event_id, channel, scheduled_at_utc
               FROM scheduled_outreach
               WHERE executed = 0
               GROUP BY live_payment_event_id
               ORDER BY scheduled_at_utc ASC
-            ) so_out ON so_out.live_payment_event_id = lpe.id
+            ) so_out ON so_out.live_payment_event_id = lpc.id
             LEFT JOIN (
               SELECT live_payment_event_id, channel, executed_at_utc, status, error_message
               FROM scheduled_outreach
               WHERE executed = 1
               GROUP BY live_payment_event_id
               ORDER BY executed_at_utc DESC
-            ) so_last ON so_last.live_payment_event_id = lpe.id
-            ORDER BY lpe.created_at_utc DESC LIMIT 50`,
+            ) so_last ON so_last.live_payment_event_id = lpc.id
+            WHERE lpc.rn = 1
+            ORDER BY lpc.created_at_utc DESC LIMIT 50`,
       args: [],
     });
     res.json(result.rows);
@@ -748,37 +781,44 @@ app.get("/api/vendor/alerts", async (_req: Request, res: Response) => {
 
 app.get("/api/vendor/analytics", async (_req: Request, res: Response) => {
   try {
+    // Customer-centric analytics: count latest status per customer
     const stats = await dbClient.execute({
-      sql: `SELECT
-              COUNT(*) as total_events,
+      sql: `WITH latest_per_customer AS (
+              SELECT lpe.*,
+                ROW_NUMBER() OVER (
+                  PARTITION BY lpe.customer_profile_id
+                  ORDER BY lpe.created_at_utc DESC
+                ) as rn
+              FROM live_payment_events lpe
+            )
+            SELECT
+              COUNT(*) as total_customers,
               SUM(CASE WHEN status = 'captured' THEN 1 ELSE 0 END) as total_successes,
               SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as total_failures,
               SUM(CASE WHEN status = 'captured' THEN amount_paise ELSE 0 END) as recovered_paise,
               SUM(CASE WHEN status = 'failed' THEN amount_paise ELSE 0 END) as at_risk_paise,
-              SUM(CASE WHEN vendor_notified = 1 THEN 1 ELSE 0 END) as suspicious_count,
               SUM(CASE WHEN payment_method = 'card' THEN 1 ELSE 0 END) as method_card,
               SUM(CASE WHEN payment_method = 'upi' THEN 1 ELSE 0 END) as method_upi,
               SUM(CASE WHEN payment_method = 'netbanking' THEN 1 ELSE 0 END) as method_netbanking,
               SUM(CASE WHEN payment_method = 'wallet' THEN 1 ELSE 0 END) as method_wallet,
               SUM(CASE WHEN payment_method IS NULL OR payment_method = '' THEN 1 ELSE 0 END) as method_other
-            FROM live_payment_events`,
+            FROM latest_per_customer WHERE rn = 1`,
       args: [],
     });
     const row = stats.rows[0] as any;
     res.json({
-      totalEvents: Number(row?.total_events || 0),
+      totalEvents: Number(row?.total_customers || 0),
       totalSuccesses: Number(row?.total_successes || 0),
       totalFailures: Number(row?.total_failures || 0),
       recoveredPaise: Number(row?.recovered_paise || 0),
       atRiskPaise: Number(row?.at_risk_paise || 0),
-      suspiciousCount: Number(row?.suspicious_count || 0),
       methodCard: Number(row?.method_card || 0),
       methodUpi: Number(row?.method_upi || 0),
       methodNetbanking: Number(row?.method_netbanking || 0),
       methodWallet: Number(row?.method_wallet || 0),
       methodOther: Number(row?.method_other || 0),
-      successRate: row?.total_events > 0
-        ? ((Number(row.total_successes) / Number(row.total_events)) * 100).toFixed(1) + "%"
+      successRate: row?.total_customers > 0
+        ? ((Number(row.total_successes) / Number(row.total_customers)) * 100).toFixed(1) + "%"
         : "0.0%",
     });
   } catch (err) {
@@ -863,7 +903,7 @@ app.post("/api/vendor/decision", async (req: Request, res: Response) => {
               action: row.ml_action || "RETRY_NOW",
               recipient: { customerName: c.name, phone: c.phone, email: c.email },
               amountPaise: row.amount_paise,
-              paymentLinkUrl: `${process.env.BASE_URL || `http://localhost:${PORT}`}/recover/${eventId}`,
+              paymentLinkUrl: `${getPublicBaseUrl()}/recover/${eventId}`,
               language: "EN" as const,
               rawErrorReason: row.failure_code || "",
               instrumentDescription: row.failure_description || "",
@@ -1029,7 +1069,7 @@ app.get("/result", (_req: Request, res: Response) => {
 app.post("/api/recovery/triage", async (req: Request, res: Response) => {
   try {
     const { presetKey } = req.body || {};
-    const base = process.env.BASE_URL || `http://localhost:${PORT}`;
+    const base = getPublicBaseUrl();
     const session = await simulateFailureTriage(presetKey || "SALARY_DELAY", base, dbClient);
     res.json(session);
   } catch (err) {
@@ -1168,7 +1208,7 @@ async function sweepScheduledOutreach() {
         action: "REMINDER",
         recipient: { customerName: r.name, phone: r.phone, email: r.email },
         amountPaise: r.amount_paise,
-        paymentLinkUrl: `${process.env.BASE_URL || `http://localhost:${PORT}`}/recover/${r.live_payment_event_id}`,
+        paymentLinkUrl: `${getPublicBaseUrl()}/recover/${r.live_payment_event_id}`,
         language: "EN" as const,
         rawErrorReason: r.failure_code || "",
         instrumentDescription: "Payment reminder",

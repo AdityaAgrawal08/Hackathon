@@ -27,7 +27,7 @@ describe("Task 2.2: Brevo Transactional Email Provider", () => {
     expect(result.providerName).toBe("brevo");
     expect(result.channel).toBe("EMAIL");
     expect(result.status).toBe("SENT");
-    expect(result.costPaise).toBe(10); // ₹0.10
+    expect(result.costPaise).toBe(0); // Simulated — no real cost
     expect(result.externalMessageId).toContain("brevo_sim_");
   });
 

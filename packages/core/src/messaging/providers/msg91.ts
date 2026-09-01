@@ -79,9 +79,10 @@ export class MSG91SmsProvider implements OutreachProvider {
         channel: this.channel,
         externalMessageId: `msg91_sim_${payload.proposalId}`,
         status: "SENT",
-        costPaise: 25,
+        costPaise: 0,
         dispatchedAtUtc: nowUtc,
         rawResponse: { simulated: true, templateId: this.config.templateId, phone, reason },
+        errorMessage: `SIMULATED: ${reason}. Set MSG91_AUTH_KEY and MSG91_TEMPLATE_ID for real delivery.`,
       };
     }
 
