@@ -1,15 +1,16 @@
-import { describe, it, expect, beforeAll, beforeEach } from "vitest";
+/**
+ * E-010: Drift Detection Integration Test
+ *
+ * Tests the actual drift detection logic by calling detectDrift() and verifying output.
+ * Replaces the previous test that only did raw SQL inserts and hardcoded arithmetic.
+ */
+import { describe, it, expect, beforeAll } from "vitest";
 import { createClient } from "@libsql/client";
 import { runMigrations } from "../../packages/core/src/db/migrate.js";
-import { saveModel, getIncumbent } from "../../packages/ml/src/registry.js";
+import { saveModel } from "../../packages/ml/src/registry.js";
 import { buildArtifact } from "../../packages/ml/src/artifact.js";
 import { FEATURE_NAMES } from "../../packages/ml/src/features.js";
-import { defaultPolicy } from "@arbiter/core/decide/policy.js";
-import {
-  processEvent,
-  approveProposal,
-  executeProposal,
-} from "../../packages/ml/src/pipeline.js";
+import { detectDrift, getRecentDriftChecks } from "../../packages/ml/src/drift.js";
 import { isoUtc } from "@arbiter/shared";
 
 const T0 = "2026-01-05T09:00:00.000Z";
@@ -32,7 +33,6 @@ let client: any;
 beforeAll(async () => {
   client = createClient({ url: "file:./data/arbiter.sqlite" });
   await runMigrations(client);
-  // Use INSERT OR REPLACE to handle re-runs
   await client.execute({
     sql: `INSERT OR REPLACE INTO tenants (id, name, created_at_utc) VALUES ('demo', 'D', ?)`,
     args: [T0],
@@ -40,7 +40,91 @@ beforeAll(async () => {
   await saveModel(client, artifact(), "INCUMBENT");
 });
 
-describe("P7 Measurement Harness", () => {
+describe("E-010 Drift Detection", () => {
+  it("detectDrift returns OK when rates are close", async () => {
+    const result = await detectDrift(client, {
+      predictedRate: 0.50,
+      realizedRate: 0.48,
+      sampleSize: 100,
+      windowStartUtc: T0,
+      windowEndUtc: isoUtc(NOW),
+      envelopeBefore: { envelope_version: "env-v1", enabled: true },
+      envelopeAfter: { envelope_version: "env-v1", enabled: true },
+    });
+
+    expect(result.verdict).toBe("OK");
+    expect(result.predictedRate).toBe(0.50);
+    expect(result.realizedRate).toBe(0.48);
+    expect(result.delta).toBeCloseTo(0.02, 4);
+    expect(result.sampleSize).toBe(100);
+    expect(result.id).toBeTruthy();
+  });
+
+  it("detectDrift returns CONTRACTED when realized is much lower", async () => {
+    const result = await detectDrift(client, {
+      predictedRate: 0.60,
+      realizedRate: 0.40,
+      sampleSize: 80,
+      windowStartUtc: T0,
+      windowEndUtc: isoUtc(NOW),
+      envelopeBefore: { envelope_version: "env-v1", enabled: true },
+      envelopeAfter: { envelope_version: "env-v1", enabled: false },
+    });
+
+    expect(result.verdict).toBe("CONTRACTED");
+    expect(result.delta).toBeCloseTo(0.20, 4);
+  });
+
+  it("detectDrift persists to drift_checks table", async () => {
+    const result = await detectDrift(client, {
+      predictedRate: 0.55,
+      realizedRate: 0.52,
+      sampleSize: 50,
+      windowStartUtc: T0,
+      windowEndUtc: isoUtc(NOW),
+      envelopeBefore: { envelope_version: "env-v1" },
+      envelopeAfter: { envelope_version: "env-v1" },
+    });
+
+    const row = await client.execute({
+      sql: `SELECT verdict, predicted_rate, realized_rate, sample_size FROM drift_checks WHERE id = ?`,
+      args: [result.id],
+    });
+
+    expect(row.rows.length).toBe(1);
+    expect(String(row.rows[0]!.verdict)).toBe("OK");
+    expect(Number(row.rows[0]!.predicted_rate)).toBeCloseTo(0.55, 4);
+    expect(Number(row.rows[0]!.realized_rate)).toBeCloseTo(0.52, 4);
+    expect(Number(row.rows[0]!.sample_size)).toBe(50);
+  });
+
+  it("getRecentDriftChecks returns recent entries", async () => {
+    // Insert a few drift checks
+    for (let i = 0; i < 3; i++) {
+      await detectDrift(client, {
+        predictedRate: 0.5 + i * 0.05,
+        realizedRate: 0.45 + i * 0.05,
+        sampleSize: 30 + i * 10,
+        windowStartUtc: T0,
+        windowEndUtc: isoUtc(NOW + i * 86400000),
+        envelopeBefore: { envelope_version: "env-v1" },
+        envelopeAfter: { envelope_version: "env-v1" },
+      }, NOW + i * 86400000);
+    }
+
+    const recent = await getRecentDriftChecks(client, 5);
+    expect(recent.length).toBeGreaterThanOrEqual(3);
+
+    // All should have valid verdicts
+    for (const check of recent) {
+      expect(["OK", "CONTRACTED"]).toContain(check.verdict);
+      expect(check.predictedRate).toBeGreaterThanOrEqual(0);
+      expect(check.predictedRate).toBeLessThanOrEqual(1);
+      expect(check.realizedRate).toBeGreaterThanOrEqual(0);
+      expect(check.realizedRate).toBeLessThanOrEqual(1);
+    }
+  });
+
   it("drift_checks table exists and is queryable", async () => {
     const r = await client.execute({ sql: "SELECT count(*) as n FROM drift_checks", args: [] });
     expect(r.rows.length).toBeGreaterThanOrEqual(0);
@@ -51,65 +135,14 @@ describe("P7 Measurement Harness", () => {
     expect(r.rows.length).toBeGreaterThanOrEqual(0);
   });
 
-  it("can insert and query drift_checks", async () => {
-    await client.execute({
-      sql: `INSERT OR REPLACE INTO drift_checks (id, window_start_utc, window_end_utc, sample_size, predicted_rate, realized_rate, verdict, envelope_before_json, envelope_after_json, checked_at_utc)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      args: [
-        "test_drift",
-        T0,
-        isoUtc(NOW),
-        10,
-        0.5,
-        0.6,
-        "OK",
-        JSON.stringify({ envelope: "env-v1" }),
-        JSON.stringify({ envelope: "env-v1" }),
-        isoUtc(NOW),
-      ],
-    });
-    const r = await client.execute({ sql: "SELECT verdict FROM drift_checks WHERE id=?", args: ["test_drift"] });
-    expect(String(r.rows[0]!.verdict)).toBe("OK");
-  });
-
-  it("can insert and query metrics_runs", async () => {
-    await client.execute({
-      sql: `INSERT OR REPLACE INTO metrics_runs (id, corpus_sha, arm, mc_iteration, recovered_paise, contacts_made, wasted_attempts, policy_refusals, params_json, ran_at_utc)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      args: [
-        "test_mc_1",
-        "demo_corpus_sha",
-        "CONTROL",
-        1,
-        1000,
-        50,
-        5,
-        2,
-        JSON.stringify({ eventsProcessed: 10 }),
-        isoUtc(NOW),
-      ],
-    });
-    const r = await client.execute({ sql: `SELECT recovered_paise FROM metrics_runs WHERE id=?`, args: ["test_mc_1"] });
-    expect(Number(r.rows[0]!.recovered_paise)).toBe(1000);
-  });
-
-  it("drift verdict is either OK or CONTRACTED", async () => {
-    // Verify the drift check logic produces valid verdicts
-    const predictedRate = 0.55;
-    const realizedRate = 0.50;
-    const verdict: string = predictedRate > realizedRate ? "CONTRACTED" : "OK";
-    expect(verdict).toBe("CONTRACTED");
-  });
-
   it("summary computes recovery rates correctly", async () => {
-    // Test that summary structure is correct
     const controlTotalRecovered = 5000;
     const pipelineTotalRecovered = 7500;
     const totalEventsPerIteration = 230;
     const controlRecoveryRate = controlTotalRecovered / totalEventsPerIteration;
     const pipelineRecoveryRate = pipelineTotalRecovered / totalEventsPerIteration;
-    
-    expect(controlRecoveryRate).toBeCloseTo(21.74, 2); // 5000/230
-    expect(pipelineRecoveryRate).toBeCloseTo(32.61, 2); // 7500/230
+
+    expect(controlRecoveryRate).toBeCloseTo(21.74, 2);
+    expect(pipelineRecoveryRate).toBeCloseTo(32.61, 2);
   });
 });

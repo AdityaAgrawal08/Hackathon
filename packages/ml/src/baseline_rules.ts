@@ -14,7 +14,8 @@
  *   Already contacted today → skip
  *   Quiet hours → defer
  */
-import type { ActionId, FailureClassId } from "../../core/src/decide/catalog.js";
+import type { ActionId, FailureClassId } from "@arbiter/core/decide";
+import { CONTACT_COST_PAISE } from "@arbiter/core/decide";
 
 export interface RulesContext {
   failureClass: FailureClassId;
@@ -122,21 +123,7 @@ export function simulateRulesOutcome(
     return { action: null, wouldRecover: false, costPaise: 0 };
   }
 
-  // Cost per action (from CONTACT_COST_PAISE in catalog.ts)
-  const ACTION_COSTS: Record<string, number> = {
-    RETRY_NOW: 300,
-    RETRY_PAYDAY: 300,
-    ALTERNATE_UPI_LINK: 150,
-    PARTIAL_COLLECT: 250,
-    RECOVER_VIA_RAIL: 200,
-    RECOVER_VOICE_HI: 800,
-    RECOVER_WHATSAPP: 120,
-    PROMISE_TO_PAY: 80,
-    REMINDER_LINK: 100,
-    HUMAN_REVIEW: 5000,
-    NO_ACTION: 0,
-  };
-  const costPaise = ACTION_COSTS[action] ?? 0;
+  const costPaise = CONTACT_COST_PAISE[action] ?? 0;
 
   // Deterministic outcome: rules-only has fixed success rates per failure class
   const RULES_SUCCESS_RATES: Record<string, number> = {

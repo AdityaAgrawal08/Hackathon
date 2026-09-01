@@ -132,12 +132,14 @@ const storeHtml = readFileSync(resolve(__dirname, "views/store.html"), "utf8");
 const dashboardHtml = readFileSync(resolve(__dirname, "views/dashboard.html"), "utf8");
 const recoverHtml = readFileSync(resolve(__dirname, "views/recover.html"), "utf8");
 const resultHtml = readFileSync(resolve(__dirname, "views/result.html"), "utf8");
+const batchReportHtml = readFileSync(resolve(__dirname, "views/batch_report.html"), "utf8");
 
 // ── Store Routes ─────────────────────────────────────────────────
 app.get("/", (_req, res) => { res.setHeader("Content-Type", "text/html"); res.send(storeHtml); });
 app.get("/store", (_req, res) => { res.setHeader("Content-Type", "text/html"); res.send(storeHtml); });
 app.get("/dashboard", (_req, res) => { res.setHeader("Content-Type", "text/html"); res.send(dashboardHtml); });
 app.get("/recover/:eventId", (_req, res) => { res.setHeader("Content-Type", "text/html"); res.send(recoverHtml); });
+app.get("/batch-report", (_req, res) => { res.setHeader("Content-Type", "text/html"); res.send(batchReportHtml); });
 
 // ── Get Products ─────────────────────────────────────────────────
 app.get("/api/products", (_req, res) => {
@@ -1242,6 +1244,17 @@ async function sweepScheduledOutreach() {
     logger.error({ msg: "[Outreach Sweeper] Error", err: (err as Error).message });
   }
 }
+
+// ── E-007: Batch Report API Endpoint ────────────────────────────
+app.get("/api/recovery/batch-report", async (_req: Request, res: Response) => {
+  try {
+    const report = await runBatchBenchmark(dbClient);
+    res.json(report);
+  } catch (err) {
+    logger.error({ msg: "[BatchReport] Error", err: (err as Error).message });
+    res.status(500).json({ error: "Failed to generate batch report" });
+  }
+});
 
 // ── Startup ──────────────────────────────────────────────────────
 export async function startServer() {

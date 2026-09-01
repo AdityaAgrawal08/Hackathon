@@ -836,6 +836,45 @@ export async function runBatchBenchmark(dbClient?: Client) {
   let controlCostPaise = 0;
   let arbiterCostPaise = 0;
 
+  // E-004: Per-failure-class accumulators
+  const perClass: Record<string, { count: number; atRiskPaise: number; recoveredPaise: number; controlRecoveredPaise: number }> = {};
+
+  // E-005: Per-intervention accumulators
+  const perAction: Record<string, { count: number; recoveredPaise: number; atRiskPaise: number; costPaise: number; totalCostPaise: number }> = {};
+
+  // E-006: Time-to-recovery tracking (hours from failure to recovery)
+  const recoveryTimesHours: number[] = [];
+
+  // E-008: Per-channel cost accumulators (action → channel mapping)
+  const perChannelCost: Record<string, number> = { email: 0, sms: 0, whatsapp: 0, voice: 0, retry: 0, other: 0 };
+
+  /** Map action to channel for E-008 cost tracking. */
+  function actionToChannel(action: string): string {
+    if (action.includes("EMAIL") || action === "REMINDER_LINK") return "email";
+    if (action.includes("SMS") || action === "ALTERNATE_UPI_LINK") return "sms";
+    if (action.includes("WHATSAPP")) return "whatsapp";
+    if (action.includes("VOICE")) return "voice";
+    if (action.includes("RETRY")) return "retry";
+    return "other";
+  }
+
+  /** Map action to estimated recovery time in hours for E-006. */
+  function estimatedRecoveryHours(action: string, success: boolean): number {
+    if (!success) return 0;
+    switch (action) {
+      case "RETRY_NOW": return 0.1;       // immediate retry
+      case "RETRY_PAYDAY": return 24 * 3;  // ~3 days
+      case "ALTERNATE_UPI_LINK": return 2; // payment link
+      case "PROMISE_TO_PAY": return 24 * 2; // ~2 days
+      case "REMINDER_LINK": return 12;
+      case "PARTIAL_COLLECT": return 1;
+      case "RECOVER_VIA_RAIL": return 4;
+      case "RECOVER_VOICE_HI": return 6;
+      case "RECOVER_WHATSAPP": return 3;
+      default: return 6;
+    }
+  }
+
   const nowMs = 1735740000000; // Fixed deterministic reference (14:00 UTC = 19:30 IST — outside quiet hours)
 
   // C-001: MockRazorpayProvider for realistic provider-side outcomes
@@ -939,14 +978,44 @@ export async function runBatchBenchmark(dbClient?: Client) {
       nowMs,
     });
     const arbSucceeded = outcomeFromStatus(providerResult.status) === "SUCCEEDED";
+    // Compute per-iteration cost (RISK_FLAGGED escalations cost 0)
+    const iterCost = failureClass === "RISK_FLAGGED" && !arbSucceeded ? 0 : COST_ARBITER_OUTREACH_PAISE;
     if (arbSucceeded) {
       arbiterRecovered += amount;
-      arbiterCostPaise += COST_ARBITER_OUTREACH_PAISE;
-    } else if (failureClass === "RISK_FLAGGED") {
-      arbiterCostPaise += 0;
-    } else {
-      arbiterCostPaise += COST_ARBITER_OUTREACH_PAISE;
     }
+    arbiterCostPaise += iterCost;
+
+    // E-004: Per-failure-class tracking
+    if (!perClass[failureClass]) {
+      perClass[failureClass] = { count: 0, atRiskPaise: 0, recoveredPaise: 0, controlRecoveredPaise: 0 };
+    }
+    perClass[failureClass].count++;
+    perClass[failureClass].atRiskPaise += amount;
+    if (arbSucceeded) perClass[failureClass].recoveredPaise += amount;
+    if (ctrlSucceeded) perClass[failureClass].controlRecoveredPaise += amount;
+
+    // E-005: Per-intervention tracking (track at-risk too for rate denominator)
+    const actionId = chosen.action;
+    if (!perAction[actionId]) {
+      perAction[actionId] = { count: 0, recoveredPaise: 0, atRiskPaise: 0, costPaise: 0, totalCostPaise: 0 };
+    }
+    perAction[actionId].atRiskPaise += amount;
+    perAction[actionId].count++;
+    perAction[actionId].totalCostPaise += iterCost;
+    if (arbSucceeded) {
+      perAction[actionId].recoveredPaise += amount;
+      perAction[actionId].costPaise += iterCost;
+    }
+
+    // E-006: Time-to-recovery tracking
+    if (arbSucceeded) {
+      const hoursToRecovery = estimatedRecoveryHours(chosen.action, true);
+      recoveryTimesHours.push(hoursToRecovery);
+    }
+
+    // E-008: Per-channel cost tracking (use iterCost, not cumulative total)
+    const channel = actionToChannel(chosen.action);
+    perChannelCost[channel] += iterCost;
 
     // TRAI Compliance
     if (i % 4 === 0) {
@@ -958,6 +1027,19 @@ export async function runBatchBenchmark(dbClient?: Client) {
     controlRecovered > 0
       ? Math.round(((arbiterRecovered - controlRecovered) / controlRecovered) * 100)
       : 0;
+
+  // E-006: Compute median and P90 time-to-recovery
+  let medianTimeToRecoveryHours = 0;
+  let p90TimeToRecoveryHours = 0;
+  if (recoveryTimesHours.length > 0) {
+    const sorted = [...recoveryTimesHours].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    medianTimeToRecoveryHours = sorted.length % 2 === 0
+      ? (sorted[mid - 1]! + sorted[mid]!) / 2
+      : sorted[mid]!;
+    const p90Idx = Math.floor(0.9 * sorted.length);
+    p90TimeToRecoveryHours = sorted[Math.min(p90Idx, sorted.length - 1)]!;
+  }
 
   const source = eventsList[0]?.id?.startsWith("evt_bench_") || eventsList[0]?.id?.startsWith("evt_") ? "deterministic_corpus" : "live_events";
 
@@ -994,6 +1076,57 @@ export async function runBatchBenchmark(dbClient?: Client) {
       wastedRetriesSaved,
       costSavingsPaise: Math.max(0, controlCostPaise - arbiterCostPaise),
       costSavingsFormatted: formatINR(paise(Math.max(0, controlCostPaise - arbiterCostPaise))),
+    },
+    // E-004: Per-failure-class breakdown
+    perFailureClass: Object.fromEntries(
+      Object.entries(perClass).map(([cls, v]) => [
+        cls,
+        {
+          count: v.count,
+          atRiskPaise: v.atRiskPaise,
+          atRiskFormatted: formatINR(paise(v.atRiskPaise)),
+          recoveredPaise: v.recoveredPaise,
+          recoveredFormatted: formatINR(paise(v.recoveredPaise)),
+          recoveryRate: v.atRiskPaise > 0 ? ((v.recoveredPaise / v.atRiskPaise) * 100).toFixed(1) + "%" : "0.0%",
+          controlRecoveredPaise: v.controlRecoveredPaise,
+          controlRecoveryRate: v.atRiskPaise > 0 ? ((v.controlRecoveredPaise / v.atRiskPaise) * 100).toFixed(1) + "%" : "0.0%",
+        },
+      ]),
+    ),
+    // E-005: Per-intervention breakdown
+    perIntervention: Object.fromEntries(
+      Object.entries(perAction).map(([action, v]) => {
+        const atRisk = v.atRiskPaise ?? v.count * 1;
+        return [
+          action,
+          {
+            count: v.count,
+            recoveredPaise: v.recoveredPaise,
+            recoveredFormatted: formatINR(paise(v.recoveredPaise)),
+            recoveryRate: atRisk > 0 ? ((v.recoveredPaise / atRisk) * 100).toFixed(1) + "%" : "0.0%",
+            totalCostPaise: v.totalCostPaise,
+            totalCostFormatted: formatINR(paise(v.totalCostPaise)),
+            costPerEvent: v.count > 0 ? Math.round(v.totalCostPaise / v.count) : 0,
+          },
+        ];
+      }),
+    ),
+    // E-006: Time-to-recovery metric
+    timeToRecovery: {
+      medianHours: Math.round(medianTimeToRecoveryHours * 10) / 10,
+      p90Hours: Math.round(p90TimeToRecoveryHours * 10) / 10,
+      sampleSize: recoveryTimesHours.length,
+    },
+    // E-008: Per-channel cost breakdown
+    perChannelCost: {
+      email: { costPaise: perChannelCost.email, costFormatted: formatINR(paise(perChannelCost.email)) },
+      sms: { costPaise: perChannelCost.sms, costFormatted: formatINR(paise(perChannelCost.sms)) },
+      whatsapp: { costPaise: perChannelCost.whatsapp, costFormatted: formatINR(paise(perChannelCost.whatsapp)) },
+      voice: { costPaise: perChannelCost.voice, costFormatted: formatINR(paise(perChannelCost.voice)) },
+      retry: { costPaise: perChannelCost.retry, costFormatted: formatINR(paise(perChannelCost.retry)) },
+      other: { costPaise: perChannelCost.other, costFormatted: formatINR(paise(perChannelCost.other)) },
+      totalOutreachPaise: Object.values(perChannelCost).reduce((a, b) => a + b, 0),
+      totalOutreachFormatted: formatINR(paise(Object.values(perChannelCost).reduce((a, b) => a + b, 0))),
     },
   };
 }

@@ -244,7 +244,7 @@ export async function recoverBatch(
   let totalCostPaise = 0;
   for (const evt of report.perEvent) {
     if (evt.outcome === "SUCCEEDED" || evt.outcome === "AMBIGUOUS") {
-      totalCostPaise += CONTACT_COST_PAISE[evt.action as keyof typeof CONTACT_COST_PAISE] ?? 100;
+      totalCostPaise += CONTACT_COST_PAISE[evt.intervention as keyof typeof CONTACT_COST_PAISE] ?? 100;
     }
   }
   report.totalOutreachCostPaise = totalCostPaise;
