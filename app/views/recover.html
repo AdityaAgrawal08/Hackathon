@@ -340,10 +340,39 @@
       rzp.on('payment.failed', function(response) {
         var err = response.error || {};
         var errorDesc = err.description || 'Payment could not be processed';
+        var errMetadata = err.metadata || {};
+        var paymentMethod = errMetadata.payment_method || {};
         document.getElementById('status').className = 'status status-error';
         document.getElementById('status').textContent = 'Payment failed: ' + errorDesc;
         btn.disabled = false;
         btn.textContent = 'Retry Payment Now';
+
+        // Report retry failure to server so it's tracked (dedup will update existing row)
+        try {
+          fetch('/api/payments/failed', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              razorpay_order_id: orderData ? orderData.orderId : '',
+              error_code: err.code || 'PAYMENT_FAILED',
+              error_description: errorDesc,
+              error_step: err.step || '',
+              error_source: err.source || '',
+              error_reason: err.reason || '',
+              customerId: eventData ? eventData.customerId : '',
+              productId: eventData ? mapProductNameToId(eventData.productName) : 'prod_premium_plan',
+              productName: eventData ? eventData.productName : 'Unknown',
+              amountPaise: eventData ? eventData.amountPaise : 0,
+              paymentMethod: {
+                type: paymentMethod.type || '',
+                last4: paymentMethod.last4 || '',
+                network: paymentMethod.network || '',
+                vpa: paymentMethod.vpa || '',
+                bank: paymentMethod.bank || '',
+              },
+            }),
+          });
+        } catch (e) {}
       });
       rzp.open();
     }

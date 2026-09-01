@@ -642,7 +642,13 @@ app.get("/api/vendor/payments", async (_req: Request, res: Response) => {
               so_last.status as last_outreach_status
             FROM live_payment_events lpe
             JOIN customer_profiles cp ON cp.id = lpe.customer_profile_id
-            LEFT JOIN scheduled_outreach so_out ON so_out.live_payment_event_id = lpe.id AND so_out.executed = 0
+            LEFT JOIN (
+              SELECT live_payment_event_id, channel, scheduled_at_utc
+              FROM scheduled_outreach
+              WHERE executed = 0
+              ORDER BY scheduled_at_utc ASC
+              LIMIT 1
+            ) so_out ON so_out.live_payment_event_id = lpe.id
             LEFT JOIN scheduled_outreach so_last ON so_last.live_payment_event_id = lpe.id AND so_last.executed = 1
               AND so_last.executed_at_utc = (
                 SELECT MAX(s2.executed_at_utc) FROM scheduled_outreach s2

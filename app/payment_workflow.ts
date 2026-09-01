@@ -281,7 +281,7 @@ export async function processFailedPayment(
         input.razorpayOrderId,
         input.failureCode, input.failureDescription, input.failureStep, input.failureSource, input.failureReason,
         failureClass, probability, decideOutput.chosen.action,
-        input.paymentMethod || null, input.cardLast4 || null, input.cardNetwork || null,
+        input.paymentMethod || "unknown", input.cardLast4 || null, input.cardNetwork || null,
         input.cardIssuer || null, input.cardType || null,
         input.vpa || null, input.bankCode || null,
         existingRetryCount + 1,
@@ -355,7 +355,7 @@ export async function processFailedPayment(
       0, // vendor_notified — false at INSERT time, set to 1 only when vendor is actually notified
       nowUtc,
       // New Razorpay webhook fields
-      input.paymentMethod || null,
+      input.paymentMethod || "unknown",
       input.cardLast4 || null,
       input.cardNetwork || null,
       input.cardIssuer || null,
