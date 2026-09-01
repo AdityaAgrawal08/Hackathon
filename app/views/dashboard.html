@@ -458,17 +458,17 @@
     function getMethodHTML(p) {
       const raw = (p.payment_method || '').toLowerCase();
       if (raw === 'card') {
-        const net = p.card_network || '';
-        const last4 = p.card_last4 || '';
-        const type = p.card_type ? ` ${p.card_type}` : '';
+        const net = escapeHtml(p.card_network || '');
+        const last4 = escapeHtml(p.card_last4 || '');
+        const type = escapeHtml(p.card_type ? ` ${p.card_type}` : '');
         return `<span class="method-pill">💳 Card${net ? ' ' + net : ''}${type}${last4 ? ' ****' + last4 : ''}</span>`;
       }
       if (raw === 'upi') {
-        const vpa = p.vpa || '';
+        const vpa = escapeHtml(p.vpa || '');
         return `<span class="method-pill">📱 UPI${vpa ? ' ' + vpa : ''}</span>`;
       }
       if (raw === 'netbanking') {
-        const bank = p.bank_code || '';
+        const bank = escapeHtml(p.bank_code || '');
         return `<span class="method-pill">🏦 Netbanking${bank ? ' ' + bank : ''}</span>`;
       }
       if (raw === 'wallet') {
@@ -757,15 +757,15 @@
       else {
         body.innerHTML = data.map(p => `
           <div class="analysis-item">
-            <div class="analysis-reason">Suspicious Transaction — ${p.customer_name || 'Unknown'}</div>
-            <div class="analysis-code">${p.failure_code || 'Unknown code'}</div>
+            <div class="analysis-reason">Suspicious Transaction — ${escapeHtml(p.customer_name || 'Unknown')}</div>
+            <div class="analysis-code">${escapeHtml(p.failure_code || 'Unknown code')}</div>
             <div class="analysis-meta">
               <span class="amount">${formatINR(p.amount_paise)}</span>
               <span class="pct">${formatTime(p.created_at_utc)}</span>
             </div>
             <div style="display:flex;gap:8px;margin-top:12px;">
-              <button class="alert-btn btn-view" style="background:#14532d;color:#86efac" onclick="decide('${p.id}','approved')">✓ Approve & Recover</button>
-              <button class="alert-btn btn-dismiss" style="border:1px solid #7f1d1d;color:#fca5a5" onclick="decide('${p.id}','rejected')">✕ Reject</button>
+              <button class="alert-btn btn-view" style="background:#14532d;color:#86efac" onclick="decide('${escapeHtml(p.id)}','approved')">✓ Approve & Recover</button>
+              <button class="alert-btn btn-dismiss" style="border:1px solid #7f1d1d;color:#fca5a5" onclick="decide('${escapeHtml(p.id)}','rejected')">✕ Reject</button>
             </div>
           </div>
         `).join('');
@@ -804,14 +804,14 @@
         document.getElementById('analysis-body').innerHTML = data.analysis.map((item, i) => `
           <div class="analysis-item">
             <div class="analysis-rank">#${i + 1} Most Common Reason</div>
-            <div class="analysis-reason">${item.humanReason}</div>
-            <div class="analysis-code">${item.code}</div>
+            <div class="analysis-reason">${escapeHtml(item.humanReason)}</div>
+            <div class="analysis-code">${escapeHtml(item.code)}</div>
             <div class="analysis-meta">
               <span class="count">${item.count} transaction${item.count > 1 ? 's' : ''}</span>
               <span class="amount">${formatINR(item.totalAmountPaise)} affected</span>
               <span class="pct">${item.percentage}% of failures</span>
             </div>
-            <div class="analysis-action">💡 ${item.recommendedAction}</div>
+            <div class="analysis-action">💡 ${escapeHtml(item.recommendedAction)}</div>
           </div>
         `).join('');
       } catch (e) {

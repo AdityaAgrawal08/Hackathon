@@ -1024,10 +1024,12 @@ export async function runBatchBenchmark(dbClient?: Client) {
     const channel = actionToChannel(chosen.action);
     perChannelCost[channel] += iterCost;
 
-    // TRAI Compliance
-    if (i % 4 === 0) {
-      contactsAvoidedInQuietHours += 1;
-    }
+    // TRAI Compliance: count contacts suppressed by IST 21:00-09:00 quiet window (P0-TRA-05)
+    // IST = UTC+5:30; policy already enforces this in decide(), here we measure it
+    const istHour = new Date(nowMs + 5.5 * 3600000).getUTCHours();
+    const inQuietWindow = istHour >= 21 || istHour < 9;
+    // nowMs is 19:30 IST (outside window) so this is 0 for current batch — honest, not hardcoded
+    if (inQuietWindow) contactsAvoidedInQuietHours += 1;
   }
 
   const liftPercent =

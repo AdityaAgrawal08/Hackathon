@@ -41,6 +41,7 @@ import {
   recordPromiseToPay,
   completeRecovery,
   getRecoveryResult,
+  runBatchBenchmark,
 } from "./recovery.js";
 
 import {
@@ -753,7 +754,7 @@ app.post("/api/webhooks/razorpay", webhookLimiter, async (req: Request, res: Res
 });
 
 // ── Vendor Dashboard API ─────────────────────────────────────────
-app.get("/api/vendor/payments", async (_req: Request, res: Response) => {
+app.get("/api/vendor/payments", adminLimiter, async (_req: Request, res: Response) => {
   try {
     // Customer-centric: show LATEST transaction per customer, not every transaction.
     // A customer who succeeded after retries appears in success list, not failed.
@@ -800,7 +801,7 @@ app.get("/api/vendor/payments", async (_req: Request, res: Response) => {
   }
 });
 
-app.get("/api/vendor/alerts", async (_req: Request, res: Response) => {
+app.get("/api/vendor/alerts", adminLimiter, async (_req: Request, res: Response) => {
   try {
     const result = await dbClient.execute({
       sql: `SELECT lpe.*, cp.name as customer_name, cp.phone as customer_phone, cp.email as customer_email
@@ -816,7 +817,7 @@ app.get("/api/vendor/alerts", async (_req: Request, res: Response) => {
   }
 });
 
-app.get("/api/vendor/analytics", async (_req: Request, res: Response) => {
+app.get("/api/vendor/analytics", adminLimiter, async (_req: Request, res: Response) => {
   try {
     // Customer-centric analytics: count latest status per customer
     const stats = await dbClient.execute({
@@ -863,7 +864,7 @@ app.get("/api/vendor/analytics", async (_req: Request, res: Response) => {
   }
 });
 
-app.get("/api/vendor/failure-analysis", async (_req: Request, res: Response) => {
+app.get("/api/vendor/failure-analysis", adminLimiter, async (_req: Request, res: Response) => {
   try {
     const failed = await dbClient.execute({
       sql: `SELECT failure_code, COUNT(*) as cnt, SUM(amount_paise) as total_amount
@@ -1154,7 +1155,7 @@ app.post("/api/recovery/triage", recoveryLimiter, async (req: Request, res: Resp
 });
 
 // ── Provider Status (diagnostic endpoint) ─────────────────────
-app.get("/api/providers/status", (_req: Request, res: Response) => {
+app.get("/api/providers/status", adminLimiter, (_req: Request, res: Response) => {
   const brevoKey = process.env.BREVO_API_KEY;
   const msg91Key = process.env.MSG91_AUTH_KEY;
     const msg91Flow = process.env.MSG91_TEMPLATE_ID || process.env.MSG91_DLT_TEMPLATE_ID;
@@ -1164,12 +1165,9 @@ app.get("/api/providers/status", (_req: Request, res: Response) => {
   res.json({
     brevo: {
       configured: !!brevoKey && !brevoKey.includes("xxxxxx"),
-      keyPreview: brevoKey ? brevoKey.slice(0, 8) + "..." : "not set",
     },
     msg91: {
       configured: !!msg91Key && !msg91Key.includes("xxxxxx"),
-      keyPreview: msg91Key ? msg91Key.slice(0, 8) + "..." : "not set",
-      flowId: msg91Flow || "not set",
       flowIdValid: !!msg91Flow,
     },
     quietHours: {

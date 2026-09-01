@@ -14,6 +14,8 @@
     "verify": "pnpm -r typecheck && pnpm test",
     "seed": "tsx packages/seed/src/main.ts --corpus all",
     "seed:demo": "tsx packages/seed/src/main.ts --corpus demo",
+    "demo": "tsx scripts/demo.ts",
+    "demo:batch": "tsx scripts/demo.ts",
     "train": "tsx packages/ml/src/main.ts",
     "propose": "tsx packages/ml/src/propose.ts",
     "execute": "tsx packages/ml/src/execute.ts",
