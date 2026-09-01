@@ -13,14 +13,14 @@ import { readFileSync, existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-if (existsSync(".env")) {
+if (!process.env.VITEST && existsSync(".env")) {
   try {
     process.loadEnvFile();
     console.log("[Config] .env loaded successfully");
   } catch (err) {
     console.error("[Config] Failed to load .env:", (err as Error).message);
   }
-} else {
+} else if (!process.env.VITEST) {
   console.log("[Config] No .env file found — using environment variables only");
 }
 
@@ -662,14 +662,16 @@ app.get("/api/vendor/payments", async (_req: Request, res: Response) => {
               SELECT live_payment_event_id, channel, scheduled_at_utc
               FROM scheduled_outreach
               WHERE executed = 0
+              GROUP BY live_payment_event_id
               ORDER BY scheduled_at_utc ASC
-              LIMIT 1
             ) so_out ON so_out.live_payment_event_id = lpe.id
-            LEFT JOIN scheduled_outreach so_last ON so_last.live_payment_event_id = lpe.id AND so_last.executed = 1
-              AND so_last.executed_at_utc = (
-                SELECT MAX(s2.executed_at_utc) FROM scheduled_outreach s2
-                WHERE s2.live_payment_event_id = lpe.id AND s2.executed = 1
-              )
+            LEFT JOIN (
+              SELECT live_payment_event_id, channel, executed_at_utc, status, error_message
+              FROM scheduled_outreach
+              WHERE executed = 1
+              GROUP BY live_payment_event_id
+              ORDER BY executed_at_utc DESC
+            ) so_last ON so_last.live_payment_event_id = lpe.id
             ORDER BY lpe.created_at_utc DESC LIMIT 50`,
       args: [],
     });

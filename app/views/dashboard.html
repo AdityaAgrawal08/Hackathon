@@ -428,17 +428,27 @@
       if (code.includes('NETBANKING') || code.includes('BANK')) {
         return `<span class="method-pill">🏦 Netbanking</span>`;
       }
-      return `<span class="method-pill" style="color:#64748b">Payment attempted</span>`;
+      // Truly unknown — show a clear indicator instead of misleading text
+      return `<span class="method-pill" style="color:#64748b">Unknown Method</span>`;
     }
 
     function getFailureReason(p) {
       if (p.status === 'captured') return '<span style="color:#86efac">Payment received ✓</span>';
-      // Always show the actual error description from Razorpay — this is the root cause
-      if (p.failure_description) return escapeHtml(p.failure_description);
-      // Fallback to error code mapping
-      const code = (p.failure_code || '').toLowerCase();
-      const reason = FAILURE_REASONS[code];
-      if (reason) return reason;
+      const parts = [];
+      // Show actual error description from Razorpay
+      if (p.failure_description) {
+        parts.push(escapeHtml(p.failure_description));
+      }
+      // Always show the error code as context (e.g., "insufficient_funds")
+      if (p.failure_code) {
+        const mapped = FAILURE_REASONS[p.failure_code.toLowerCase()];
+        if (mapped && !p.failure_description) {
+          parts.push(mapped);
+        } else if (p.failure_code) {
+          parts.push(`<span style="color:#94a3b8;font-size:0.85em">[${p.failure_code}]</span>`);
+        }
+      }
+      if (parts.length > 0) return parts.join(' ');
       if (p.failure_reason) return escapeHtml(p.failure_reason);
       return 'Payment failed';
     }
@@ -446,28 +456,26 @@
     function getActionBadge(p) {
       if (p.status === 'captured') return '';
 
-      // Suspicious + needs vendor review
-      if (p.is_suspicious || (p.ml_action && p.ml_action.includes('HUMAN'))) {
-        if (p.vendor_decision === 'approved') return '<span class="action-badge" style="background:#052e16;color:#86efac">✓ Vendor Approved</span>';
-        if (p.vendor_decision === 'rejected') return '<span class="action-badge" style="background:#450a0a;color:#fca5a5">✕ Vendor Rejected</span>';
-        return '<span class="action-badge" style="background:#7f1d1d;color:#fca5a5;cursor:pointer" onclick="showAlerts()">👁 Needs Vendor Review</span>';
-      }
+      // Vendor already decided
+      if (p.vendor_decision === 'approved') return '<span class="action-badge" style="background:#052e16;color:#86efac">✓ Vendor Approved</span>';
+      if (p.vendor_decision === 'rejected') return '<span class="action-badge" style="background:#450a0a;color:#fca5a5">✕ Vendor Rejected</span>';
 
       // Show LAST outreach action with time
       if (p.last_outreach_channel && p.last_outreach_utc) {
         const lastTime = new Date(p.last_outreach_utc);
         const timeStr = lastTime.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
         const channel = p.last_outreach_channel === 'SMS' ? '📱 SMS' : '📧 Email';
+        const reviewTag = (p.is_suspicious || (p.ml_action && p.ml_action.includes('HUMAN'))) ? ' 👁' : '';
 
         if (p.last_outreach_status === 'SENT') {
-          return `<span class="action-badge" style="background:#052e16;color:#86efac">${channel} sent ${timeStr}</span>`;
+          return `<span class="action-badge" style="background:#052e16;color:#86efac">${channel} sent ${timeStr}${reviewTag}</span>`;
         }
         if (p.last_outreach_status === 'FAILED' || p.last_outreach_status === 'BOMBED') {
           const error = p.last_outreach_error ? `: ${escapeHtml(p.last_outreach_error.substring(0, 30))}` : '';
-          return `<span class="action-badge" style="background:#7f1d1d;color:#fca5a5">${channel} failed${error}</span>`;
+          return `<span class="action-badge" style="background:#7f1d1d;color:#fca5a5">${channel} failed${error}${reviewTag}</span>`;
         }
         if (p.last_outreach_status === 'SUPPRESSED') {
-          return `<span class="action-badge" style="background:#713f12;color:#fde68a">${channel} suppressed (DND)</span>`;
+          return `<span class="action-badge" style="background:#713f12;color:#fde68a">${channel} suppressed (DND)${reviewTag}</span>`;
         }
       }
 
@@ -479,13 +487,19 @@
         const diffMins = Math.round(diffMs / (1000 * 60));
         const diffHrs = Math.round(diffMs / (1000 * 60 * 60));
         const channel = p.next_outreach_channel === 'SMS' ? '📱 SMS' : '📧 Email';
+        const reviewTag = (p.is_suspicious || (p.ml_action && p.ml_action.includes('HUMAN'))) ? ' 👁' : '';
 
         if (diffMs > 0) {
-          if (diffMins < 60) return `<span class="action-badge" style="background:#1e3a5f;color:#93c5fd">${channel} in ${diffMins}m</span>`;
-          return `<span class="action-badge" style="background:#1e3a5f;color:#93c5fd">${channel} in ${diffHrs}h</span>`;
+          if (diffMins < 60) return `<span class="action-badge" style="background:#1e3a5f;color:#93c5fd">${channel} in ${diffMins}m${reviewTag}</span>`;
+          return `<span class="action-badge" style="background:#1e3a5f;color:#93c5fd">${channel} in ${diffHrs}h${reviewTag}</span>`;
         } else {
-          return `<span class="action-badge" style="background:#713f12;color:#fde68a">⏰ ${channel} overdue</span>`;
+          return `<span class="action-badge" style="background:#713f12;color:#fde68a">⏰ ${channel} overdue${reviewTag}</span>`;
         }
+      }
+
+      // Suspicious + no outreach yet — show review badge
+      if (p.is_suspicious || (p.ml_action && p.ml_action.includes('HUMAN'))) {
+        return '<span class="action-badge" style="background:#7f1d1d;color:#fca5a5;cursor:pointer" onclick="showAlerts()">👁 Needs Review</span>';
       }
 
       // Hard method dead — needs different payment method
