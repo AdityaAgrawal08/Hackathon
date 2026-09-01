@@ -403,7 +403,8 @@ export async function processFailedPayment(
   if (!isSuspicious) {
     // Immediate outreach via primary channels (Email + SMS only, no WhatsApp/Voice)
     // Build recovery URL with product info so customer's cart is restored
-    const baseUrl = process.env.PUBLIC_BASE_URL || process.env.BASE_URL || `http://localhost:${process.env.PORT || "3000"}`;
+    const baseUrl = (process.env.PUBLIC_BASE_URL || process.env.BASE_URL || "").replace(/\/$/, "")
+      || (process.env.NODE_ENV === "test" ? "http://localhost:3000" : `http://localhost:${process.env.PORT || "3000"}`);
     const recoveryUrl = new URL(`/recover/${eventId}`, baseUrl);
     if (input.productName) {
       // Map product name back to product ID
