@@ -180,10 +180,10 @@
       </div>
     </div>
 
-    <!-- Failed Transactions Table -->
+    <!-- Failed Transactions Table (customer-centric) -->
     <div style="margin-bottom:24px;">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
-        <h2 style="font-size:18px;font-weight:600;color:#ef4444;">Failed Transactions <span id="failed-count" style="font-size:14px;color:#64748b;font-weight:400;"></span></h2>
+        <h2 style="font-size:18px;font-weight:600;color:#ef4444;">Failed Payments <span id="failed-count" style="font-size:14px;color:#64748b;font-weight:400;"></span></h2>
         <div style="display:flex;gap:8px;">
           <select class="filter-select" id="method-filter" onchange="applyFilters()">
             <option value="all">All Methods</option>
@@ -198,14 +198,14 @@
         <table>
           <thead>
             <tr>
-              <th>Time</th>
               <th>Customer</th>
+              <th>Contact</th>
               <th>Product</th>
               <th>Amount</th>
               <th>Method</th>
               <th>What Happened</th>
-              <th>Retries</th>
-              <th>AI Action</th>
+              <th>Informed</th>
+              <th>Action</th>
             </tr>
           </thead>
           <tbody id="failed-body"></tbody>
@@ -433,22 +433,11 @@
     }
 
     function getFailureReason(p) {
-      if (p.status === 'captured') return '<span style="color:#86efac">Payment received ✓</span>';
-      const parts = [];
-      // Show actual error description from Razorpay
-      if (p.failure_description) {
-        parts.push(escapeHtml(p.failure_description));
-      }
-      // Always show the error code as context (e.g., "insufficient_funds")
-      if (p.failure_code) {
-        const mapped = FAILURE_REASONS[p.failure_code.toLowerCase()];
-        if (mapped && !p.failure_description) {
-          parts.push(mapped);
-        } else if (p.failure_code) {
-          parts.push(`<span style="color:#94a3b8;font-size:0.85em">[${p.failure_code}]</span>`);
-        }
-      }
-      if (parts.length > 0) return parts.join(' ');
+      if (p.status === 'captured') return '<span style="color:#86efac">Payment received</span>';
+      // Use the vendor message from error catalog — concise, operational, no raw codes
+      const catalogEntry = FAILURE_REASONS[(p.failure_code || '').toLowerCase()];
+      if (catalogEntry) return escapeHtml(catalogEntry);
+      if (p.failure_description) return escapeHtml(p.failure_description);
       if (p.failure_reason) return escapeHtml(p.failure_reason);
       return 'Payment failed';
     }
@@ -520,15 +509,22 @@
       const methodDetail = p.payment_method === 'card' ? `${p.card_network || ''} ${p.card_type || ''} ****${p.card_last4 || ''}` :
                           p.payment_method === 'upi' ? (p.vpa || '—') :
                           p.payment_method === 'netbanking' ? (p.bank_code || '—') : '—';
+      const failureReason = getFailureReason(p);
+      const informed = p.outreach_dispatched ? 'Yes — customer has been notified' : 'No — customer has not been informed';
+      const retryLink = p.status === 'failed' ? `<a href="/recover/${p.id}?class=${p.failure_class || 'UNKNOWN'}&code=${p.failure_code || ''}&reason=${encodeURIComponent(failureReason)}&product=${p.product_name || ''}&productName=${encodeURIComponent(p.product_name || '')}" target="_blank" style="color:#60a5fa;text-decoration:underline;font-size:13px;">Open Pay Again page</a>` : '';
       content.innerHTML = `
+        <div style="grid-column:span 4;margin-bottom:12px;">
+          <div style="font-size:11px;color:#64748b;text-transform:uppercase;">What Happened</div>
+          <div style="font-size:14px;color:#e2e8f0;font-weight:500;margin-top:4px;">${failureReason}</div>
+        </div>
         <div><div style="font-size:11px;color:#64748b;text-transform:uppercase;">Name</div><div style="font-size:14px;color:#e2e8f0;font-weight:500;">${escapeHtml(p.customer_name || '—')}</div></div>
-        <div><div style="font-size:11px;color:#64748b;text-transform:uppercase;">Phone</div><div style="font-size:14px;color:#e2e8f0;font-weight:500;">${escapeHtml(p.customer_phone || p.razorpay_contact || '—')}</div></div>
-        <div><div style="font-size:11px;color:#64748b;text-transform:uppercase;">Email</div><div style="font-size:14px;color:#e2e8f0;font-weight:500;">${escapeHtml(p.customer_email || p.razorpay_email || '—')}</div></div>
+        <div><div style="font-size:11px;color:#64748b;text-transform:uppercase;">Email</div><div style="font-size:14px;color:#e2e8f0;font-weight:500;">${escapeHtml(p.customer_email || '—')}</div></div>
+        <div><div style="font-size:11px;color:#64748b;text-transform:uppercase;">Phone</div><div style="font-size:14px;color:#e2e8f0;font-weight:500;">${escapeHtml(p.customer_phone || '—')}</div></div>
         <div><div style="font-size:11px;color:#64748b;text-transform:uppercase;">Payment Method</div><div style="font-size:14px;color:#e2e8f0;font-weight:500;">${escapeHtml(methodDetail)}</div></div>
-        <div><div style="font-size:11px;color:#64748b;text-transform:uppercase;">Total Attempts</div><div style="font-size:14px;color:#e2e8f0;font-weight:500;">${p.total_attempts || 0}</div></div>
-        <div><div style="font-size:11px;color:#64748b;text-transform:uppercase;">Successes</div><div style="font-size:14px;color:#86efac;font-weight:500;">${p.total_successes || 0}</div></div>
-        <div><div style="font-size:11px;color:#64748b;text-transform:uppercase;">Failures</div><div style="font-size:14px;color:#fca5a5;font-weight:500;">${p.total_failures || 0}</div></div>
-        <div><div style="font-size:11px;color:#64748b;text-transform:uppercase;">Success Rate</div><div style="font-size:14px;color:#e2e8f0;font-weight:500;">${(p.total_attempts || 0) > 0 ? (((p.total_successes || 0) / (p.total_attempts || 1)) * 100).toFixed(0) : 0}%</div></div>
+        <div><div style="font-size:11px;color:#64748b;text-transform:uppercase;">Amount</div><div style="font-size:14px;color:#e2e8f0;font-weight:500;">${formatINR(p.amount_paise)}</div></div>
+        <div><div style="font-size:11px;color:#64748b;text-transform:uppercase;">Customer Informed</div><div style="font-size:14px;color:${p.outreach_dispatched ? '#86efac' : '#fca5a5'};font-weight:500;">${informed}</div></div>
+        <div><div style="font-size:11px;color:#64748b;text-transform:uppercase;">Recommended Action</div><div style="font-size:14px;color:#e2e8f0;font-weight:500;">${getActionBadge(p) || '—'}</div></div>
+        <div><div style="font-size:11px;color:#64748b;text-transform:uppercase;">Recovery Link</div><div style="font-size:14px;margin-top:4px;">${retryLink || '—'}</div></div>
       `;
       el.style.display = 'block';
     }
@@ -540,18 +536,22 @@
       countEl.textContent = `(${data.length})`;
       if (data.length === 0) { tbody.innerHTML = ''; empty.style.display = 'block'; return; }
       empty.style.display = 'none';
-      tbody.innerHTML = data.map(p => `
+      tbody.innerHTML = data.map(p => {
+        const contact = p.customer_email || p.customer_phone || '—';
+        const informed = p.outreach_dispatched ? '<span style="color:#86efac">Yes</span>' : '<span style="color:#64748b">No</span>';
+        const action = getActionBadge(p);
+        return `
         <tr style="cursor:pointer" onclick='showCustomerDetails(${JSON.stringify(p).replace(/'/g, "&#39;")})'>
-          <td>${formatTime(p.created_at_utc)}</td>
-          <td>${escapeHtml(p.customer_name || '—')}</td>
+          <td><strong>${escapeHtml(p.customer_name || '—')}</strong></td>
+          <td style="font-size:12px;color:#94a3b8">${escapeHtml(contact)}</td>
           <td>${escapeHtml(p.product_name || '—')}</td>
           <td><strong>${formatINR(p.amount_paise)}</strong></td>
           <td>${getMethodHTML(p)}</td>
           <td><div class="failure-reason">${getFailureReason(p)}</div></td>
-          <td>${(p.retry_count || 0) > 0 ? '<span style="color:#f59e0b">#' + (p.retry_count + 1) + '</span>' : '#1'}</td>
-          <td>${getActionBadge(p)}</td>
-        </tr>
-      `).join('');
+          <td>${informed}</td>
+          <td>${action}</td>
+        </tr>`;
+      }).join('');
     }
 
     function renderSuccess(data) {
@@ -589,20 +589,20 @@
           <div class="stat-card failed">
             <div class="stat-label">Failed Payments</div>
             <div class="stat-value red">${failed}</div>
-            <div class="stat-sub">transactions</div>
+            <div class="stat-sub">need attention</div>
           </div>
           <div class="stat-card success">
-            <div class="stat-label">Successful</div>
+            <div class="stat-label">Recovered</div>
             <div class="stat-value green">${success}</div>
-            <div class="stat-sub">transactions</div>
+            <div class="stat-sub">successfully paid</div>
           </div>
           <div class="stat-card lost">
-            <div class="stat-label">Net Revenue Lost</div>
+            <div class="stat-label">Revenue at Risk</div>
             <div class="stat-value yellow">${formatINR(Math.max(0, netLost))}</div>
-            <div class="stat-sub">lost − recovered</div>
+            <div class="stat-sub">failed amount</div>
           </div>
           <div class="stat-card recovered">
-            <div class="stat-label">Recovered</div>
+            <div class="stat-label">Revenue Recovered</div>
             <div class="stat-value blue">${formatINR(data.recoveredPaise || 0)}</div>
             <div class="stat-sub">via ARBITER</div>
           </div>

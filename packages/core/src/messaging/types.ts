@@ -30,6 +30,8 @@ export interface OutreachPayload {
   language?: "EN" | "HI" | string;
   action?: string;
   rawErrorReason?: string;
+  customerMessage?: string;
+  vendorMessage?: string;
   scheduledForUtc?: string;
   method?: "card" | "upi" | "netbanking" | "wallet";
   last4?: string;

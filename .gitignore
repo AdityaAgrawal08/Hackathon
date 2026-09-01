@@ -49,3 +49,5 @@ arbiter.sqlite-shm
 !.vscode/extensions.json
 :memory:-shm
 :memory:-wal
+:memory:-shm
+:memory:-wal

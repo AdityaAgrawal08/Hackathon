@@ -10,6 +10,7 @@ import { isoUtc, paise, formatINR } from "../packages/shared/src/index.js";
 import { classifyByCode, computeFeatures, scoreWithArtifact, DEFAULT_16D_MODEL, assessCredibility } from "../packages/ml/src/index.js";
 import { decide, defaultPolicy, type DecideOutput, type FailureClassId } from "../packages/core/src/decide/index.js";
 import { OutreachRouter, type OutreachChannel, type OutreachPayload, type ProviderDispatchResult } from "../packages/core/src/messaging/index.js";
+import { getErrorEntry, getCustomerMessage, getVendorMessage, getFailureClass as getCatalogFailureClass } from "../packages/core/src/error-catalog.js";
 
 export interface Product {
   id: string;
@@ -262,84 +263,63 @@ export async function processFailedPayment(
   });
 
   if (existingRow.rows.length > 0) {
-    // Check if this is the webhook arriving after client-side failure (same event, different source)
-    // vs. an actual customer retry (different attempt entirely)
     const existingPaymentId = String(existingRow.rows[0].razorpay_payment_id || "");
     const newPaymentId = String(input.razorpayPaymentId || "");
     const existingIsClientSide = existingPaymentId.startsWith("pay_client_");
     const newIsClientSide = newPaymentId.startsWith("pay_client_");
     const isSameEventDifferentSource = existingIsClientSide !== newIsClientSide;
 
-    // Different order_id means a genuinely new attempt (customer got a new order link)
     const existingOrderId = String(existingRow.rows[0].razorpay_order_id || "");
     const isNewOrder = existingOrderId && input.razorpayOrderId && existingOrderId !== input.razorpayOrderId;
 
-    // RETRY: Update existing failed row with new method, new error
-    const existingId = String(existingRow.rows[0].id);
-    const existingRetryCount = Number(existingRow.rows[0].retry_count || 0);
+    // NEW RETRY (different order): Treat as a completely new transaction — INSERT new row, dispatch outreach
+    // Same-event webhook fill-in or same-order update: UPDATE existing row, return early (no outreach)
+    if (!isNewOrder) {
+      const existingId = String(existingRow.rows[0].id);
+      const existingRetryCount = Number(existingRow.rows[0].retry_count || 0);
+      const newRetryCount = isSameEventDifferentSource ? 0 : existingRetryCount + 1;
 
-    // Only increment retry_count if this is an ACTUAL customer retry (different attempt)
-    // NOT when the webhook is filling in real data for the same client-side failure
-    // NOT when it's a completely new order (different order = first attempt, not a retry)
-    const newRetryCount = isSameEventDifferentSource ? 0 : isNewOrder ? 0 : existingRetryCount + 1;
+      await client.execute({
+        sql: `UPDATE live_payment_events SET
+          razorpay_payment_id = ?, razorpay_order_id = ?,
+          failure_code = ?, failure_description = ?, failure_step = ?, failure_source = ?, failure_reason = ?,
+          failure_class = ?, ml_probability = ?, ml_action = ?,
+          payment_method = ?, card_last4 = ?, card_network = ?, card_issuer = ?, card_type = ?,
+          vpa = ?, bank_code = ?,
+          retry_count = ?,
+          created_at_utc = ?
+          WHERE id = ?`,
+        args: [
+          input.razorpayPaymentId, input.razorpayOrderId,
+          input.failureCode, input.failureDescription, input.failureStep, input.failureSource, input.failureReason,
+          failureClass, probability, decideOutput.chosen.action,
+          input.paymentMethod || "unknown", input.cardLast4 || null, input.cardNetwork || null,
+          input.cardIssuer || null, input.cardType || null,
+          input.vpa || null, input.bankCode || null,
+          newRetryCount, nowUtc, existingId,
+        ],
+      });
+      console.log(`[Workflow] ${isSameEventDifferentSource ? 'Webhook fill-in' : 'Update'}: event ${existingId} (retry #${newRetryCount})`);
 
-    await client.execute({
-      sql: `UPDATE live_payment_events SET
-        razorpay_payment_id = ?,
-        razorpay_order_id = ?,
-        failure_code = ?, failure_description = ?, failure_step = ?, failure_source = ?, failure_reason = ?,
-        failure_class = ?, ml_probability = ?, ml_action = ?,
-        payment_method = ?, card_last4 = ?, card_network = ?, card_issuer = ?, card_type = ?,
-        vpa = ?, bank_code = ?,
-        retry_count = ?,
-        created_at_utc = ?
-        WHERE id = ?`,
-      args: [
-        input.razorpayPaymentId,
-        input.razorpayOrderId,
-        input.failureCode, input.failureDescription, input.failureStep, input.failureSource, input.failureReason,
-        failureClass, probability, decideOutput.chosen.action,
-        input.paymentMethod || "unknown", input.cardLast4 || null, input.cardNetwork || null,
-        input.cardIssuer || null, input.cardType || null,
-        input.vpa || null, input.bankCode || null,
-        newRetryCount,
-        nowUtc,
-        existingId,
-      ],
-    });
-    console.log(`[Workflow] ${isSameEventDifferentSource ? 'Webhook fill-in' : 'Retry'}: updated event ${existingId} (retry #${newRetryCount}) for order ${input.razorpayOrderId}`);
+      await client.execute({
+        sql: `UPDATE customer_profiles SET
+          total_attempts = total_attempts + 1, total_failures = total_failures + 1,
+          last_failure_code = ?, last_failure_at_utc = ?, flagged_as_suspicious = ?, risk_score_bp = MAX(risk_score_bp, ?)
+          WHERE id = ?`,
+        args: [input.failureCode, nowUtc, isSuspicious ? 1 : 0, isSuspicious ? 3000 : 0, input.customerProfileId],
+      });
 
-    // 8. Update customer profile
-    await client.execute({
-      sql: `UPDATE customer_profiles SET
-        total_attempts = total_attempts + 1,
-        total_failures = total_failures + 1,
-        last_failure_code = ?,
-        last_failure_at_utc = ?,
-        flagged_as_suspicious = ?,
-        risk_score_bp = MAX(risk_score_bp, ?)
-        WHERE id = ?`,
-      args: [
-        input.failureCode,
-        nowUtc,
-        isSuspicious ? 1 : 0,
-        isSuspicious ? 3000 : 0,
-        input.customerProfileId,
-      ],
-    });
-
-    return {
-      eventId: existingId,
-      failureClass,
-      action: decideOutput.chosen.action,
-      probability,
-      outreachResults: [],
-      isSuspicious,
-      suspicionReasons,
-    };
+      // NO outreach for same-event updates — this is a webhook filling in data for an already-tracked failure
+      return {
+        eventId: existingId, failureClass, action: decideOutput.chosen.action, probability,
+        isSuspicious, suspicionReasons,
+      };
+    }
+    // isNewOrder=true: fall through to INSERT below (new independent transaction)
+    console.log(`[Workflow] New retry order ${input.razorpayOrderId}: creating new transaction (original was ${existingRow.rows[0].id})`);
   }
 
-  // FIRST ATTEMPT: Insert new row
+  // FIRST ATTEMPT / NEW RETRY ORDER: Insert new row
   await client.execute({
     sql: `INSERT INTO live_payment_events
       (id, razorpay_payment_id, razorpay_order_id, customer_profile_id, product_name, amount_paise,
@@ -465,6 +445,8 @@ export async function processFailedPayment(
       language: "EN",
       rawErrorReason: input.failureCode,
       instrumentDescription: input.failureDescription,
+      customerMessage: getCustomerMessage(input.failureCode, input.failureDescription),
+      vendorMessage: getVendorMessage(input.failureCode, input.failureDescription),
       // Payment method details for personalized outreach
       method: input.paymentMethod || "",
       last4: input.cardLast4 || "",

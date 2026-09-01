@@ -71,21 +71,19 @@ export class BrevoEmailProvider implements OutreachProvider {
     const subject =
       language === "HI"
         ? `Payment Update: ${this.config.senderName} (${formattedAmount})`
-        : `Action Required: Subscription Payment for ${this.config.senderName} (${formattedAmount})`;
+        : `Payment could not be completed (${formattedAmount})`;
 
-    // Build heading from ACTUAL Razorpay error — not inferred from method
-    let methodSpecificText = "";
-    if (payload.rawErrorReason || payload.instrumentDescription) {
-      const errCode = payload.rawErrorReason || "PAYMENT_FAILED";
-      const errDesc = payload.instrumentDescription || "Payment could not be processed";
-      // Show the actual Razorpay error: "Payment failed — <description> [CODE]"
-      methodSpecificText = `Payment failed — ${errDesc} [${errCode}]`;
-    } else if (payload.method === "card" && payload.network && payload.last4) {
-      methodSpecificText = `Your ${payload.network} card ending in ${payload.last4} was declined`;
-    } else if (payload.method === "upi" && payload.vpa) {
-      methodSpecificText = `Your UPI payment (${payload.vpa}) was declined`;
-    } else if (payload.method === "netbanking" && payload.bank) {
-      methodSpecificText = `Your ${payload.bank} netbanking payment was declined`;
+    // Use customerMessage from error catalog — concise, actionable, no raw codes
+    let methodSpecificText = payload.customerMessage || "";
+    if (!methodSpecificText && payload.instrumentDescription) {
+      // Fallback: method-specific text when no catalog message available
+      if (payload.method === "card" && payload.network && payload.last4) {
+        methodSpecificText = `Your ${payload.network} card ending in ${payload.last4} was declined`;
+      } else if (payload.method === "upi" && payload.vpa) {
+        methodSpecificText = `Your UPI payment (${payload.vpa}) was declined`;
+      } else if (payload.method === "netbanking" && payload.bank) {
+        methodSpecificText = `Your ${payload.bank} netbanking payment was declined`;
+      }
     }
 
     const messageText = escapeHtml(rendered?.content || `Your payment of ${formattedAmount} needs attention.`);
@@ -98,12 +96,12 @@ export class BrevoEmailProvider implements OutreachProvider {
     <h1 style="color: #ffffff; margin: 0; font-size: 20px; letter-spacing: 1px;">ARBITER RECOVERY</h1>
   </div>
   <div style="background: #ffffff; padding: 32px; border: 1px solid #e2e8f0; border-top: none; border-radius: 0 0 8px 8px;">
-    <h2 style="font-size: 18px; color: #0f172a; margin-top: 0;">Payment Recovery Notice</h2>
-    ${methodSpecificText ? `<p style="font-size: 16px; color: #dc2626; font-weight: bold; margin: 0 0 12px 0;">${escapeHtml(methodSpecificText)}</p>` : ""}
-    <p style="font-size: 15px; color: #475569;">${messageText}</p>
+    <h2 style="font-size: 18px; color: #0f172a; margin-top: 0;">Payment Update</h2>
+    ${methodSpecificText ? `<p style="font-size: 15px; color: #dc2626; font-weight: bold; margin: 0 0 12px 0;">${escapeHtml(methodSpecificText)}</p>` : ""}
+    <p style="font-size: 15px; color: #475569;">Please try again using a different payment method, or retry after a few minutes.</p>
     <div style="margin: 32px 0; text-align: center;">
       <a href="${escapeHtml(recoveryUrl)}" style="background: #2563eb; color: #ffffff; padding: 14px 28px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">
-        Complete Payment via UPI / Card (${formattedAmount})
+        Pay Again (${formattedAmount})
       </a>
     </div>
 
