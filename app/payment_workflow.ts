@@ -250,14 +250,15 @@ export async function processFailedPayment(
   const isSuspicious = credResult.isSuspicious;
 
   // 7. Log to live_payment_events with ALL Razorpay webhook fields
-  // Dedup: same customer + same order = UPDATE existing row (retry), not INSERT new row
+  // Dedup: same customer + same product = UPDATE existing row (retry), not INSERT new row
+  // (order_id changes on every retry since recover.html creates new orders)
   const eventId = `evt_${nowMs}_${createHash("sha256").update(`${input.razorpayPaymentId}${nowMs}`).digest("hex").slice(0, 8)}`;
 
   const existingRow = await client.execute({
     sql: `SELECT id, retry_count FROM live_payment_events
-          WHERE customer_profile_id = ? AND razorpay_order_id = ? AND status = 'failed'
+          WHERE customer_profile_id = ? AND product_name = ? AND status = 'failed'
           ORDER BY created_at_utc DESC LIMIT 1`,
-    args: [input.customerProfileId, input.razorpayOrderId],
+    args: [input.customerProfileId, input.productName],
   });
 
   if (existingRow.rows.length > 0) {
@@ -267,6 +268,7 @@ export async function processFailedPayment(
     await client.execute({
       sql: `UPDATE live_payment_events SET
         razorpay_payment_id = ?,
+        razorpay_order_id = ?,
         failure_code = ?, failure_description = ?, failure_step = ?, failure_source = ?, failure_reason = ?,
         failure_class = ?, ml_probability = ?, ml_action = ?,
         payment_method = ?, card_last4 = ?, card_network = ?, card_issuer = ?, card_type = ?,
@@ -276,9 +278,10 @@ export async function processFailedPayment(
         WHERE id = ?`,
       args: [
         input.razorpayPaymentId,
+        input.razorpayOrderId,
         input.failureCode, input.failureDescription, input.failureStep, input.failureSource, input.failureReason,
         failureClass, probability, decideOutput.chosen.action,
-        input.paymentMethod || null, input.cardLast4 || null, input.cardNetwork || null,
+        input.paymentMethod || "unknown", input.cardLast4 || null, input.cardNetwork || null,
         input.cardIssuer || null, input.cardType || null,
         input.vpa || null, input.bankCode || null,
         existingRetryCount + 1,
@@ -352,7 +355,7 @@ export async function processFailedPayment(
       0, // vendor_notified — false at INSERT time, set to 1 only when vendor is actually notified
       nowUtc,
       // New Razorpay webhook fields
-      input.paymentMethod || null,
+      input.paymentMethod || "unknown",
       input.cardLast4 || null,
       input.cardNetwork || null,
       input.cardIssuer || null,
@@ -540,13 +543,14 @@ export async function recordSuccessfulPayment(
   const nowUtc = isoUtc(params.nowMs);
   const eventId = `evt_${params.nowMs}_${createHash("sha256").update(`${params.razorpayPaymentId}${params.nowMs}`).digest("hex").slice(0, 8)}`;
 
-  // Step 7: If customer had a failed payment for this order, UPDATE it to 'captured'
+  // Step 7: If customer had a failed payment for this product, UPDATE it to 'captured'
   // (moves entry from failed view to successful view — no duplicate row)
+  // Dedup key: customer + product (not order_id, since retry creates new orders)
   const existingFailed = await client.execute({
     sql: `SELECT id FROM live_payment_events
-          WHERE customer_profile_id = ? AND razorpay_order_id = ? AND status = 'failed'
+          WHERE customer_profile_id = ? AND product_name = ? AND status = 'failed'
           ORDER BY created_at_utc DESC LIMIT 1`,
-    args: [params.customerProfileId, params.razorpayOrderId],
+    args: [params.customerProfileId, params.productName],
   });
 
   if (existingFailed.rows.length > 0) {
@@ -555,13 +559,12 @@ export async function recordSuccessfulPayment(
       sql: `UPDATE live_payment_events SET
         status = 'captured',
         razorpay_payment_id = ?,
+        razorpay_order_id = ?,
         failure_code = NULL, failure_description = NULL, failure_class = NULL,
         ml_action = 'PAYMENT_RECEIVED',
-        payment_method = NULL, card_last4 = NULL, card_network = NULL,
-        vpa = NULL, bank_code = NULL,
         retry_count = 0
         WHERE id = ?`,
-      args: [params.razorpayPaymentId, existingId],
+      args: [params.razorpayPaymentId, params.razorpayOrderId, existingId],
     });
     console.log(`[Workflow] Recovery: moved event ${existingId} from failed → captured for order ${params.razorpayOrderId}`);
 

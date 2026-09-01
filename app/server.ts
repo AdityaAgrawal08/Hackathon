@@ -511,6 +511,35 @@ app.post("/api/webhooks/razorpay", webhookLimiter, async (req: Request, res: Res
           } catch {}
         }
 
+        // Fallback: create/find customer from webhook payload fields
+        if (!customerProfileId && (payment.contact || payment.email)) {
+          try {
+            const phone = payment.contact || "";
+            const email = payment.email || "";
+            const name = payment.customer_name || "Customer";
+            const nowUtc = isoUtc(Date.now());
+
+            // Upsert customer by phone
+            if (phone) {
+              const existing = await dbClient.execute({
+                sql: `SELECT id FROM customer_profiles WHERE phone = ? LIMIT 1`,
+                args: [phone],
+              });
+              if (existing.rows.length > 0) {
+                customerProfileId = String(existing.rows[0].id);
+              } else {
+                const custId = `cust_${Date.now()}_${createHash("sha256").update(phone).digest("hex").slice(0, 8)}`;
+                await dbClient.execute({
+                  sql: `INSERT INTO customer_profiles (id, name, phone, email, created_at_utc) VALUES (?, ?, ?, ?, ?)`,
+                  args: [custId, name, phone, email, nowUtc],
+                });
+                customerProfileId = custId;
+              }
+            }
+            if (!productName) productName = "Unknown Product";
+          } catch {}
+        }
+
         if (customerProfileId) {
           try {
             // Extract ALL Razorpay webhook fields
@@ -606,9 +635,25 @@ app.get("/api/vendor/payments", async (_req: Request, res: Response) => {
   try {
     const result = await dbClient.execute({
       sql: `SELECT lpe.*, cp.name as customer_name, cp.phone as customer_phone, cp.email as customer_email,
-              lpe.payment_method, lpe.card_last4, lpe.card_network, lpe.card_issuer
+              lpe.payment_method, lpe.card_last4, lpe.card_network, lpe.card_issuer,
+              cp.total_attempts, cp.total_successes, cp.total_failures,
+              so_out.channel as next_outreach_channel, so_out.scheduled_at_utc as next_outreach_utc,
+              so_last.channel as last_outreach_channel, so_last.executed_at_utc as last_outreach_utc,
+              so_last.status as last_outreach_status
             FROM live_payment_events lpe
             JOIN customer_profiles cp ON cp.id = lpe.customer_profile_id
+            LEFT JOIN (
+              SELECT live_payment_event_id, channel, scheduled_at_utc
+              FROM scheduled_outreach
+              WHERE executed = 0
+              ORDER BY scheduled_at_utc ASC
+              LIMIT 1
+            ) so_out ON so_out.live_payment_event_id = lpe.id
+            LEFT JOIN scheduled_outreach so_last ON so_last.live_payment_event_id = lpe.id AND so_last.executed = 1
+              AND so_last.executed_at_utc = (
+                SELECT MAX(s2.executed_at_utc) FROM scheduled_outreach s2
+                WHERE s2.live_payment_event_id = lpe.id AND s2.executed = 1
+              )
             ORDER BY lpe.created_at_utc DESC LIMIT 50`,
       args: [],
     });
