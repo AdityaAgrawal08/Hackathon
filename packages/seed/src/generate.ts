@@ -9,7 +9,7 @@
  * clock, canonical JSON key order. Same seed ⇒ byte-identical fixtures.
  * Isolation (P1-B9): disjoint id prefixes trn_/demo_.
  */
-import { Rng, isoUtc } from "@arbiter/shared";
+import { Rng, isoUtc, clamp01 } from "@arbiter/shared";
 import {
   CLASS_SHARES,
   CODES_BY_CLASS,
@@ -230,8 +230,4 @@ export function baseRecoveryProb(
     case "UNKNOWN":
       return 0.04;
   }
-}
-
-function clamp01(x: number): number {
-  return Math.min(1, Math.max(0, x));
 }

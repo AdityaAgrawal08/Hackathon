@@ -101,8 +101,8 @@ describe("Aggressive Codebase Fuzzing & Invariant Audit", () => {
 
       for (const ec of edgeCases) {
         const feat = computeFeatures(ec);
-        expect(feat.values.length).toBe(23);
-        expect(FEATURE_NAMES.length).toBe(23);
+        expect(feat.values.length).toBe(22);
+        expect(FEATURE_NAMES.length).toBe(22);
 
         for (let i = 0; i < 16; i++) {
           const val = feat.values[i];
@@ -147,7 +147,7 @@ describe("Aggressive Codebase Fuzzing & Invariant Audit", () => {
 
     it("verifies mathematical attribution identity across 1,000 random vectors", () => {
       for (let trial = 0; trial < 1000; trial++) {
-        const randomValues = Array.from({ length: 23 }, () => (Math.random() - 0.5) * 10);
+        const randomValues = Array.from({ length: 22 }, () => (Math.random() - 0.5) * 10);
         const res = scoreWithArtifact(randomValues, DEFAULT_16D_MODEL);
 
         expect(res.probability).toBeGreaterThanOrEqual(0.0);
@@ -234,14 +234,14 @@ describe("Aggressive Codebase Fuzzing & Invariant Audit", () => {
       const twilio = new TwilioVoiceProvider();
       const res = await twilio.send(attackPayload);
       expect(res.status).toBe("QUEUED");
-      expect(res.costPaise).toBe(150);
+      expect(res.costPaise).toBe(800); // COST_VOICE_PAISE default
     });
 
     it("Gupshup WhatsApp Provider isolates tokens locally without PII leakage", async () => {
       const gupshup = new GupshupWhatsAppProvider();
       const res = await gupshup.send(attackPayload);
       expect(res.status).toBe("SENT");
-      expect(res.costPaise).toBe(80);
+      expect(res.costPaise).toBe(120); // COST_WHATSAPP_PAISE default
     });
   });
 });

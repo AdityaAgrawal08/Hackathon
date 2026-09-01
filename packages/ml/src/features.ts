@@ -9,7 +9,7 @@
  *    ground-truth salary day is NEVER an input (it exists only to score
  *    inference quality later).
  */
-import { hashSeed, LTV_NORM_PAISE } from "@arbiter/shared";
+import { hashSeed, LTV_NORM_PAISE, clamp01, clamp } from "@arbiter/shared";
 
 export const FEATURE_VERSION = "feat-v1";
 
@@ -39,7 +39,6 @@ export const FEATURE_NAMES = [
   "churn_risk_norm", // predicted churn risk, 0..1 (higher ⇒ more likely to leave)
   "days_since_last_attempt_norm", // min(days_since_last_attempt, 30) / 30
   "high_value_tier", // 1 if amount >= ₹10,000, else 0
-  "bank_rail_health_norm", // rolling health score of the bank rail (0..1, default 1.0)
   // ── Payment method features (from Razorpay webhook) ──
   "is_card", // 1 if payment method is card
   "is_upi", // 1 if payment method is UPI
@@ -66,13 +65,6 @@ export interface FeatureCustomerContext {
   optedOut?: boolean | null;
   /** §4.7 — fraction of prior promises-to-pay this customer kept (0..1). */
   promiseKeptRate?: number | null;
-}
-
-function clamp01(x: number): number {
-  return Math.min(1, Math.max(0, x));
-}
-function clamp(x: number, lo: number, hi: number): number {
-  return Math.min(hi, Math.max(lo, x));
 }
 
 /**
@@ -303,7 +295,6 @@ export function computeFeatures(input: FeatureInput): ComputedFeatures {
 
   const daysSinceLastAttempt = input.priorFailureAmountsPaise.length > 0 ? 1 : 0;
   const highValueTier = input.amountPaise >= 1_000_000 ? 1 : 0;
-  const bankRailHealth = 1.0;
 
   // ── Payment method features (decision-time, no leakage)
   const method = (input.paymentMethod || "").toLowerCase();
@@ -334,7 +325,6 @@ export function computeFeatures(input: FeatureInput): ComputedFeatures {
     ltv.churnRiskBp / 10_000,
     Math.min(1, daysSinceLastAttempt / 30),
     highValueTier,
-    bankRailHealth,
     // Payment method features
     isCard,
     isUpi,

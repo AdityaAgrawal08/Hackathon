@@ -2,11 +2,10 @@
  * Provider factory — picks the action provider based on environment.
  *
  * REAL_EXECUTION_MODE:
- *   - unset / "simulation" → simulationProvider (default, zero deps)
+ *   - unset / "simulation" → razorpay dry-run (default, zero deps)
  *   - "razorpay" / "dry-run" / "live" → razorpayProvider
  */
 import { ActionProvider } from "./types.js";
-import { simulationProvider } from "./simulation.js";
 import { razorpayProvider } from "./razorpay.js";
 
 function getProviderName(): string {
@@ -18,9 +17,7 @@ function getProviderName(): string {
 }
 
 export function getProvider(): ActionProvider {
-  const name = getProviderName();
-  if (name === "razorpay") return razorpayProvider;
-  return simulationProvider;
+  return razorpayProvider;
 }
 
 export function listProviders(): string[] {

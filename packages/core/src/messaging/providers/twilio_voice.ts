@@ -4,7 +4,8 @@
  * Initiates interactive voice recovery calls with Amazon Polly Hindi/English TTS,
  * <Gather> keypad detection, and instant Press-1 payment link dispatch.
  */
-import { formatINR, paise, isoUtc } from "@arbiter/shared";
+import { createHmac } from "node:crypto";
+import { formatINR, paise, isoUtc, COST_VOICE_PAISE, logger } from "@arbiter/shared";
 import type { OutreachPayload, OutreachProvider, ProviderDispatchResult } from "../types.js";
 import { renderComplianceMessage } from "../templates.js";
 
@@ -113,7 +114,7 @@ export class TwilioVoiceProvider implements OutreachProvider {
         channel: this.channel,
         externalMessageId: `twilio_sim_${payload.proposalId}`,
         status: "QUEUED",
-        costPaise: 150, // ₹1.50 per IVR recovery call
+        costPaise: COST_VOICE_PAISE, // Voice call cost from config
         dispatchedAtUtc: nowUtc,
         rawResponse: { simulated: true, twiml, gatherUrl },
       };
@@ -166,7 +167,15 @@ export class TwilioVoiceProvider implements OutreachProvider {
     }
   }
 
-  verifyWebhookSignature(_rawBody: string | Buffer, _signatureHeader: string): boolean {
-    return true; // Twilio signature verification
+  verifyWebhookSignature(rawBody: string | Buffer, signatureHeader: string): boolean {
+    const authToken = this.config.authToken;
+    if (!authToken) {
+      logger.warn({ msg: "Twilio auth token not configured, webhook verification skipped" });
+      return false;
+    }
+    // Twilio uses HMAC-SHA1 with URL encoding
+    const body = typeof rawBody === "string" ? rawBody : rawBody.toString("utf8");
+    const signature = createHmac("sha1", authToken).update(body).digest("base64");
+    return signature === signatureHeader;
   }
 }

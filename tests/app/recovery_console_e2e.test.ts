@@ -19,7 +19,7 @@ describe("Recovery Command Center & Customer Simulator E2E (Task 1.1 - 1.5)", ()
     expect(session.amountPaise).toBe(199900);
     expect(session.diagnosis.rootCause).toBe("INSUFFICIENT_FUNDS");
     expect(session.diagnosis.recommendedIntervention).toBe("RETRY_PAYDAY");
-    expect(session.features.values.length).toBe(23);
+    expect(session.features.values.length).toBe(22);
     expect(["RETRY_PAYDAY", "ALTERNATE_UPI_LINK", "RECOVER_WHATSAPP", "REMINDER_LINK"]).toContain(
       session.decideOutput.chosen.action,
     );

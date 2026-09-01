@@ -1,5 +1,5 @@
 import type { Client } from "@libsql/client";
-import { isoUtc, isWithinQuietHours, paise } from "@arbiter/shared";
+import { isoUtc, isWithinQuietHours, paise, logger } from "@arbiter/shared";
 import {
   decide,
   loadPolicyFile,
@@ -16,7 +16,7 @@ import { diagnoseFailure } from "@arbiter/core/diagnosis";
 import { simulatedRailHealth } from "@arbiter/core/ingest";
 import { MAX_EDIT_VERSIONS } from "@arbiter/core/constants";
 import type { ActionId } from "@arbiter/core/decide";
-import { computeFeatures } from "./features.js";
+import { computeFeatures, FEATURE_VERSION } from "./features.js";
 import { saveFeatures, loadFeatureVectors } from "./features_store.js";
 import { scoreWithArtifact } from "./predict.js";
 import { recordPromiseToPay, queryPromiseKeptRate } from "./promise_store.js";
@@ -216,8 +216,8 @@ export async function processEvent(
       sql: `INSERT INTO proposals
               (id, event_id, customer_id, model_version_id, policy_version, action_json,
                ev_paise, confidence, attributions_json, narrative, state, state_version,
-               dedupe_key, created_at_utc, updated_at_utc)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, 0, ?, ?, ?)
+               dedupe_key, created_at_utc, updated_at_utc, feature_version)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, 0, ?, ?, ?, ?)
             ON CONFLICT(dedupe_key) DO NOTHING`,
       args: [
         proposalId,
@@ -233,6 +233,7 @@ export async function processEvent(
         dedupeKey,
         nowIso,
         nowIso,
+        FEATURE_VERSION,
       ],
     });
   } catch (err) {
@@ -393,6 +394,7 @@ export async function editProposal(
     model_version_id: string;
     policy_version: string;
     state: string;
+    feature_version: string;
   };
   if (prop.state !== "AWAITING_APPROVAL") {
     return { ok: false, reason: "NOT_AWAITING_APPROVAL" };
@@ -438,11 +440,15 @@ export async function editProposal(
       promiseKeptRate: await queryPromiseKeptRate(client, prop.customer_id),
     },
   });
-  if (
-    recomputed.values.length !== frozenValues.length ||
-    recomputed.values.some((v, i) => v !== frozenValues[i])
-  ) {
-    return { ok: false, reason: "MISSING_FEATURES" };
+  // C-006: When feature version differs, skip frozen/recomputed comparison —
+  // the zero-padded old vector won't match real recomputed values.
+  if (prop.feature_version === FEATURE_VERSION) {
+    if (
+      recomputed.values.length !== frozenValues.length ||
+      recomputed.values.some((v, i) => v !== frozenValues[i])
+    ) {
+      return { ok: false, reason: "MISSING_FEATURES" };
+    }
   }
 
   const score = scoreWithArtifact(recomputed.values, model);
@@ -508,8 +514,8 @@ export async function editProposal(
         sql: `INSERT INTO proposals
                 (id, event_id, customer_id, model_version_id, policy_version, action_json,
                  ev_paise, confidence, attributions_json, narrative, state, state_version,
-                 dedupe_key, created_at_utc, updated_at_utc)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, 0, ?, ?, ?)`,
+                 dedupe_key, created_at_utc, updated_at_utc, feature_version)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, 0, ?, ?, ?, ?)`,
         args: [
           newId,
           prop.event_id,
@@ -524,6 +530,7 @@ export async function editProposal(
           dedupeKey,
           nowIso,
           nowIso,
+          FEATURE_VERSION,
         ],
       });
       if ((ins.rowsAffected ?? 0) > 0) {
@@ -579,7 +586,7 @@ export async function editProposal(
             ],
           })
           .catch((err: unknown) => {
-            console.error("editProposal: failed to write EDIT_ORPHAN alarm:", (err as Error).message);
+            logger.error({ msg: "editProposal: failed to write EDIT_ORPHAN alarm", err });
           });
         throw err;
       }

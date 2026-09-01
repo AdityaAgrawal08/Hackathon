@@ -12,24 +12,18 @@
  *   - stopped ₹ (FAILED — stopping rules / policy refusals)
  *   - contacts made, wasted attempts, human escalations
  *   - audit-trail entry count (every step is logged)
+ *   - bootstrap 95% confidence intervals (B-003)
+ *   - cost-per-recovered-rupee metric (B-005)
  *
  * Every amount is integer paise; no float ever touches the measurement.
  */
 import type { Client } from "@libsql/client";
+import { paise, type Paise, hashSeed } from "@arbiter/shared";
+import { CONTACT_COST_PAISE } from "@arbiter/core/decide";
 import { processEvent } from "./pipeline.js";
 import { executeProposal } from "@arbiter/core/executor";
 import { diagnoseFailure } from "@arbiter/core/diagnosis";
-import { paise, type Paise, hashSeed } from "@arbiter/shared";
-
-/**
- * Deterministic control-arm outcome: given an event's predicted recovery
- * probability, decide if it would self-recover without intervention.
- * Uses a hash of the event ID for reproducibility — no RNG.
- */
-function controlOutcome(eventId: string, probability: number): "SUCCEEDED" | "FAILED" {
-  const draw = hashSeed(eventId + "|control") % 10_000;
-  return draw < Math.round(probability * 10_000) ? "SUCCEEDED" : "FAILED";
-}
+import { controlOutcome } from "./control_arm.js";
 
 export interface PerEventResult {
   eventId: string;
@@ -65,6 +59,12 @@ export interface BatchRecoveryReport {
   humanEscalations: number;
   auditTrailCount: number;
   perEvent: PerEventResult[];
+  /** B-003: Bootstrap 95% CI for recovery rate [low, high]. */
+  bootstrapCI95: { low: number; high: number } | null;
+  /** B-005: Cost per recovered rupee (total cost / recovered amount). */
+  costPerRecoveredPaise: number;
+  /** B-005: Total outreach cost in paise. */
+  totalOutreachCostPaise: number;
 }
 
 export interface RecoverBatchOptions {
@@ -97,6 +97,9 @@ export async function recoverBatch(
     humanEscalations: 0,
     auditTrailCount: 0,
     perEvent: [],
+    bootstrapCI95: null,
+    costPerRecoveredPaise: 0,
+    totalOutreachCostPaise: 0,
   };
 
   for (const eventId of eventIds) {
@@ -144,9 +147,8 @@ export async function recoverBatch(
       evRow.rows.length > 0 ? String(evRow.rows[0]!.failure_code) : "UNKNOWN_CODE";
 
     // 2b. Control-arm: what would happen with NO intervention?
-    // Uses the model's predicted probability for this event.
-    const probability = result.probability ?? 0;
-    const ctlOutcome = controlOutcome(eventId, probability);
+    //     Uses fixed historical baseline rates per failure class (not model-dependent).
+    const ctlOutcome = controlOutcome(eventId, failureCode);
     if (ctlOutcome === "SUCCEEDED") {
       report.controlRecoveredPaise += amountPaise;
     }
@@ -164,7 +166,18 @@ export async function recoverBatch(
 
     // 5. Measure (integer paise only) — every processed event counts.
     report.totalAtRiskPaise += amountPaise;
-    report.auditTrailCount += 2; // DECISION + DIAGNOSIS written by pipeline
+
+    // Query actual audit trail entries for this event (not hardcoded count — bug #A-011)
+    try {
+      const auditRow = await client.execute({
+        sql: `SELECT COUNT(*) as cnt FROM audit_trail WHERE event_id = ?`,
+        args: [eventId],
+      });
+      report.auditTrailCount += auditRow.rows.length > 0 ? Number(auditRow.rows[0]!.cnt) : 0;
+    } catch {
+      // audit_trail table may not exist in all test environments
+      report.auditTrailCount += 0;
+    }
 
     let outcome: PerEventResult["outcome"] = null;
     if (proposalState === "AWAITING_APPROVAL") {
@@ -197,8 +210,12 @@ export async function recoverBatch(
       } else {
         report.stoppedPaise += amountPaise;
       }
+    } else if (proposalState === "PROCESSING") {
+      // Intermediate state — not yet terminal; count as in-progress
+      outcome = null;
+      report.stoppedPaise += amountPaise;
     } else {
-      // Terminal/unknown state — stopped, not recovered.
+      // Terminal state (EXECUTED, FAILED, CANCELLED, etc.) — stopped, not recovered.
       outcome = "ERROR";
       report.stoppedPaise += amountPaise;
     }
@@ -217,5 +234,55 @@ export async function recoverBatch(
   // Incremental lift: true measured recovery above natural baseline.
   report.incrementalRecoveredPaise = report.recoveredPaise - report.controlRecoveredPaise;
 
+  // B-003: Bootstrap 95% confidence intervals for recovery rate.
+  if (report.processedCount > 0) {
+    report.bootstrapCI95 = bootstrapCI95(report.perEvent, 1000);
+  }
+
+  // B-005: Cost-per-recovered-rupee metric.
+  // Per-action costs from catalog (CONTACT_COST_PAISE from decide/catalog.ts)
+  let totalCostPaise = 0;
+  for (const evt of report.perEvent) {
+    if (evt.outcome === "SUCCEEDED" || evt.outcome === "AMBIGUOUS") {
+      totalCostPaise += CONTACT_COST_PAISE[evt.intervention as keyof typeof CONTACT_COST_PAISE] ?? 100;
+    }
+  }
+  report.totalOutreachCostPaise = totalCostPaise;
+  report.costPerRecoveredPaise = report.recoveredPaise > 0
+    ? Math.round((totalCostPaise / report.recoveredPaise) * 100)
+    : 0;
+
   return report;
+}
+
+/**
+ * B-003: Bootstrap 95% confidence interval for recovery rate.
+ * Resamples the per-event outcomes `iterations` times with replacement,
+ * computes the recovery rate for each sample, and returns the 2.5th/97.5th percentiles.
+ */
+export function bootstrapCI95(
+  perEvent: PerEventResult[],
+  iterations = 1000,
+): { low: number; high: number } {
+  const n = perEvent.length;
+  if (n === 0) return { low: 0, high: 0 };
+
+  const rates: number[] = [];
+  for (let iter = 0; iter < iterations; iter++) {
+    let recovered = 0;
+    for (let i = 0; i < n; i++) {
+      // Deterministic bootstrap: use hashSeed for sampling (no Math.random)
+      const idx = hashSeed(`bootstrap:${iter}:${i}`) % n;
+      if (perEvent[idx]!.outcome === "SUCCEEDED") recovered++;
+    }
+    rates.push(recovered / n);
+  }
+
+  rates.sort((a, b) => a - b);
+  const lowIdx = Math.floor(0.025 * rates.length);
+  const highIdx = Math.floor(0.975 * rates.length);
+  return {
+    low: Math.round(rates[lowIdx]! * 1000) / 10,
+    high: Math.round(rates[highIdx]! * 1000) / 10,
+  };
 }

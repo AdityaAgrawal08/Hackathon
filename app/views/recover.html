@@ -171,10 +171,17 @@
 
     const config = classConfig[failureClass] || classConfig['UNKNOWN'];
 
-    // Apply class-specific UI
+    // Apply class-specific UI — H-002: use customerMessage for heading when available (especially UNKNOWN)
     document.getElementById('main-icon').textContent = config.icon;
-    document.getElementById('main-title').textContent = config.title;
-    document.getElementById('main-subtitle').textContent = config.subtitle;
+    // H-002: If server supplied a customerMessage (failureReason), show it in the heading for UNKNOWN
+    // so the page is transaction-specific rather than generic "Payment Could Not Be Processed"
+    if (failureClass === 'UNKNOWN' && failureReason) {
+      document.getElementById('main-title').textContent = failureReason;
+      document.getElementById('main-subtitle').textContent = config.subtitle;
+    } else {
+      document.getElementById('main-title').textContent = config.title;
+      document.getElementById('main-subtitle').textContent = config.subtitle;
+    }
 
     const msgBox = document.getElementById('message-box');
     msgBox.className = 'message-box ' + config.cssClass;
@@ -324,8 +331,8 @@
               btn.textContent = 'Retry Payment Now';
             }
           } catch (e) {
-            document.getElementById('status').className = 'status status-success';
-            document.getElementById('status').textContent = 'Payment received. Confirmation pending.';
+            document.getElementById('status').className = 'status status-error';
+            document.getElementById('status').textContent = 'Connection issue. Please check your payment status before retrying.';
             btn.disabled = false;
             btn.textContent = 'Retry Payment Now';
           }
@@ -362,7 +369,7 @@
               error_step: err.step || '',
               error_source: err.source || '',
               error_reason: err.reason || '',
-              customerId: eventData ? eventData.customerId : '',
+              customerId: eventData ? eventData.customerProfileId : '',
               productId: eventData ? mapProductNameToId(eventData.productName) : 'prod_premium_plan',
               productName: eventData ? eventData.productName : 'Unknown',
               amountPaise: eventData ? eventData.amountPaise : 0,

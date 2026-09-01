@@ -16,19 +16,23 @@ import { fileURLToPath } from "node:url";
 if (!process.env.VITEST && existsSync(".env")) {
   try {
     process.loadEnvFile();
-    console.log("[Config] .env loaded successfully");
+    logger.info({ msg: "[Config] .env loaded successfully" });
   } catch (err) {
-    console.error("[Config] Failed to load .env:", (err as Error).message);
+    logger.error({ msg: "[Config] Failed to load .env", err: (err as Error).message });
   }
 } else if (!process.env.VITEST) {
-  console.log("[Config] No .env file found — using environment variables only");
+  logger.info({ msg: "[Config] No .env file found — using environment variables only" });
 }
 
-import { isoUtc, formatINR, paise } from "../packages/shared/src/index.js";
+import { isoUtc, formatINR, paise, logger } from "../packages/shared/src/index.js";
 import {
   runMigrations,
   RATE_LIMIT_WEBHOOKS_PER_MIN,
+  RATE_LIMIT_CHECKOUT_ORDERS_PER_MIN,
+  RATE_LIMIT_CHARGES_PER_MIN,
+  RATE_LIMIT_ADMIN_PER_MIN,
   DEFAULT_LOCAL_WEBHOOK_SECRET,
+  DEFAULT_LOCAL_ADMIN_SECRET,
 } from "../packages/core/src/index.js";
 
 import {
@@ -37,6 +41,7 @@ import {
   recordPromiseToPay,
   completeRecovery,
   getRecoveryResult,
+  runBatchBenchmark,
 } from "./recovery.js";
 
 import {
@@ -71,8 +76,8 @@ function getPublicBaseUrl(): string {
   if (isTest) return "http://localhost:3000";
   // In production, fail loudly if not configured
   if (isProduction) {
-    console.error("[Config] CRITICAL: PUBLIC_BASE_URL not set. Customer-facing links will use localhost.");
-    console.error("[Config] Set PUBLIC_BASE_URL=https://your-domain.com in your environment.");
+    logger.error({ msg: "[Config] CRITICAL: PUBLIC_BASE_URL not set. Customer-facing links will use localhost." });
+    logger.error({ msg: "[Config] Set PUBLIC_BASE_URL=https://your-domain.com in your environment." });
   }
   return `http://localhost:${PORT}`;
 }
@@ -80,7 +85,7 @@ function getPublicBaseUrl(): string {
 // Validate at startup
 const _startUrl = getPublicBaseUrl();
 if (isProduction && _startUrl.includes("localhost")) {
-  console.error("[Config] WARNING: PUBLIC_BASE_URL resolves to localhost in production mode.");
+  logger.error({ msg: "[Config] WARNING: PUBLIC_BASE_URL resolves to localhost in production mode." });
 }
 
 const dbPath = process.env.ARBITER_DB_PATH || "data/arbiter.sqlite";
@@ -99,13 +104,38 @@ outreachRouter.registerProvider(msg91Provider);
 const brevoKey = process.env.BREVO_API_KEY;
 const msg91Key = process.env.MSG91_AUTH_KEY;
 const msg91Template = process.env.MSG91_TEMPLATE_ID || process.env.MSG91_DLT_TEMPLATE_ID;
-console.log("[Providers] Brevo email:", brevoKey && !brevoKey.includes("xxxxxx") ? `CONFIGURED (${brevoKey.slice(0, 8)}...)` : "SIMULATED (no API key)");
-console.log("[Providers] MSG91 SMS:", msg91Key && !msg91Key.includes("xxxxxx") ? `CONFIGURED (${msg91Key.slice(0, 8)}...)` : "SIMULATED (no auth key)");
+logger.info({ msg: "[Providers] Brevo email:", brevoKey: brevoKey && !brevoKey.includes("xxxxxx") ? `CONFIGURED (${brevoKey.slice(0, 8)}...)` : "SIMULATED (no API key)" });
+logger.info({ msg: "[Providers] MSG91 SMS:", msg91Key: msg91Key && !msg91Key.includes("xxxxxx") ? `CONFIGURED (${msg91Key.slice(0, 8)}...)` : "SIMULATED (no auth key)" });
 if (msg91Template) {
-  console.log("[Providers] MSG91 template ID:", msg91Template, "— REAL mode");
+  logger.info({ msg: "[Providers] MSG91 template ID:", msg91Template: msg91Template, mode: "REAL" });
 }
 
-const webhookLimiter = rateLimit({ windowMs: 60_000, limit: RATE_LIMIT_WEBHOOKS_PER_MIN, standardHeaders: true });
+const webhookLimiter = rateLimit({ windowMs: 60_000, limit: RATE_LIMIT_WEBHOOKS_PER_MIN, standardHeaders: true, skip: () => isTest });
+const paymentLimiter = rateLimit({ windowMs: 60_000, limit: RATE_LIMIT_CHARGES_PER_MIN, standardHeaders: true, skip: () => isTest });
+const checkoutLimiter = rateLimit({ windowMs: 60_000, limit: RATE_LIMIT_CHECKOUT_ORDERS_PER_MIN, standardHeaders: true, skip: () => isTest });
+const adminLimiter = rateLimit({ windowMs: 60_000, limit: RATE_LIMIT_ADMIN_PER_MIN, standardHeaders: true, skip: () => isTest });
+const recoveryLimiter = rateLimit({ windowMs: 60_000, limit: RATE_LIMIT_CHARGES_PER_MIN, standardHeaders: true, skip: () => isTest });
+
+// G-002: Admin key enforcement — ENFORCE_ADMIN_KEY=true requires X-Admin-Key header
+const ENFORCE_ADMIN_KEY = String(process.env.ENFORCE_ADMIN_KEY ?? "false").toLowerCase() === "true";
+const ADMIN_SECRET_KEY = process.env.ADMIN_SECRET_KEY || DEFAULT_LOCAL_ADMIN_SECRET;
+
+function requireAdminKey(req: Request, res: Response, next: NextFunction): void {
+  if (!ENFORCE_ADMIN_KEY) {
+    next();
+    return;
+  }
+  const provided = String(req.headers["x-admin-key"] ?? req.headers["authorization"] ?? "");
+  const token = provided.startsWith("Bearer ") ? provided.slice(7) : provided;
+  // timingSafeEqual requires equal-length buffers — hash both first
+  const a = createHash("sha256").update(ADMIN_SECRET_KEY).digest();
+  const b = createHash("sha256").update(token).digest();
+  if (!timingSafeEqual(a, b)) {
+    res.status(401).json({ error: "Unauthorized: missing or invalid admin key" });
+    return;
+  }
+  next();
+}
 
 // Simplified human-readable error reasons — user sees this, not raw codes
 function getSimplifiedReason(code: string, failureClass: string): string {
@@ -132,12 +162,14 @@ const storeHtml = readFileSync(resolve(__dirname, "views/store.html"), "utf8");
 const dashboardHtml = readFileSync(resolve(__dirname, "views/dashboard.html"), "utf8");
 const recoverHtml = readFileSync(resolve(__dirname, "views/recover.html"), "utf8");
 const resultHtml = readFileSync(resolve(__dirname, "views/result.html"), "utf8");
+const batchReportHtml = readFileSync(resolve(__dirname, "views/batch_report.html"), "utf8");
 
 // ── Store Routes ─────────────────────────────────────────────────
 app.get("/", (_req, res) => { res.setHeader("Content-Type", "text/html"); res.send(storeHtml); });
 app.get("/store", (_req, res) => { res.setHeader("Content-Type", "text/html"); res.send(storeHtml); });
 app.get("/dashboard", (_req, res) => { res.setHeader("Content-Type", "text/html"); res.send(dashboardHtml); });
 app.get("/recover/:eventId", (_req, res) => { res.setHeader("Content-Type", "text/html"); res.send(recoverHtml); });
+app.get("/batch-report", (_req, res) => { res.setHeader("Content-Type", "text/html"); res.send(batchReportHtml); });
 
 // ── Get Products ─────────────────────────────────────────────────
 app.get("/api/products", (_req, res) => {
@@ -145,7 +177,7 @@ app.get("/api/products", (_req, res) => {
 });
 
 // ── Create Razorpay Order + Upsert Customer ─────────────────────
-app.post("/api/orders/create", async (req: Request, res: Response) => {
+app.post("/api/orders/create", checkoutLimiter, async (req: Request, res: Response) => {
   try {
     const { productId, customerName, customerPhone, customerEmail } = req.body;
     if (!productId || !customerName || !customerPhone || !customerEmail) {
@@ -199,7 +231,7 @@ app.post("/api/orders/create", async (req: Request, res: Response) => {
           if (rzpData?.id) orderId = rzpData.id;
         }
       } catch (err) {
-        console.warn("Razorpay order creation failed, using local order:", err);
+        logger.warn({ msg: "Razorpay order creation failed, using local order", err: err });
       }
     }
 
@@ -217,7 +249,7 @@ app.post("/api/orders/create", async (req: Request, res: Response) => {
 });
 
 // ── Verify Payment (called by frontend after Checkout.js success) ─
-app.post("/api/payments/verify", async (req: Request, res: Response) => {
+app.post("/api/payments/verify", paymentLimiter, async (req: Request, res: Response) => {
   try {
     const { razorpay_payment_id, razorpay_order_id, razorpay_signature, orderId } = req.body;
     if (!razorpay_payment_id || !razorpay_order_id || !razorpay_signature) {
@@ -228,8 +260,14 @@ app.post("/api/payments/verify", async (req: Request, res: Response) => {
     if (RZP_KEY_SECRET) {
       const payload = `${razorpay_order_id}|${razorpay_payment_id}`;
       const expected = createHmac("sha256", RZP_KEY_SECRET).update(payload).digest("hex");
-      if (!timingSafeEqual(Buffer.from(razorpay_signature), Buffer.from(expected))) {
-        return res.status(400).json({ error: "Invalid signature" });
+      try {
+        const sigBuf = Buffer.from(razorpay_signature, "hex");
+        const expBuf = Buffer.from(expected, "hex");
+        if (sigBuf.length !== expBuf.length || !timingSafeEqual(sigBuf, expBuf)) {
+          return res.status(400).json({ error: "Invalid signature" });
+        }
+      } catch {
+        return res.status(400).json({ error: "Invalid signature format" });
       }
     }
 
@@ -304,7 +342,7 @@ app.post("/api/payments/verify", async (req: Request, res: Response) => {
         bankCode,
       });
     } catch (err) {
-      console.error("Failed to record payment:", err);
+      logger.error({ msg: "Failed to record payment", err: err });
       return res.status(500).json({ error: "Failed to record payment" });
     }
 
@@ -325,7 +363,7 @@ app.post("/api/payments/verify", async (req: Request, res: Response) => {
 });
 
 // ── Client-Side Payment Failure (immediate redirect to recovery) ─
-app.post("/api/payments/failed", async (req: Request, res: Response) => {
+app.post("/api/payments/failed", paymentLimiter, async (req: Request, res: Response) => {
   try {
     const { razorpay_order_id, razorpay_payment_id, error_code, error_description, error_step, error_source, error_reason,
             customerId, productId, productName, amountPaise, paymentMethod } = req.body;
@@ -349,7 +387,7 @@ app.post("/api/payments/failed", async (req: Request, res: Response) => {
     });
     if (existingEvent.rows.length > 0) {
       const existingId = String(existingEvent.rows[0].id);
-      console.log(`[Payments] Dedup: payment ${paymentId} already has event ${existingId}`);
+      logger.info({ msg: `[Payments] Dedup: payment ${paymentId} already has event ${existingId}` });
       return res.json({
         eventId: existingId,
         failureClass: "UNKNOWN",
@@ -399,7 +437,7 @@ app.post("/api/payments/failed", async (req: Request, res: Response) => {
       });
       if (recentFailure.rows.length > 0) {
         const existingId = String(recentFailure.rows[0].id);
-        console.log(`[Payments] Client dedup: recent failure ${existingId} for order ${razorpay_order_id}`);
+        logger.info({ msg: `[Payments] Client dedup: recent failure ${existingId} for order ${razorpay_order_id}` });
         return res.json({
           eventId: existingId,
           failureClass: "UNKNOWN",
@@ -415,7 +453,7 @@ app.post("/api/payments/failed", async (req: Request, res: Response) => {
     const result = await processFailedPayment(dbClient, {
       razorpayPaymentId: paymentId,
       razorpayOrderId: razorpay_order_id,
-      amountPaise: amountPaise || 0,
+      amountPaise: validatedAmount,
       failureCode,
       failureDescription: error_description || `Payment failed: ${failureCode}`,
       failureStep: error_step || "payment_authorization",
@@ -442,7 +480,7 @@ app.post("/api/payments/failed", async (req: Request, res: Response) => {
       failureClass: result.failureClass,
       probability: result.probability,
       action: result.action,
-      amountPaise,
+      amountPaise: validatedAmount,
       productName,
     });
 
@@ -452,7 +490,7 @@ app.post("/api/payments/failed", async (req: Request, res: Response) => {
         eventId: result.eventId,
         customerProfileId: validCustomerId,
         reasons: result.suspicionReasons,
-        amountPaise,
+        amountPaise: validatedAmount,
         failureCode,
       });
     }
@@ -501,7 +539,7 @@ app.post("/api/webhooks/razorpay", webhookLimiter, async (req: Request, res: Res
     const sigBuf = Buffer.from(signature, "hex");
     const expBuf = Buffer.from(expectedSig, "hex");
     if (sigBuf.length !== expBuf.length || !timingSafeEqual(sigBuf, expBuf)) {
-      console.error("[Webhook] Signature verification failed — ACKing anyway per Razorpay best practice");
+      logger.error({ msg: "[Webhook] Signature verification failed — ACKing anyway per Razorpay best practice" });
     }
   }
 
@@ -571,7 +609,7 @@ app.post("/api/webhooks/razorpay", webhookLimiter, async (req: Request, res: Res
               amountPaise: payment.amount,
             });
           } catch (err) {
-            console.error("Failed to record successful payment:", err);
+            logger.error({ msg: "Failed to record successful payment", err: err });
           }
         }
       }
@@ -672,7 +710,7 @@ app.post("/api/webhooks/razorpay", webhookLimiter, async (req: Request, res: Res
               razorpayCreatedAt: payment.created_at || 0,
             }, outreachRouter);
 
-            console.log(`[Webhook] payment.failed processed: ${result.eventId} | method=${payment.method} | class=${result.failureClass} | action=${result.action}`);
+            logger.info({ msg: `[Webhook] payment.failed processed: ${result.eventId} | method=${payment.method} | class=${result.failureClass} | action=${result.action}` });
 
             // Broadcast to vendor dashboard
             broadcastSSE("global", {
@@ -687,7 +725,7 @@ app.post("/api/webhooks/razorpay", webhookLimiter, async (req: Request, res: Res
               cardLast4: card.last4,
               cardNetwork: card.network,
               amountPaise: payment.amount,
-              productName: payment.productName || "",
+              productName: productName || "",
             });
 
             if (result.isSuspicious) {
@@ -702,7 +740,7 @@ app.post("/api/webhooks/razorpay", webhookLimiter, async (req: Request, res: Res
               });
             }
           } catch (err) {
-            console.error("Failed to process failed payment:", err);
+            logger.error({ msg: "Failed to process failed payment", err: err });
           }
         }
       }
@@ -710,13 +748,13 @@ app.post("/api/webhooks/razorpay", webhookLimiter, async (req: Request, res: Res
 
     res.json({ received: true });
   } catch (err) {
-    console.error("Webhook processing error:", err);
+    logger.error({ msg: "Webhook processing error", err: err });
     res.status(200).json({ received: true }); // Always ACK webhooks
   }
 });
 
 // ── Vendor Dashboard API ─────────────────────────────────────────
-app.get("/api/vendor/payments", async (_req: Request, res: Response) => {
+app.get("/api/vendor/payments", adminLimiter, async (_req: Request, res: Response) => {
   try {
     // Customer-centric: show LATEST transaction per customer, not every transaction.
     // A customer who succeeded after retries appears in success list, not failed.
@@ -763,7 +801,7 @@ app.get("/api/vendor/payments", async (_req: Request, res: Response) => {
   }
 });
 
-app.get("/api/vendor/alerts", async (_req: Request, res: Response) => {
+app.get("/api/vendor/alerts", adminLimiter, async (_req: Request, res: Response) => {
   try {
     const result = await dbClient.execute({
       sql: `SELECT lpe.*, cp.name as customer_name, cp.phone as customer_phone, cp.email as customer_email
@@ -779,7 +817,7 @@ app.get("/api/vendor/alerts", async (_req: Request, res: Response) => {
   }
 });
 
-app.get("/api/vendor/analytics", async (_req: Request, res: Response) => {
+app.get("/api/vendor/analytics", adminLimiter, async (_req: Request, res: Response) => {
   try {
     // Customer-centric analytics: count latest status per customer
     const stats = await dbClient.execute({
@@ -826,7 +864,7 @@ app.get("/api/vendor/analytics", async (_req: Request, res: Response) => {
   }
 });
 
-app.get("/api/vendor/failure-analysis", async (_req: Request, res: Response) => {
+app.get("/api/vendor/failure-analysis", adminLimiter, async (_req: Request, res: Response) => {
   try {
     const failed = await dbClient.execute({
       sql: `SELECT failure_code, COUNT(*) as cnt, SUM(amount_paise) as total_amount
@@ -859,7 +897,7 @@ app.get("/api/vendor/failure-analysis", async (_req: Request, res: Response) => 
   }
 });
 
-app.post("/api/vendor/decision", async (req: Request, res: Response) => {
+app.post("/api/vendor/decision", adminLimiter, requireAdminKey, async (req: Request, res: Response) => {
   try {
     const { eventId, decision } = req.body;
     if (!eventId || !["approved", "rejected"].includes(decision)) {
@@ -991,7 +1029,25 @@ app.get("/api/status/:token", (req: Request, res: Response) => {
 });
 
 // ── Provider DLR Webhook Endpoints ───────────────────────────────
-app.post("/api/webhooks/providers/brevo", async (req: Request, res: Response) => {
+// G-004: DLR webhooks verify signatures when provider secrets are configured
+function extractSignature(req: Request): string {
+  const h = req.headers as Record<string, string | undefined>;
+  return String(h["x-webhook-signature"] ?? h["x-bravo-signature"] ?? h["x-msg91-signature"] ?? h["x-twilio-signature"] ?? h["authorization"] ?? "");
+}
+
+app.post("/api/webhooks/providers/brevo", webhookLimiter, async (req: Request, res: Response) => {
+  // G-004: Verify Brevo webhook signature when secret is configured
+  const sig = extractSignature(req);
+  if (process.env.BREVO_WEBHOOK_SECRET && sig) {
+    const rawBody = JSON.stringify(req.body);
+    const expected = createHmac("sha256", process.env.BREVO_WEBHOOK_SECRET).update(rawBody).digest("hex");
+    try {
+      if (!timingSafeEqual(Buffer.from(expected, "hex"), Buffer.from(sig, "hex"))) {
+        res.status(401).json({ error: "Invalid webhook signature" });
+        return;
+      }
+    } catch { /* hex parse failure → treat as invalid */ res.status(401).json({ error: "Invalid webhook signature" }); return; }
+  }
   try {
     const event = req.body;
     await dbClient.execute({
@@ -1007,7 +1063,19 @@ app.post("/api/webhooks/providers/brevo", async (req: Request, res: Response) =>
   } catch { res.json({ received: true }); }
 });
 
-app.post("/api/webhooks/providers/msg91", async (req: Request, res: Response) => {
+app.post("/api/webhooks/providers/msg91", webhookLimiter, async (req: Request, res: Response) => {
+  // G-004: Verify MSG91 webhook signature when auth key is configured
+  const sig = extractSignature(req);
+  if (process.env.MSG91_AUTH_KEY && sig) {
+    const rawBody = JSON.stringify(req.body);
+    const expected = createHmac("sha256", process.env.MSG91_AUTH_KEY).update(rawBody).digest("hex");
+    try {
+      if (!timingSafeEqual(Buffer.from(expected, "hex"), Buffer.from(sig, "hex"))) {
+        res.status(401).json({ error: "Invalid webhook signature" });
+        return;
+      }
+    } catch { res.status(401).json({ error: "Invalid webhook signature" }); return; }
+  }
   try {
     const event = req.body;
     await dbClient.execute({
@@ -1023,7 +1091,16 @@ app.post("/api/webhooks/providers/msg91", async (req: Request, res: Response) =>
   } catch { res.json({ received: true }); }
 });
 
-app.post("/api/webhooks/providers/gupshup", async (req: Request, res: Response) => {
+app.post("/api/webhooks/providers/gupshup", webhookLimiter, async (req: Request, res: Response) => {
+  // G-004: Verify Gupshup webhook signature when secret is configured
+  const sig = extractSignature(req);
+  if (process.env.GUPSHUP_WEBHOOK_SECRET && sig) {
+    const rawBody = JSON.stringify(req.body);
+    const expected = createHmac("sha256", process.env.GUPSHUP_WEBHOOK_SECRET).update(rawBody).digest("hex");
+    try {
+      if (expected !== sig) { res.status(401).json({ error: "Invalid webhook signature" }); return; }
+    } catch { res.status(401).json({ error: "Invalid webhook signature" }); return; }
+  }
   try {
     const event = req.body;
     await dbClient.execute({
@@ -1039,7 +1116,7 @@ app.post("/api/webhooks/providers/gupshup", async (req: Request, res: Response) 
   } catch { res.json({ received: true }); }
 });
 
-app.post("/api/webhooks/twilio/gather", async (req: Request, res: Response) => {
+app.post("/api/webhooks/twilio/gather", webhookLimiter, async (req: Request, res: Response) => {
   const { Digits } = req.body;
   if (Digits === "1" || Digits === 1) {
     res.setHeader("Content-Type", "text/xml");
@@ -1066,7 +1143,7 @@ app.get("/result", (_req: Request, res: Response) => {
   res.send(resultHtml);
 });
 
-app.post("/api/recovery/triage", async (req: Request, res: Response) => {
+app.post("/api/recovery/triage", recoveryLimiter, async (req: Request, res: Response) => {
   try {
     const { presetKey } = req.body || {};
     const base = getPublicBaseUrl();
@@ -1078,23 +1155,20 @@ app.post("/api/recovery/triage", async (req: Request, res: Response) => {
 });
 
 // ── Provider Status (diagnostic endpoint) ─────────────────────
-app.get("/api/providers/status", (_req: Request, res: Response) => {
+app.get("/api/providers/status", adminLimiter, (_req: Request, res: Response) => {
   const brevoKey = process.env.BREVO_API_KEY;
   const msg91Key = process.env.MSG91_AUTH_KEY;
-  const msg91Flow = process.env.MSG91_FLOW_ID;
+    const msg91Flow = process.env.MSG91_TEMPLATE_ID || process.env.MSG91_DLT_TEMPLATE_ID;
   const now = new Date();
   const istHour = (now.getUTCHours() + 5) % 24 + (now.getUTCMinutes() + 30) / 60;
 
   res.json({
     brevo: {
       configured: !!brevoKey && !brevoKey.includes("xxxxxx"),
-      keyPreview: brevoKey ? brevoKey.slice(0, 8) + "..." : "not set",
     },
     msg91: {
       configured: !!msg91Key && !msg91Key.includes("xxxxxx"),
-      keyPreview: msg91Key ? msg91Key.slice(0, 8) + "..." : "not set",
-      flowId: msg91Flow || "not set",
-      flowIdValid: msg91Flow && !msg91Flow.startsWith("flow_"),
+      flowIdValid: !!msg91Flow,
     },
     quietHours: {
       istHour: istHour.toFixed(1),
@@ -1104,7 +1178,7 @@ app.get("/api/providers/status", (_req: Request, res: Response) => {
   });
 });
 
-app.post("/api/recovery/initiate", async (req: Request, res: Response) => {
+app.post("/api/recovery/initiate", recoveryLimiter, async (req: Request, res: Response) => {
   try {
     const { proposalId, preferredMethod } = req.body || {};
     const result = await initiateRecoveryOrder(proposalId, preferredMethod || "upi", dbClient);
@@ -1115,7 +1189,7 @@ app.post("/api/recovery/initiate", async (req: Request, res: Response) => {
   }
 });
 
-app.post("/api/recovery/promise-to-pay", async (req: Request, res: Response) => {
+app.post("/api/recovery/promise-to-pay", recoveryLimiter, async (req: Request, res: Response) => {
   try {
     const { proposalId, promisedDay, contactPreference } = req.body || {};
     if (!proposalId || !promisedDay) return res.status(400).json({ error: "proposalId and promisedDay required" });
@@ -1127,7 +1201,7 @@ app.post("/api/recovery/promise-to-pay", async (req: Request, res: Response) => 
   }
 });
 
-app.post("/api/recovery/complete", async (req: Request, res: Response) => {
+app.post("/api/recovery/complete", recoveryLimiter, async (req: Request, res: Response) => {
   try {
     const { proposalId } = req.body || {};
     if (!proposalId) return res.status(400).json({ error: "proposalId required" });
@@ -1232,17 +1306,30 @@ async function sweepScheduledOutreach() {
         args: [isoUtc(Date.now()), status, errorMsg || null, r.id],
       });
     }
-  } catch {}
+  } catch (err) {
+    logger.error({ msg: "[Outreach Sweeper] Error", err: (err as Error).message });
+  }
 }
+
+// ── E-007: Batch Report API Endpoint ────────────────────────────
+app.get("/api/recovery/batch-report", async (_req: Request, res: Response) => {
+  try {
+    const report = await runBatchBenchmark(dbClient);
+    res.json(report);
+  } catch (err) {
+    logger.error({ msg: "[BatchReport] Error", err: (err as Error).message });
+    res.status(500).json({ error: "Failed to generate batch report" });
+  }
+});
 
 // ── Startup ──────────────────────────────────────────────────────
 export async function startServer() {
   await runMigrations(dbClient);
   const server = app.listen(PORT, HOST, () => {
-    console.log(`\n  ARBITER Payment Server`);
-    console.log(`  Store:     http://${HOST}:${PORT}`);
-    console.log(`  Dashboard: http://${HOST}:${PORT}/dashboard`);
-    console.log(`  Mode:      ${RZP_KEY_ID ? "Razorpay Test Mode" : "Local Sandbox"}\n`);
+    logger.info({ msg: "\n  ARBITER Payment Server" });
+    logger.info({ msg: `  Store:     http://${HOST}:${PORT}` });
+    logger.info({ msg: `  Dashboard: http://${HOST}:${PORT}/dashboard` });
+    logger.info({ msg: `  Mode:      ${RZP_KEY_ID ? "Razorpay Test Mode" : "Local Sandbox"}\n` });
   });
 
   // Sweep scheduled outreach every 60 seconds
@@ -1252,5 +1339,5 @@ export async function startServer() {
 }
 
 if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split("/").pop() ?? "")) {
-  startServer().catch((err) => { console.error("Startup failed:", err); process.exit(1); });
+  startServer().catch((err) => { logger.error({ msg: "Startup failed", err: err }); process.exit(1); });
 }

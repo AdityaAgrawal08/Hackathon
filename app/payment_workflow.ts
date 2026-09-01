@@ -6,7 +6,7 @@
  */
 import type { Client } from "@libsql/client";
 import { createHash } from "node:crypto";
-import { isoUtc, paise, formatINR } from "../packages/shared/src/index.js";
+import { isoUtc, paise, formatINR, logger } from "../packages/shared/src/index.js";
 import { classifyByCode, computeFeatures, scoreWithArtifact, DEFAULT_16D_MODEL, assessCredibility } from "../packages/ml/src/index.js";
 import { decide, defaultPolicy, type DecideOutput, type FailureClassId } from "../packages/core/src/decide/index.js";
 import { OutreachRouter, type OutreachChannel, type OutreachPayload, type ProviderDispatchResult } from "../packages/core/src/messaging/index.js";
@@ -197,7 +197,12 @@ export async function processFailedPayment(
     customer: {
       priorSuccessCount: customer?.total_successes ?? 0,
       joinedAtUtc: customer?.created_at_utc ?? nowUtc,
-      channelResponsiveness: 0.85,
+      // Derive from actual success ratio; null lets features engine use default (0.5)
+      channelResponsiveness: (customer?.total_attempts ?? 0) > 0
+        ? (customer.total_successes ?? 0) / customer.total_attempts
+        : null,
+      // paydayPattern not available in customer_profiles table (migration 0008) — null is correct sentinel
+      paydayPattern: null,
     },
     // Payment method features (from Razorpay webhook)
     paymentMethod: input.paymentMethod,
@@ -299,7 +304,7 @@ export async function processFailedPayment(
           newRetryCount, nowUtc, existingId,
         ],
       });
-      console.log(`[Workflow] ${isSameEventDifferentSource ? 'Webhook fill-in' : 'Update'}: event ${existingId} (retry #${newRetryCount})`);
+      logger.info({ msg: `${isSameEventDifferentSource ? 'Webhook fill-in' : 'Update'}: event ${existingId} (retry #${newRetryCount})`, event: existingId, retryCount: newRetryCount });
 
       await client.execute({
         sql: `UPDATE customer_profiles SET
@@ -313,10 +318,13 @@ export async function processFailedPayment(
       return {
         eventId: existingId, failureClass, action: decideOutput.chosen.action, probability,
         isSuspicious, suspicionReasons,
+        outreachDispatched: false,
+        dispatchResults: [],
+        scheduledOutreach: [],
       };
     }
     // isNewOrder=true: fall through to INSERT below (new independent transaction)
-    console.log(`[Workflow] New retry order ${input.razorpayOrderId}: creating new transaction (original was ${existingRow.rows[0].id})`);
+    logger.info({ msg: `New retry order ${input.razorpayOrderId}: creating new transaction (original was ${existingRow.rows[0].id})`, orderId: input.razorpayOrderId, originalEventId: existingRow.rows[0].id });
   }
 
   // FIRST ATTEMPT / NEW RETRY ORDER: Insert new row
@@ -419,9 +427,10 @@ export async function processFailedPayment(
       recoveryUrl.searchParams.set("productName", input.productName);
     }
     // Include failure class info in URL for recovery page UI
+    // H-002: Use customerMessage from error catalog for transaction-specific explanation
     recoveryUrl.searchParams.set("class", failureClass);
     recoveryUrl.searchParams.set("code", input.failureCode);
-    recoveryUrl.searchParams.set("reason", input.failureReason || input.failureDescription);
+    recoveryUrl.searchParams.set("reason", getCustomerMessage(input.failureCode, input.failureDescription));
 
     // Include payment method details in URL so recovery page can display them
     if (input.paymentMethod) recoveryUrl.searchParams.set("method", input.paymentMethod);
@@ -449,21 +458,21 @@ export async function processFailedPayment(
       customerMessage: getCustomerMessage(input.failureCode, input.failureDescription),
       vendorMessage: getVendorMessage(input.failureCode, input.failureDescription),
       // Payment method details for personalized outreach
-      method: input.paymentMethod || "",
+      method: (["card", "upi", "netbanking", "wallet"].includes(input.paymentMethod || "") ? input.paymentMethod : undefined) as OutreachPayload["method"],
       last4: input.cardLast4 || "",
       network: input.cardNetwork || "",
       vpa: input.vpa || "",
       bank: input.bankCode || "",
     };
 
-    console.log(`[Outreach] Dispatching for ${failureClass} | phone: ${outreachPayload.recipient.phone || '(none)'} | email: ${outreachPayload.recipient.email || '(none)'}`);
+    logger.info({ msg: `Dispatching outreach for ${failureClass}`, failureClass, phone: outreachPayload.recipient.phone || '(none)', email: outreachPayload.recipient.email || '(none)' });
 
     // Dispatch Email via Brevo (skip if no email)
     if (outreachPayload.recipient.email) {
       try {
         const emailResult = await outreachRouter.dispatch("EMAIL", outreachPayload, nowMs);
         dispatchResults.push(emailResult);
-        console.log(`[Outreach] EMAIL → ${emailResult.status} via ${emailResult.providerName}`);
+        logger.info({ msg: `EMAIL → ${emailResult.status} via ${emailResult.providerName}`, channel: 'EMAIL', status: emailResult.status, provider: emailResult.providerName });
         // Store initial outreach result in scheduled_outreach for AI Action tracking
         // Distinguish simulated from real delivery
         const isSimulated = !!emailResult.errorMessage?.startsWith("SIMULATED:");
@@ -482,7 +491,7 @@ export async function processFailedPayment(
           });
         } catch {}
       } catch (err) {
-        console.error("[Outreach] Email dispatch failed:", err);
+        logger.error({ msg: "Email dispatch failed", err: err as Error });
         // Store failed attempt
         try {
           await client.execute({
@@ -497,7 +506,7 @@ export async function processFailedPayment(
         } catch {}
       }
     } else {
-      console.log("[Outreach] SKIPPED email: no email address on customer profile");
+      logger.info({ msg: "SKIPPED email: no email address on customer profile" });
     }
 
     // Dispatch SMS via MSG91 (skip if no phone)
@@ -505,9 +514,9 @@ export async function processFailedPayment(
       try {
         const smsResult = await outreachRouter.dispatch("SMS", outreachPayload, nowMs);
         dispatchResults.push(smsResult);
-        console.log(`[Outreach] SMS → ${smsResult.status} via ${smsResult.providerName}`);
+        logger.info({ msg: `SMS → ${smsResult.status} via ${smsResult.providerName}`, channel: 'SMS', status: smsResult.status, provider: smsResult.providerName });
         if (smsResult.status.includes("SUPPRESSED")) {
-          console.log(`[Outreach] SMS suppressed: ${smsResult.errorMessage}`);
+          logger.info({ msg: `SMS suppressed: ${smsResult.errorMessage}`, channel: 'SMS', reason: smsResult.errorMessage });
         }
         // Store initial outreach result in scheduled_outreach for AI Action tracking
         const isSmsSimulated = !!smsResult.errorMessage?.startsWith("SIMULATED:");
@@ -526,7 +535,7 @@ export async function processFailedPayment(
           });
         } catch {}
       } catch (err) {
-        console.error("[Outreach] SMS dispatch failed:", err);
+        logger.error({ msg: "SMS dispatch failed", err: err as Error });
         // Store failed attempt
         try {
           await client.execute({
@@ -541,7 +550,7 @@ export async function processFailedPayment(
         } catch {}
       }
     } else {
-      console.log("[Outreach] SKIPPED SMS: no phone number on customer profile");
+      logger.info({ msg: "SKIPPED SMS: no phone number on customer profile" });
     }
 
     // Schedule follow-ups
@@ -654,7 +663,7 @@ export async function recordSuccessfulPayment(
         params.cardIssuer || null, params.cardType || null, params.vpa || null, params.bankCode || null,
         existingId],
     });
-    console.log(`[Workflow] Recovery: moved event ${existingId} from failed → captured for order ${params.razorpayOrderId}`);
+    logger.info({ msg: `Recovery: moved event ${existingId} from failed → captured for order ${params.razorpayOrderId}`, eventId: existingId, orderId: params.razorpayOrderId });
 
     // Update customer profile
     await client.execute({

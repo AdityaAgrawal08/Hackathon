@@ -19,9 +19,13 @@ services:
       - key: BREVO_API_KEY
         sync: false
       - key: BREVO_SENDER_EMAIL
-        value: magicalfootball2005@gmail.com
+        value: noreply@arbiter.in
       - key: BREVO_SENDER_NAME
         value: ARBITER Recovery
+      - key: BREVO_SENDER_EMAIL_FALLBACK
+        value: magicalfootball2005@gmail.com
+      - key: PUBLIC_BASE_URL
+        value: https://hackathon-grfw.onrender.com
       - key: MSG91_AUTH_KEY
         sync: false
       - key: MSG91_SENDER_ID

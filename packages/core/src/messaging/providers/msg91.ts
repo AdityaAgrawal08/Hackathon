@@ -18,7 +18,8 @@
  *   ]
  * }
  */
-import { formatINR, paise, isoUtc } from "@arbiter/shared";
+import { createHmac, timingSafeEqual } from "node:crypto";
+import { formatINR, paise, isoUtc, logger } from "@arbiter/shared";
 import type { FailureClassId } from "../../decide/catalog.js";
 import type { OutreachPayload, OutreachProvider, ProviderDispatchResult } from "../types.js";
 
@@ -51,7 +52,7 @@ export class MSG91SmsProvider implements OutreachProvider {
     // template_id: use MSG91_TEMPLATE_ID env, fallback to MSG91_DLT_TEMPLATE_ID
     this.config.templateId = config.templateId || process.env.MSG91_TEMPLATE_ID || process.env.MSG91_DLT_TEMPLATE_ID;
 
-    console.log(`[MSG91] Constructor — authKey: ${this.config.authKey ? 'SET (' + this.config.authKey.slice(0, 8) + '...)' : 'MISSING'}, templateId: ${this.config.templateId || 'MISSING'}`);
+    logger.info({ msg: "[MSG91] Constructor — config loaded", authKey: this.config.authKey ? 'SET (' + this.config.authKey.slice(0, 8) + '...)' : 'MISSING', templateId: this.config.templateId || 'MISSING' });
   }
 
   async send(payload: OutreachPayload): Promise<ProviderDispatchResult> {
@@ -72,8 +73,7 @@ export class MSG91SmsProvider implements OutreachProvider {
 
     if (!hasAuthKey || !hasTemplateId) {
       const reason = !hasAuthKey ? "no authKey" : `no templateId`;
-      console.log(`[MSG91] SIMULATED SMS to ${phone} — reason: ${reason}`);
-      console.log(`[MSG91] SIMULATED body: ${JSON.stringify({ failureClass: payload.failureClass, amount: formattedAmount, recoveryUrl })}`);
+      logger.info({ msg: "[MSG91] SIMULATED SMS", phone, reason, failureClass: payload.failureClass, amount: formattedAmount, recoveryUrl });
       return {
         providerName: this.name,
         channel: this.channel,
@@ -109,8 +109,7 @@ export class MSG91SmsProvider implements OutreachProvider {
       recipients: [recipientObj],
     };
 
-    console.log(`[MSG91] SENDING SMS to ${phone} via template ${this.config.templateId}`);
-    console.log(`[MSG91] Request body: ${JSON.stringify(flowBody, null, 2)}`);
+    logger.info({ msg: "[MSG91] SENDING SMS", phone, templateId: this.config.templateId, body: flowBody });
 
     try {
       const res = await fetch("https://control.msg91.com/api/v5/flow", {
@@ -127,11 +126,9 @@ export class MSG91SmsProvider implements OutreachProvider {
       const isSuccess = data.type === "success" || res.ok;
 
       if (!isSuccess) {
-        console.error(`[MSG91] FAILED to ${phone}: HTTP ${res.status}`);
-        console.error(`[MSG91] Response: ${JSON.stringify(data)}`);
+        logger.error({ msg: "[MSG91] FAILED", phone, httpStatus: res.status, response: data });
       } else {
-        console.log(`[MSG91] SENT SMS to ${phone}: request_id=${data.request_id}`);
-        console.log(`[MSG91] Full response: ${JSON.stringify(data)}`);
+        logger.info({ msg: "[MSG91] SENT SMS", phone, requestId: data.request_id, response: data });
       }
 
       return {
@@ -146,7 +143,7 @@ export class MSG91SmsProvider implements OutreachProvider {
         errorMessage: isSuccess ? undefined : String(data.message || "Failed to dispatch SMS"),
       };
     } catch (err) {
-      console.error(`[MSG91] NETWORK ERROR to ${phone}: ${(err as Error).message}`);
+      logger.error({ msg: "[MSG91] NETWORK ERROR", phone, err });
       return {
         providerName: this.name,
         channel: this.channel,
@@ -159,7 +156,19 @@ export class MSG91SmsProvider implements OutreachProvider {
     }
   }
 
-  verifyWebhookSignature(_rawBody: string | Buffer, _signatureHeader: string): boolean {
-    return true; // MSG91 uses IP whitelisting / authkey validation
+  verifyWebhookSignature(rawBody: string | Buffer, signatureHeader: string): boolean {
+    // MSG91 webhooks are verified via authkey-based HMAC
+    const authKey = this.config.authKey;
+    if (!authKey) {
+      logger.warn({ msg: "[MSG91] No auth key configured — webhook verification skipped (insecure)" });
+      return false;
+    }
+    const body = typeof rawBody === "string" ? rawBody : rawBody.toString("utf8");
+    const expected = createHmac("sha256", authKey).update(body).digest("hex");
+    try {
+      return timingSafeEqual(Buffer.from(expected, "hex"), Buffer.from(signatureHeader, "hex"));
+    } catch {
+      return false;
+    }
   }
 }

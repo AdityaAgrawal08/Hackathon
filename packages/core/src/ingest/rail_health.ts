@@ -11,7 +11,7 @@
  * shift model behavior or break the frozen-feature contract. It feeds the
  * decision engine's timing/deferral, not the logreg score.
  */
-import { hashSeed } from "@arbiter/shared";
+import { hashSeed, clamp01 } from "@arbiter/shared";
 import { RAIL_HEALTH_THRESHOLD } from "../decide/window.js";
 
 export type RailId = "upi" | "imps" | "neft" | "cards" | "autopay";
@@ -67,8 +67,4 @@ export function simulatedRailHealth(nowMs: number): RailHealthSnapshot {
 /** Convenience: is the overall rail healthy enough to attempt a recovery now? */
 export function isRailHealthy(nowMs: number): boolean {
   return simulatedRailHealth(nowMs).overall >= RAIL_HEALTH_THRESHOLD;
-}
-
-function clamp01(x: number): number {
-  return Math.min(1, Math.max(0, x));
 }

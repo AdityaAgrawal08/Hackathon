@@ -21,7 +21,7 @@ ARBITER detects failed payments via real webhooks, diagnoses root causes via ML,
         │  ┌──────────────────────┐  │
         │  │ 1. Error Extraction  │  │
         │  │ 2. Root-Cause Class  │  │
-        │  │ 3. 16-D Feature Vec  │  │
+        │  │ 3. 23-D Feature Vec  │  │
         │  │ 4. ML LogReg Scorer  │  │
         │  │ 5. EV Decision Eng   │  │
         │  │ 6. Credibility Score │  │
@@ -48,7 +48,7 @@ ARBITER detects failed payments via real webhooks, diagnoses root causes via ML,
 | Package | Purpose |
 |---------|---------|
 | `packages/core` | Decision engine, policy pack, messaging providers, DB schema |
-| `packages/ml` | 16-D feature extraction, logistic regression scoring, credibility |
+| `packages/ml` | 23-D feature extraction, logistic regression scoring, credibility |
 | `packages/shared` | Utilities (formatINR, isoUtc, paise) |
 | `app/` | Express server, HTML views, payment workflow |
 
@@ -212,6 +212,20 @@ pnpm vitest run tests/app/e2e_integration.test.ts
 | `RZP_TEST_KEY_SECRET` | Gateway test key secret | Yes |
 | `BREVO_API_KEY` | Brevo transactional email API key | For email outreach |
 | `MSG91_AUTH_KEY` | MSG91 SMS API key | For SMS outreach |
+
+---
+
+## What We Tried That Didn't Work
+
+Engineering maturity means publishing negative results. Here's what we tried and measured:
+
+1. **LLM for root-cause diagnosis**: We tested using an LLM to classify failure root causes from error codes. Measured zero delta over simple rule-based classification on synthetic data — same finding as Reflex's公开 admission. The LLM added latency and cost with no accuracy improvement. **Decision: removed from pipeline.**
+
+2. **Rail health signal**: Implemented a simulated payment-rail health score to defer retries during degraded rail periods. Could not measurable impact on recovery timing in controlled batch experiments. The signal was too noisy to be actionable. **Decision: kept as opt-in, not used in default policy.**
+
+3. **Federated learning**: Implemented FedAvg with DP noise across merchant silos. Random silo weights produce random improvement — the simulated local training generates weights that are essentially random, so aggregation adds variance, not signal. **Decision: documented as simulation for demo; removed from production pitch.**
+
+4. **WhatsApp/voice outreach**: Tested WhatsApp (Gupshup) and voice (Twilio) recovery channels. Both require real customer opt-in and DLT template approval in India. Without live merchant data, these channels cannot be demonstrated end-to-end. **Decision: implemented provider abstraction but kept SMS/email as primary channels.**
 
 ---
 

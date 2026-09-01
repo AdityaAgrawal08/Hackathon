@@ -4,7 +4,8 @@
  * Dispatches recovery emails via MSG91 Email API v5
  * with domain validation and fallback to simulation if domain is unverified.
  */
-import { formatINR, paise, isoUtc } from "@arbiter/shared";
+import { createHmac } from "node:crypto";
+import { formatINR, paise, isoUtc, COST_EMAIL_PAISE, logger } from "@arbiter/shared";
 import type { OutreachPayload, OutreachProvider, ProviderDispatchResult } from "../types.js";
 import { renderComplianceMessage } from "../templates.js";
 import { escapeHtml } from "./brevo.js";
@@ -27,7 +28,7 @@ export class MSG91EmailProvider implements OutreachProvider {
     this.config.authKey = rawKey && !rawKey.includes("xxxxxx") && !isTest ? rawKey : undefined;
     this.config.domain = config.domain || process.env.MSG91_DOMAIN || process.env.MSG91_EMAIL_DOMAIN;
     this.config.senderEmail =
-      config.senderEmail || process.env.MSG91_FROM_EMAIL || process.env.BREVO_SENDER_EMAIL || "magicalfootball2005@gmail.com";
+      config.senderEmail || process.env.MSG91_FROM_EMAIL || process.env.BREVO_SENDER_EMAIL || undefined;
     this.config.senderName = config.senderName || process.env.BREVO_SENDER_NAME || "ARBITER Recovery";
     this.config.templateId = config.templateId || process.env.MSG91_EMAIL_TEMPLATE_ID;
   }
@@ -62,7 +63,7 @@ export class MSG91EmailProvider implements OutreachProvider {
         channel: this.channel,
         externalMessageId: `msg91_email_sim_${payload.proposalId}`,
         status: "SENT",
-        costPaise: 10,
+        costPaise: COST_EMAIL_PAISE,
         dispatchedAtUtc: nowUtc,
         rawResponse: { simulated: true, to: payload.recipient.email, subject },
       };
@@ -113,8 +114,15 @@ export class MSG91EmailProvider implements OutreachProvider {
     }
   }
 
-  verifyWebhookSignature(_rawBody: string | Buffer, _signatureHeader: string): boolean {
-    return true;
+  verifyWebhookSignature(rawBody: string | Buffer, signatureHeader: string): boolean {
+    const authKey = this.config.authKey;
+    if (!authKey) {
+      logger.warn({ msg: "MSG91 email auth key not configured, webhook verification skipped" });
+      return false;
+    }
+    const body = typeof rawBody === "string" ? rawBody : rawBody.toString("utf8");
+    const expected = createHmac("sha256", authKey).update(body).digest("hex");
+    return expected === signatureHeader;
   }
 }
 

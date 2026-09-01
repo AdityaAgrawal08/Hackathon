@@ -14,6 +14,12 @@ export interface ProviderContext {
   rzpRequestRef: string;
   idempotencyKey: string;
   nowMs: number;
+  /** Customer profile data — optional so dry-run/tests can omit it. */
+  customer?: {
+    name?: string;
+    phone?: string;
+    email?: string;
+  };
 }
 
 export interface ProviderResult {

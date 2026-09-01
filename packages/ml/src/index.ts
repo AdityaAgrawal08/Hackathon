@@ -8,3 +8,8 @@ export * from "./metrics.js";
 export * from "./dataset.js";
 export * from "./train.js";
 export * from "./credibility.js";
+export * from "./control_arm.js";
+export * from "./baseline_rules.js";
+export * from "./evaluate.js";
+export * from "./sensitivity.js";
+export * from "./drift.js";

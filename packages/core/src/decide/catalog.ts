@@ -10,7 +10,11 @@
  * basis points (see engine.ts). HUMAN_REVIEW carries explicit labor cost and
  * NO_ACTION is the zero-EV baseline so the optimizer cannot "dodge" into a
  * free option (bug P3-B6).
+ *
+ * Merchants can override multipliers via config/catalog.yaml (C-005).
  */
+import { readFileSync } from "node:fs";
+import { parse as parseYaml } from "yaml";
 import { paise, type Paise } from "@arbiter/shared";
 
 /** Catalog order is normative: ties in EV break toward the earlier entry. */
@@ -214,5 +218,55 @@ export function assertTableComplete(table: Multipliers): void {
         throw new Error(`adjustment table incomplete: ${cls} × ${action}`);
       }
     }
+  }
+}
+
+/**
+ * Load merchant-tunable catalog overrides from config/catalog.yaml (C-005).
+ * Returns merged multipliers: config overrides applied on top of defaults.
+ * If the config file is missing or malformed, returns the hardcoded defaults.
+ */
+export function loadCatalogFromConfig(
+  configPath?: string,
+): { multipliers: Multipliers; contactCosts: Record<ActionId, Paise>; partialCollectFraction: number } {
+  const path = configPath ?? process.env.ARBITER_CATALOG_PATH ?? "config/catalog.yaml";
+
+  try {
+    const text = readFileSync(path, "utf8");
+    const raw = parseYaml(text) as Record<string, unknown>;
+
+    const multipliers: Multipliers = { ...DEFAULT_ACTION_MULTIPLIERS };
+    if (raw.multipliers && typeof raw.multipliers === "object") {
+      for (const [cls, actions] of Object.entries(raw.multipliers as Record<string, Record<string, number>>)) {
+        if (cls in DEFAULT_ACTION_MULTIPLIERS) {
+          multipliers[cls as FailureClassId] = {
+            ...DEFAULT_ACTION_MULTIPLIERS[cls as FailureClassId],
+            ...actions,
+          };
+        }
+      }
+    }
+
+    let contactCosts = { ...CONTACT_COST_PAISE };
+    if (raw.contact_cost_paise && typeof raw.contact_cost_paise === "object") {
+      for (const [action, cost] of Object.entries(raw.contact_cost_paise as Record<string, number>)) {
+        if (action in CONTACT_COST_PAISE) {
+          contactCosts[action as ActionId] = paise(cost);
+        }
+      }
+    }
+
+    const partialCollectFraction =
+      typeof raw.partial_collect_fraction === "number"
+        ? raw.partial_collect_fraction
+        : PARTIAL_COLLECT_FRACTION;
+
+    return { multipliers, contactCosts, partialCollectFraction };
+  } catch {
+    return {
+      multipliers: DEFAULT_ACTION_MULTIPLIERS,
+      contactCosts: CONTACT_COST_PAISE,
+      partialCollectFraction: PARTIAL_COLLECT_FRACTION,
+    };
   }
 }

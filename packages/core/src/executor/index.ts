@@ -183,7 +183,7 @@ export async function executeProposal(
 
   // 3. Fetch event row for failure class, amount, AND tenant_id (needed for audit_log)
   const evRow = await client.execute({
-    sql: `SELECT failure_class_hint, amount_paise, e.tenant_id
+    sql: `SELECT failure_class_hint, amount_paise, e.tenant_id, e.customer_id
           FROM payment_events e
           JOIN proposals p ON p.event_id = e.id
           WHERE p.id = ?`,
@@ -198,6 +198,7 @@ export async function executeProposal(
     chosen.failureClass ?? String(evRow.rows[0]!.failure_class_hint ?? "UNKNOWN");
   const amountPaise = paise(Number(evRow.rows[0]!.amount_paise));
   const tenantId = String(evRow.rows[0]!.tenant_id);
+  const customerId = String(evRow.rows[0]!.customer_id ?? "");
 
   // 4. Generate deterministic idempotency key
   const idemKey = idempotencyKey(proposalId, p.model_version_id, p.policy_version, p.action_json);
@@ -233,6 +234,22 @@ export async function executeProposal(
 
   // 7. Run the action via the configured provider (simulation or Razorpay dry-run/live)
   const provider = getProvider();
+
+  // Fetch customer profile data for provider context (best-effort — don't fail execution if missing)
+  let customerData: { name?: string; phone?: string; email?: string } | undefined;
+  if (customerId) {
+    try {
+      const custRow = await client.execute({
+        sql: `SELECT name, phone, email FROM customer_profiles WHERE id = ?`,
+        args: [customerId],
+      });
+      if (custRow.rows.length > 0) {
+        const r = custRow.rows[0] as any;
+        customerData = { name: r.name, phone: r.phone, email: r.email };
+      }
+    } catch { /* customer_profiles may not exist in test DBs */ }
+  }
+
   const providerCtx = {
     proposalId,
     actionId,
@@ -243,6 +260,7 @@ export async function executeProposal(
     rzpRequestRef: ref,
     idempotencyKey: idemKey,
     nowMs,
+    customer: customerData,
   };
   const providerResult = await provider.execute(providerCtx);
   const outcome = providerResult.outcome;

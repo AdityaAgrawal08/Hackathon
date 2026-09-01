@@ -22,6 +22,9 @@ export const CHECKOUT_SESSION_TTL_MS = 15 * 60 * 1000;
 /** Maximum duration for automated two-way reconciliation before manual review (5 minutes). */
 export const MAX_RECONCILIATION_TTL_MS = 5 * 60 * 1000;
 
+/** UNKNOWN payment escalation timeout — if UNKNOWN for >24h, auto-escalate to human review (F-004). */
+export const UNKNOWN_ESCALATION_MS = 24 * 60 * 60 * 1000;
+
 /** Default fallback test secrets (strictly for LOCAL_SANDBOX/dev mode). */
 export const DEFAULT_LOCAL_WEBHOOK_SECRET = "whsec_local_test_secret_12345";
 export const DEFAULT_LOCAL_ADMIN_SECRET = "arbiter_admin_secret_key_2026";

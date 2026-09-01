@@ -26,7 +26,7 @@ describe("Task 2.5 & 2.6: Gupshup WhatsApp Provider & Local Token Isolation", ()
     expect(result.providerName).toBe("gupshup_whatsapp");
     expect(result.channel).toBe("WHATSAPP");
     expect(result.status).toBe("SENT");
-    expect(result.costPaise).toBe(80); // ₹0.80
+    expect(result.costPaise).toBe(120); // ₹1.20 (COST_WHATSAPP_PAISE default)
 
     const raw = result.rawResponse as {
       params: string[];
