@@ -318,13 +318,29 @@ app.post("/api/payments/failed", async (req: Request, res: Response) => {
     const validCustomerId = customerId || "";
 
     // Extract method details from Razorpay JS SDK error metadata
-    const method = paymentMethod?.type || paymentMethod?.method || "";
+    let method = paymentMethod?.type || paymentMethod?.method || "";
     const cardLast4 = paymentMethod?.last4 || "";
     const cardNetwork = paymentMethod?.network || paymentMethod?.card_network || "";
     const cardIssuer = paymentMethod?.issuer || paymentMethod?.card_issuer || "";
     const cardType = paymentMethod?.card_type || paymentMethod?.type === "card" ? (paymentMethod?.card_type || "") : "";
     const vpa = paymentMethod?.vpa || "";
     const bankCode = paymentMethod?.bank || paymentMethod?.bank_name || "";
+
+    // Fallback: infer payment method from error_code when SDK metadata is empty
+    if (!method && failureCode) {
+      const code = failureCode.toUpperCase();
+      if (code.includes("CARD") || code.includes("EXPIRED") || code.includes("INSUFFICIENT_FUNDS") ||
+          code.includes("INVALID_EXPIRY") || code.includes("BAD_EXPIRY") || code.includes("CVV") ||
+          code.includes("CARDHOLDER") || code.includes("BLOCKED") || code.includes("LIMIT_EXCEEDED")) {
+        method = "card";
+      } else if (code.includes("UPI") || code.includes("VPA") || code.includes("MANDATE")) {
+        method = "upi";
+      } else if (code.includes("NETBANKING") || code.includes("BANK") || code.includes("ACCOUNT")) {
+        method = "netbanking";
+      } else if (code.includes("WALLET")) {
+        method = "wallet";
+      }
+    }
 
     // Use processFailedPayment to run full ML pipeline
     const result = await processFailedPayment(dbClient, {
@@ -639,7 +655,7 @@ app.get("/api/vendor/payments", async (_req: Request, res: Response) => {
               cp.total_attempts, cp.total_successes, cp.total_failures,
               so_out.channel as next_outreach_channel, so_out.scheduled_at_utc as next_outreach_utc,
               so_last.channel as last_outreach_channel, so_last.executed_at_utc as last_outreach_utc,
-              so_last.status as last_outreach_status
+              so_last.status as last_outreach_status, so_last.error_message as last_outreach_error
             FROM live_payment_events lpe
             JOIN customer_profiles cp ON cp.id = lpe.customer_profile_id
             LEFT JOIN (
@@ -1108,6 +1124,7 @@ async function sweepScheduledOutreach() {
       };
 
       let status = "FAILED";
+      let errorMsg = "";
       try {
         if (r.channel === "EMAIL") {
           await outreachRouter.dispatch("EMAIL", payload);
@@ -1115,11 +1132,13 @@ async function sweepScheduledOutreach() {
           await outreachRouter.dispatch("SMS", payload);
         }
         status = "SENT";
-      } catch {}
+      } catch (err) {
+        errorMsg = (err as Error).message || "Dispatch failed";
+      }
 
       await dbClient.execute({
-        sql: "UPDATE scheduled_outreach SET executed = 1, executed_at_utc = ?, status = ? WHERE id = ?",
-        args: [isoUtc(Date.now()), status, r.id],
+        sql: "UPDATE scheduled_outreach SET executed = 1, executed_at_utc = ?, status = ?, error_message = ? WHERE id = ?",
+        args: [isoUtc(Date.now()), status, errorMsg || null, r.id],
       });
     }
   } catch {}
