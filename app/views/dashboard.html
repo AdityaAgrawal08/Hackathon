@@ -428,17 +428,27 @@
       if (code.includes('NETBANKING') || code.includes('BANK')) {
         return `<span class="method-pill">🏦 Netbanking</span>`;
       }
-      return `<span class="method-pill" style="color:#64748b">Payment attempted</span>`;
+      // Truly unknown — show a clear indicator instead of misleading text
+      return `<span class="method-pill" style="color:#64748b">Unknown Method</span>`;
     }
 
     function getFailureReason(p) {
       if (p.status === 'captured') return '<span style="color:#86efac">Payment received ✓</span>';
-      // Always show the actual error description from Razorpay — this is the root cause
-      if (p.failure_description) return escapeHtml(p.failure_description);
-      // Fallback to error code mapping
-      const code = (p.failure_code || '').toLowerCase();
-      const reason = FAILURE_REASONS[code];
-      if (reason) return reason;
+      const parts = [];
+      // Show actual error description from Razorpay
+      if (p.failure_description) {
+        parts.push(escapeHtml(p.failure_description));
+      }
+      // Always show the error code as context (e.g., "insufficient_funds")
+      if (p.failure_code) {
+        const mapped = FAILURE_REASONS[p.failure_code.toLowerCase()];
+        if (mapped && !p.failure_description) {
+          parts.push(mapped);
+        } else if (p.failure_code) {
+          parts.push(`<span style="color:#94a3b8;font-size:0.85em">[${p.failure_code}]</span>`);
+        }
+      }
+      if (parts.length > 0) return parts.join(' ');
       if (p.failure_reason) return escapeHtml(p.failure_reason);
       return 'Payment failed';
     }

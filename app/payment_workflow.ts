@@ -255,7 +255,7 @@ export async function processFailedPayment(
   const eventId = `evt_${nowMs}_${createHash("sha256").update(`${input.razorpayPaymentId}${nowMs}`).digest("hex").slice(0, 8)}`;
 
   const existingRow = await client.execute({
-    sql: `SELECT id, retry_count, razorpay_payment_id FROM live_payment_events
+    sql: `SELECT id, retry_count, razorpay_payment_id, razorpay_order_id FROM live_payment_events
           WHERE customer_profile_id = ? AND product_name = ? AND status = 'failed'
           ORDER BY created_at_utc DESC LIMIT 1`,
     args: [input.customerProfileId, input.productName],
@@ -270,13 +270,18 @@ export async function processFailedPayment(
     const newIsClientSide = newPaymentId.startsWith("pay_client_");
     const isSameEventDifferentSource = existingIsClientSide !== newIsClientSide;
 
+    // Different order_id means a genuinely new attempt (customer got a new order link)
+    const existingOrderId = String(existingRow.rows[0].razorpay_order_id || "");
+    const isNewOrder = existingOrderId && input.razorpayOrderId && existingOrderId !== input.razorpayOrderId;
+
     // RETRY: Update existing failed row with new method, new error
     const existingId = String(existingRow.rows[0].id);
     const existingRetryCount = Number(existingRow.rows[0].retry_count || 0);
 
     // Only increment retry_count if this is an ACTUAL customer retry (different attempt)
     // NOT when the webhook is filling in real data for the same client-side failure
-    const newRetryCount = isSameEventDifferentSource ? existingRetryCount : existingRetryCount + 1;
+    // NOT when it's a completely new order (different order = first attempt, not a retry)
+    const newRetryCount = isSameEventDifferentSource ? 0 : isNewOrder ? 0 : existingRetryCount + 1;
 
     await client.execute({
       sql: `UPDATE live_payment_events SET

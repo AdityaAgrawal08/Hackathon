@@ -13,14 +13,14 @@ import { readFileSync, existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-if (existsSync(".env")) {
+if (!process.env.VITEST && existsSync(".env")) {
   try {
     process.loadEnvFile();
     console.log("[Config] .env loaded successfully");
   } catch (err) {
     console.error("[Config] Failed to load .env:", (err as Error).message);
   }
-} else {
+} else if (!process.env.VITEST) {
   console.log("[Config] No .env file found — using environment variables only");
 }
 
