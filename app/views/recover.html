@@ -171,10 +171,17 @@
 
     const config = classConfig[failureClass] || classConfig['UNKNOWN'];
 
-    // Apply class-specific UI
+    // Apply class-specific UI — H-002: use customerMessage for heading when available (especially UNKNOWN)
     document.getElementById('main-icon').textContent = config.icon;
-    document.getElementById('main-title').textContent = config.title;
-    document.getElementById('main-subtitle').textContent = config.subtitle;
+    // H-002: If server supplied a customerMessage (failureReason), show it in the heading for UNKNOWN
+    // so the page is transaction-specific rather than generic "Payment Could Not Be Processed"
+    if (failureClass === 'UNKNOWN' && failureReason) {
+      document.getElementById('main-title').textContent = failureReason;
+      document.getElementById('main-subtitle').textContent = config.subtitle;
+    } else {
+      document.getElementById('main-title').textContent = config.title;
+      document.getElementById('main-subtitle').textContent = config.subtitle;
+    }
 
     const msgBox = document.getElementById('message-box');
     msgBox.className = 'message-box ' + config.cssClass;

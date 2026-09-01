@@ -427,9 +427,10 @@ export async function processFailedPayment(
       recoveryUrl.searchParams.set("productName", input.productName);
     }
     // Include failure class info in URL for recovery page UI
+    // H-002: Use customerMessage from error catalog for transaction-specific explanation
     recoveryUrl.searchParams.set("class", failureClass);
     recoveryUrl.searchParams.set("code", input.failureCode);
-    recoveryUrl.searchParams.set("reason", input.failureReason || input.failureDescription);
+    recoveryUrl.searchParams.set("reason", getCustomerMessage(input.failureCode, input.failureDescription));
 
     // Include payment method details in URL so recovery page can display them
     if (input.paymentMethod) recoveryUrl.searchParams.set("method", input.paymentMethod);

@@ -831,6 +831,8 @@ export async function runBatchBenchmark(dbClient?: Client) {
   let totalAtRisk = 0;
   let controlRecovered = 0;
   let arbiterRecovered = 0;
+  let arbiterEscalatedPaise = 0;
+  let arbiterStoppedPaise = 0;
   let wastedRetriesSaved = 0;
   let contactsAvoidedInQuietHours = 0;
   let controlCostPaise = 0;
@@ -978,10 +980,15 @@ export async function runBatchBenchmark(dbClient?: Client) {
       nowMs,
     });
     const arbSucceeded = outcomeFromStatus(providerResult.status) === "SUCCEEDED";
+    const isEscalated = chosen.action === "HUMAN_REVIEW" || failureClass === "RISK_FLAGGED";
     // Compute per-iteration cost (RISK_FLAGGED escalations cost 0)
     const iterCost = failureClass === "RISK_FLAGGED" && !arbSucceeded ? 0 : COST_ARBITER_OUTREACH_PAISE;
     if (arbSucceeded) {
       arbiterRecovered += amount;
+    } else if (isEscalated) {
+      arbiterEscalatedPaise += amount;
+    } else {
+      arbiterStoppedPaise += amount;
     }
     arbiterCostPaise += iterCost;
 
@@ -1054,6 +1061,10 @@ export async function runBatchBenchmark(dbClient?: Client) {
     arbiterRecoveredPaise: arbiterRecovered,
     arbiterRecoveredFormatted: formatINR(paise(arbiterRecovered)),
     arbiterRecoveryRate: ((arbiterRecovered / totalAtRisk) * 100).toFixed(1) + "%",
+    arbiterEscalatedPaise,
+    arbiterEscalatedFormatted: formatINR(paise(arbiterEscalatedPaise)),
+    arbiterStoppedPaise,
+    arbiterStoppedFormatted: formatINR(paise(arbiterStoppedPaise)),
     liftPercent: `+${liftPercent}%`,
     wastedRetriesSaved,
     contactsAvoidedInQuietHours,

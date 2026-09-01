@@ -19,6 +19,32 @@
     .header-right a { color: #94a3b8; text-decoration: none; font-size: 13px; padding: 6px 12px; border-radius: 6px; transition: all 0.2s; }
     .header-right a:hover { color: #e2e8f0; background: #334155; }
     .header-right a.active { color: #e2e8f0; background: #334155; }
+
+    /* Tab nav */
+    .tab-nav { display: flex; gap: 4px; padding: 0 24px; max-width: 1400px; margin: 0 auto; border-bottom: 1px solid #334155; background: #0f172a; }
+    .tab-btn { background: none; border: none; color: #64748b; font-size: 13px; font-weight: 500; padding: 12px 16px; cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.2s; }
+    .tab-btn.active { color: #60a5fa; border-bottom-color: #3b82f6; }
+    .tab-btn:hover { color: #e2e8f0; }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    /* Recovery Report (H-001) */
+    .report-badge { display: inline-block; background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 4px 10px; font-size: 11px; color: #94a3b8; }
+    .report-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 20px; }
+    .report-card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 20px; }
+    .report-card h4 { font-size: 11px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+    .report-card .rv { font-size: 26px; font-weight: 700; }
+    .report-card .rv.green { color: #22c55e; }
+    .report-card .rv.blue { color: #3b82f6; }
+    .report-card .rv.yellow { color: #f59e0b; }
+    .report-card .rv.red { color: #ef4444; }
+    .report-sub { font-size: 11px; color: #475569; margin-top: 4px; }
+    .report-chart-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; }
+    .report-chart-card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 20px; }
+    .report-chart-card h4 { font-size: 12px; color: #94a3b8; margin-bottom: 14px; }
+    .report-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .report-table th { background: #0f172a; padding: 8px 12px; text-align: left; font-size: 11px; color: #64748b; textTransform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid #334155; }
+    .report-table td { padding: 8px 12px; border-bottom: 1px solid #1e293b; }
     .refresh-btn { background: none; border: 1px solid #334155; color: #94a3b8; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; transition: all 0.2s; }
     .refresh-btn:hover { border-color: #3b82f6; color: #3b82f6; }
 
@@ -155,7 +181,39 @@
     </div>
   </div>
 
+  <div class="tab-nav">
+    <button class="tab-btn active" id="tab-transactions" onclick="switchTab('transactions')">Transactions</button>
+    <button class="tab-btn" id="tab-recovery-report" onclick="switchTab('recovery-report')">Recovery Report</button>
+  </div>
+
   <div class="container">
+    <!-- Recovery Report Panel (H-001) -->
+    <div class="tab-panel" id="panel-recovery-report">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+        <h2 style="font-size:18px;font-weight:600;">Recovery Report <span class="report-badge">[SIMULATED - MOCK PROVIDER]</span></h2>
+        <button class="analysis-btn" onclick="loadRecoveryReport()">↻ Refresh Report</button>
+      </div>
+      <div id="report-loading" style="text-align:center;padding:40px;color:#64748b;">Loading batch report...</div>
+      <div id="report-content" style="display:none;">
+        <div class="report-grid" id="report-metrics"></div>
+        <div class="report-chart-row">
+          <div class="report-chart-card"><h4>Recovery Rate: ML vs Rules</h4><canvas id="report-recovery-chart"></canvas></div>
+          <div class="report-chart-card"><h4>Revenue Recovered</h4><canvas id="report-revenue-chart"></canvas></div>
+        </div>
+        <div class="report-chart-row">
+          <div class="report-chart-card"><h4>Recovery by Failure Class</h4><canvas id="report-class-chart"></canvas></div>
+          <div class="report-chart-card"><h4>Cost by Channel</h4><canvas id="report-channel-chart"></canvas></div>
+        </div>
+        <div class="report-chart-card" style="margin-bottom:20px;">
+          <h4>Per-Intervention Breakdown</h4>
+          <table class="report-table" id="report-intervention-table"><thead><tr><th>Action</th><th>Count</th><th>Recovered</th><th>Rate</th><th>Cost</th></tr></thead><tbody></tbody></table>
+        </div>
+        <div style="text-align:center;margin-top:16px;"><a href="/batch-report" target="_blank" style="color:#60a5fa;font-size:13px;">Open full report in new tab →</a></div>
+      </div>
+      <div id="report-error" style="display:none;text-align:center;padding:40px;color:#f87171;"></div>
+    </div>
+
+    <div class="tab-panel active" id="panel-transactions">
     <!-- Stats Row -->
     <div class="stats-row" id="stats-row"></div>
 
@@ -242,7 +300,8 @@
         </div>
       </div>
     </div>
-  </div>
+    </div><!-- /panel-transactions -->
+  </div><!-- /container -->
 
   <!-- Toast Container -->
   <div class="toast-container" id="toast-container"></div>
@@ -271,6 +330,7 @@
     </div>
   </div>
 
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
   <script>
     const METHOD_META = {
       card:       { icon: '💳', label: 'Card' },
@@ -845,7 +905,69 @@
     loadAlerts();
     connectSSE();
 
-    // Event delegation for table row clicks (XSS-safe: no inline onclick)
+     // ── H-001: Tab switching + Recovery Report ─────────────────────
+    function switchTab(name) {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+      document.getElementById('tab-' + name).classList.add('active');
+      document.getElementById('panel-' + name).classList.add('active');
+      if (name === 'recovery-report') loadRecoveryReport();
+    }
+
+    let _reportCharts = [];
+    async function loadRecoveryReport() {
+      const loading = document.getElementById('report-loading');
+      const content = document.getElementById('report-content');
+      const errEl = document.getElementById('report-error');
+      loading.style.display = 'block'; content.style.display = 'none'; errEl.style.display = 'none';
+      _reportCharts.forEach(c => { try { c.destroy(); } catch {} });
+      _reportCharts = [];
+      try {
+        const res = await fetch('/api/recovery/batch-report');
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const d = await res.json();
+        loading.style.display = 'none'; content.style.display = 'block';
+
+        // Metrics — H-001: batch size, at-risk, recovered, escalated, stopped, cost efficiency, rules vs ML
+        var escFmt = d.arbiterEscalatedFormatted || (d.arbiterEscalatedPaise != null ? '₹' + (d.arbiterEscalatedPaise/100).toLocaleString('en-IN') : '—');
+        var stopFmt = d.arbiterStoppedFormatted || (d.arbiterStoppedPaise != null ? '₹' + (d.arbiterStoppedPaise/100).toLocaleString('en-IN') : '—');
+        document.getElementById('report-metrics').innerHTML = [
+          '<div class="report-card"><h4>Batch Size</h4><div class="rv blue">' + d.batchSize + '</div><div class="report-sub">' + d.source + '</div></div>',
+          '<div class="report-card"><h4>At Risk</h4><div class="rv yellow">' + d.totalAtRiskFormatted + '</div><div class="report-sub">' + d.batchSize + ' events</div></div>',
+          '<div class="report-card"><h4>Recovered (ML)</h4><div class="rv green">' + d.arbiterRecoveredFormatted + ' (' + d.arbiterRecoveryRate + ')</div><div class="report-sub">vs Rules ' + d.controlRecoveredFormatted + ' (' + d.controlRecoveryRate + ')</div></div>',
+          '<div class="report-card"><h4>Escalated</h4><div class="rv red">' + escFmt + '</div><div class="report-sub">human review</div></div>',
+          '<div class="report-card"><h4>Stopped</h4><div class="rv" style="color:#64748b">' + stopFmt + '</div><div class="report-sub">policy / failed</div></div>',
+          '<div class="report-card"><h4>Cost Efficiency</h4><div class="rv blue">' + d.perChannelCost.totalOutreachFormatted + '</div><div class="report-sub">Lift ' + d.liftPercent + ' · Saved ' + d.delta.costSavingsFormatted + '</div></div>',
+        ].join('');
+
+        function makeChart(id, cfg) {
+          const c = new Chart(document.getElementById(id), cfg);
+          _reportCharts.push(c);
+        }
+        makeChart('report-recovery-chart', { type: 'bar', data: { labels: ['ML (ARBITER)', 'Rules-Only'], datasets: [{ label: 'Rate %', data: [parseFloat(d.arbiterRecoveryRate), parseFloat(d.controlRecoveryRate)], backgroundColor: ['#22c55e', '#f59e0b'], borderRadius: 6 }] }, options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, max: 100, ticks: { color: '#64748b', callback: function(v){ return v + '%'; } }, grid: { color: '#1e293b' } }, x: { ticks: { color: '#64748b' }, grid: { display: false } } } } });
+        makeChart('report-revenue-chart', { type: 'bar', data: { labels: ['ML (ARBITER)', 'Rules-Only'], datasets: [{ label: 'Revenue (₹)', data: [d.arbiterRecoveredPaise/100, d.controlRecoveredPaise/100], backgroundColor: ['#22c55e', '#f59e0b'], borderRadius: 6 }] }, options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { color: '#64748b' }, grid: { color: '#1e293b' } }, x: { ticks: { color: '#64748b' }, grid: { display: false } } } } });
+        const cls = d.perFailureClass || {};
+        const clsNames = Object.keys(cls);
+        makeChart('report-class-chart', { type: 'bar', data: { labels: clsNames, datasets: [{ label: 'At Risk (₹)', data: clsNames.map(function(c){ return cls[c].atRiskPaise/100; }), backgroundColor: '#3b82f6', borderRadius: 4 }, { label: 'Recovered (₹)', data: clsNames.map(function(c){ return cls[c].recoveredPaise/100; }), backgroundColor: '#22c55e', borderRadius: 4 }] }, options: { responsive: true, plugins: { legend: { labels: { color: '#94a3b8' } } }, scales: { y: { beginAtZero: true, ticks: { color: '#64748b' }, grid: { color: '#1e293b' } }, x: { ticks: { color: '#64748b' }, grid: { display: false } } } } });
+        const ch = d.perChannelCost || {};
+        const chNames = ['email','sms','whatsapp','voice','retry','other'];
+        makeChart('report-channel-chart', { type: 'doughnut', data: { labels: chNames.map(function(c){ return c.charAt(0).toUpperCase()+c.slice(1); }), datasets: [{ data: chNames.map(function(c){ return (ch[c] ? ch[c].costPaise : 0)/100; }), backgroundColor: ['#3b82f6','#22c55e','#f59e0b','#ef4444','#8b5cf6','#64748b'] }] }, options: { responsive: true, plugins: { legend: { labels: { color: '#94a3b8' } } } } });
+        var tbody = document.querySelector('#report-intervention-table tbody');
+        tbody.innerHTML = '';
+        var actions = d.perIntervention || {};
+        for (var action in actions) {
+          var v = actions[action];
+          var tr = document.createElement('tr');
+          tr.innerHTML = '<td><strong>' + action + '</strong></td><td>' + v.count + '</td><td>' + v.recoveredFormatted + '</td><td>' + v.recoveryRate + '</td><td>' + v.totalCostFormatted + '</td>';
+          tbody.appendChild(tr);
+        }
+      } catch (e) {
+        loading.style.display = 'none'; errEl.style.display = 'block';
+        errEl.textContent = 'Failed to load report: ' + e.message;
+      }
+    }
+
+     // Event delegation for table row clicks (XSS-safe: no inline onclick)
     document.getElementById('failed-body').addEventListener('click', function(e) {
       const row = e.target.closest('tr[data-event-id]');
       if (!row) return;
