@@ -12,7 +12,7 @@
  */
 import type { Client } from "@libsql/client";
 import { isoUtc, hashSeed } from "@arbiter/shared";
-import { MAX_RECONCILIATION_TTL_MS } from "../constants.js";
+import { MAX_RECONCILIATION_TTL_MS, UNKNOWN_ESCALATION_MS } from "../constants.js";
 import { canTransitionKnowledgeStatus, type KnowledgeStatus } from "./payment_state_machine.js";
 
 export interface ReconcileGateway {
@@ -267,4 +267,58 @@ export async function sweepStuckIntents(
     if (res.resolved) resolvedCount++;
   }
   return resolvedCount;
+}
+
+/**
+ * F-004: Escalate UNKNOWN intents that have been unresolved for >24 hours.
+ *
+ * Intents stuck in UNKNOWN (provider charged but response lost, no webhook)
+ * that never reconcile within 24h are auto-escalated to human review with a
+ * "check with provider" action. This guarantees UNKNOWN never lingers forever.
+ */
+export async function escalateStaleUnknownIntents(
+  client: Client,
+  nowMs: number,
+): Promise<number> {
+  const cutoff = isoUtc(nowMs - UNKNOWN_ESCALATION_MS);
+  const stale = await client.execute({
+    sql: `SELECT id, tenant_id, customer_id, amount_paise, created_at_utc
+          FROM payment_intents WHERE status = 'UNKNOWN' AND created_at_utc < ?`,
+    args: [cutoff],
+  });
+
+  let escalated = 0;
+  for (const row of stale.rows) {
+    const r = row as unknown as { id: string; tenant_id: string; customer_id: string; amount_paise: number; created_at_utc: string };
+    const nowIso = isoUtc(nowMs);
+
+    // Deduplicate: only escalate once per intent (check audit_log for prior escalation)
+    const existing = await client.execute({
+      sql: `SELECT seq FROM audit_log WHERE event_id = ? AND entry_type = 'TRIGGER' AND payload_json LIKE '%UNKNOWN_ESCALATED%' LIMIT 1`,
+      args: [r.id],
+    });
+    if (existing.rows.length > 0) continue;
+
+    await client.execute({
+      sql: `INSERT INTO audit_log (ts_utc, tenant_id, event_id, actor, entry_type, payload_json)
+            VALUES (?, ?, ?, 'SYSTEM', 'TRIGGER', ?)`,
+      args: [
+        nowIso,
+        r.tenant_id || "demo",
+        r.id,
+        JSON.stringify({
+          alarm: "UNKNOWN_ESCALATED",
+          action: "check_with_provider",
+          detail: "Payment intent UNKNOWN for >24h — auto-escalated to human review. Please verify with provider dashboard.",
+          intentId: r.id,
+          customerId: r.customer_id,
+          amountPaise: r.amount_paise,
+          createdAtUtc: r.created_at_utc,
+          escalatedAtUtc: nowIso,
+        }),
+      ],
+    });
+    escalated++;
+  }
+  return escalated;
 }
