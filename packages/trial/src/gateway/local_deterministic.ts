@@ -346,7 +346,7 @@ export class LocalDeterministicGateway implements PaymentGateway {
 
       // Simulate contact/email from customer
       paymentEntity.contact = "9876543210";
-      paymentEntity.email = "aditya@example.com";
+      paymentEntity.email = "customer@example.com";
     }
 
     const bodyObj = {

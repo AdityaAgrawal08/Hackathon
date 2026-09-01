@@ -28,7 +28,7 @@ export class MSG91EmailProvider implements OutreachProvider {
     this.config.authKey = rawKey && !rawKey.includes("xxxxxx") && !isTest ? rawKey : undefined;
     this.config.domain = config.domain || process.env.MSG91_DOMAIN || process.env.MSG91_EMAIL_DOMAIN;
     this.config.senderEmail =
-      config.senderEmail || process.env.MSG91_FROM_EMAIL || process.env.BREVO_SENDER_EMAIL || "magicalfootball2005@gmail.com";
+      config.senderEmail || process.env.MSG91_FROM_EMAIL || process.env.BREVO_SENDER_EMAIL || undefined;
     this.config.senderName = config.senderName || process.env.BREVO_SENDER_NAME || "ARBITER Recovery";
     this.config.templateId = config.templateId || process.env.MSG91_EMAIL_TEMPLATE_ID;
   }

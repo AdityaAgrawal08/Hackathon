@@ -23,7 +23,7 @@ export interface LinearModel {
   sigma: readonly number[];
 }
 
-/** Pre-calibrated default 23-D model weights (deterministic baseline). */
+/** Pre-calibrated default 22-D model weights (deterministic baseline). */
 export const DEFAULT_16D_MODEL: LinearModel = {
   featureNames: FEATURE_NAMES,
   weights: [
@@ -42,7 +42,6 @@ export const DEFAULT_16D_MODEL: LinearModel = {
     -1.10, // churn_risk_norm
     0.30, // days_since_last_attempt_norm
     -0.10, // high_value_tier
-    0.60, // bank_rail_health_norm
     // Payment method features
     0.30, // is_card — cards have established retry mechanisms
     0.45, // is_upi — UPI has highest recovery rate in India
@@ -53,8 +52,8 @@ export const DEFAULT_16D_MODEL: LinearModel = {
     -0.40, // is_international — international cards have more restrictions
   ],
   bias: 0.15,
-  mu: Array(23).fill(0),
-  sigma: Array(23).fill(1),
+  mu: Array(22).fill(0),
+  sigma: Array(22).fill(1),
 };
 
 export interface ScoreResult {
