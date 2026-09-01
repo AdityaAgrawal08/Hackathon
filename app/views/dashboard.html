@@ -191,7 +191,6 @@
             <option value="upi">UPI</option>
             <option value="netbanking">Netbanking</option>
           </select>
-          <button class="analysis-btn" onclick="showAnalysis()">Why Payments Fail</button>
           <button class="export-btn" onclick="exportCSV()">↓ Export</button>
         </div>
       </div>
@@ -402,7 +401,7 @@
         const net = p.card_network || '';
         const last4 = p.card_last4 || '';
         const type = p.card_type ? ` ${p.card_type}` : '';
-        return `<span class="method-pill">💳 ${net}${type} ${last4 ? '****' + last4 : ''}</span>`;
+        return `<span class="method-pill">💳 Card${net ? ' ' + net : ''}${type}${last4 ? ' ****' + last4 : ''}</span>`;
       }
       if (raw === 'upi') {
         const vpa = p.vpa || '';
@@ -412,18 +411,35 @@
         const bank = p.bank_code || '';
         return `<span class="method-pill">🏦 Netbanking${bank ? ' ' + bank : ''}</span>`;
       }
+      if (raw === 'wallet') {
+        return `<span class="method-pill">👛 Wallet</span>`;
+      }
       if (METHOD_META[raw]) {
         return `<span class="method-pill">${METHOD_META[raw].icon} ${METHOD_META[raw].label}</span>`;
       }
-      return '<span class="method-pill" style="color:#64748b">—</span>';
+      // For "unknown" or empty — try to infer from error_code
+      const code = (p.failure_code || '').toUpperCase();
+      if (code.includes('CARD') || code.includes('EXPIRY') || code.includes('CVV') || code.includes('INSUFFICIENT')) {
+        return `<span class="method-pill">💳 Card</span>`;
+      }
+      if (code.includes('UPI') || code.includes('VPA') || code.includes('MANDATE')) {
+        return `<span class="method-pill">📱 UPI</span>`;
+      }
+      if (code.includes('NETBANKING') || code.includes('BANK')) {
+        return `<span class="method-pill">🏦 Netbanking</span>`;
+      }
+      return `<span class="method-pill" style="color:#64748b">Payment attempted</span>`;
     }
 
     function getFailureReason(p) {
       if (p.status === 'captured') return '<span style="color:#86efac">Payment received ✓</span>';
+      // Always show the actual error description from Razorpay — this is the root cause
+      if (p.failure_description) return escapeHtml(p.failure_description);
+      // Fallback to error code mapping
       const code = (p.failure_code || '').toLowerCase();
       const reason = FAILURE_REASONS[code];
       if (reason) return reason;
-      if (p.failure_description) return escapeHtml(p.failure_description.substring(0, 80));
+      if (p.failure_reason) return escapeHtml(p.failure_reason);
       return 'Payment failed';
     }
 
@@ -437,39 +453,48 @@
         return '<span class="action-badge" style="background:#7f1d1d;color:#fca5a5;cursor:pointer" onclick="showAlerts()">👁 Needs Vendor Review</span>';
       }
 
-      // Show REAL outreach schedule from scheduled_outreach table
+      // Show LAST outreach action with time
+      if (p.last_outreach_channel && p.last_outreach_utc) {
+        const lastTime = new Date(p.last_outreach_utc);
+        const timeStr = lastTime.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+        const channel = p.last_outreach_channel === 'SMS' ? '📱 SMS' : '📧 Email';
+
+        if (p.last_outreach_status === 'SENT') {
+          return `<span class="action-badge" style="background:#052e16;color:#86efac">${channel} sent ${timeStr}</span>`;
+        }
+        if (p.last_outreach_status === 'FAILED' || p.last_outreach_status === 'BOMBED') {
+          const error = p.last_outreach_error ? `: ${escapeHtml(p.last_outreach_error.substring(0, 30))}` : '';
+          return `<span class="action-badge" style="background:#7f1d1d;color:#fca5a5">${channel} failed${error}</span>`;
+        }
+        if (p.last_outreach_status === 'SUPPRESSED') {
+          return `<span class="action-badge" style="background:#713f12;color:#fde68a">${channel} suppressed (DND)</span>`;
+        }
+      }
+
+      // Show NEXT scheduled outreach with countdown
       if (p.next_outreach_utc && p.next_outreach_channel) {
         const nextTime = new Date(p.next_outreach_utc);
         const now = new Date();
         const diffMs = nextTime - now;
-        const diffHrs = Math.round(diffMs / (1000 * 60 * 60));
         const diffMins = Math.round(diffMs / (1000 * 60));
+        const diffHrs = Math.round(diffMs / (1000 * 60 * 60));
         const channel = p.next_outreach_channel === 'SMS' ? '📱 SMS' : '📧 Email';
 
         if (diffMs > 0) {
           if (diffMins < 60) return `<span class="action-badge" style="background:#1e3a5f;color:#93c5fd">${channel} in ${diffMins}m</span>`;
-          if (diffHrs < 24) return `<span class="action-badge" style="background:#1e3a5f;color:#93c5fd">${channel} in ${diffHrs}h</span>`;
           return `<span class="action-badge" style="background:#1e3a5f;color:#93c5fd">${channel} in ${diffHrs}h</span>`;
         } else {
           return `<span class="action-badge" style="background:#713f12;color:#fde68a">⏰ ${channel} overdue</span>`;
         }
       }
 
-      // Outreach was dispatched but no next scheduled — check last outreach status
-      if (p.last_outreach_status === 'FAILED' || p.last_outreach_status === 'BOUNCED') {
-        return `<span class="action-badge" style="background:#7f1d1d;color:#fca5a5">⚠ ${p.last_outreach_channel || 'Outreach'} failed</span>`;
-      }
-
-      // All outreach exhausted
-      if (p.outreach_dispatched && !p.next_outreach_utc) {
-        return '<span class="action-badge" style="background:#374151;color:#9ca3af">All outreach sent</span>';
-      }
-
       // Hard method dead — needs different payment method
       if (p.failure_class === 'HARD_METHOD_DEAD') return '<span class="action-badge" style="background:#7f1d1d;color:#fca5a5">🔄 Use different method</span>';
 
-      // Outreach not yet dispatched
-      if (!p.outreach_dispatched) return '<span class="action-badge" style="background:#713f12;color:#fde68a">⏳ Queued for outreach</span>';
+      // No outreach possible (no contact info)
+      if (!p.outreach_dispatched && !p.next_outreach_utc && !p.last_outreach_channel) {
+        return '<span class="action-badge" style="background:#374151;color:#9ca3af">No contact info</span>';
+      }
 
       return '<span class="action-badge" style="background:#374151;color:#9ca3af">—</span>';
     }

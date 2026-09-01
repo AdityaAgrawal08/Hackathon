@@ -255,16 +255,29 @@ export async function processFailedPayment(
   const eventId = `evt_${nowMs}_${createHash("sha256").update(`${input.razorpayPaymentId}${nowMs}`).digest("hex").slice(0, 8)}`;
 
   const existingRow = await client.execute({
-    sql: `SELECT id, retry_count FROM live_payment_events
+    sql: `SELECT id, retry_count, razorpay_payment_id FROM live_payment_events
           WHERE customer_profile_id = ? AND product_name = ? AND status = 'failed'
           ORDER BY created_at_utc DESC LIMIT 1`,
     args: [input.customerProfileId, input.productName],
   });
 
   if (existingRow.rows.length > 0) {
-    // RETRY: Update existing failed row with new method, new error, increment retry_count
+    // Check if this is the webhook arriving after client-side failure (same event, different source)
+    // vs. an actual customer retry (different attempt entirely)
+    const existingPaymentId = String(existingRow.rows[0].razorpay_payment_id || "");
+    const newPaymentId = String(input.razorpayPaymentId || "");
+    const existingIsClientSide = existingPaymentId.startsWith("pay_client_");
+    const newIsClientSide = newPaymentId.startsWith("pay_client_");
+    const isSameEventDifferentSource = existingIsClientSide !== newIsClientSide;
+
+    // RETRY: Update existing failed row with new method, new error
     const existingId = String(existingRow.rows[0].id);
     const existingRetryCount = Number(existingRow.rows[0].retry_count || 0);
+
+    // Only increment retry_count if this is an ACTUAL customer retry (different attempt)
+    // NOT when the webhook is filling in real data for the same client-side failure
+    const newRetryCount = isSameEventDifferentSource ? existingRetryCount : existingRetryCount + 1;
+
     await client.execute({
       sql: `UPDATE live_payment_events SET
         razorpay_payment_id = ?,
@@ -284,12 +297,12 @@ export async function processFailedPayment(
         input.paymentMethod || "unknown", input.cardLast4 || null, input.cardNetwork || null,
         input.cardIssuer || null, input.cardType || null,
         input.vpa || null, input.bankCode || null,
-        existingRetryCount + 1,
+        newRetryCount,
         nowUtc,
         existingId,
       ],
     });
-    console.log(`[Workflow] Retry: updated event ${existingId} (retry #${existingRetryCount + 1}) for order ${input.razorpayOrderId}`);
+    console.log(`[Workflow] ${isSameEventDifferentSource ? 'Webhook fill-in' : 'Retry'}: updated event ${existingId} (retry #${newRetryCount}) for order ${input.razorpayOrderId}`);
 
     // 8. Update customer profile
     await client.execute({
@@ -457,8 +470,34 @@ export async function processFailedPayment(
         const emailResult = await outreachRouter.dispatch("EMAIL", outreachPayload, nowMs);
         dispatchResults.push(emailResult);
         console.log(`[Outreach] EMAIL → ${emailResult.status} via ${emailResult.providerName}`);
+        // Store initial outreach result in scheduled_outreach for AI Action tracking
+        try {
+          await client.execute({
+            sql: `INSERT OR IGNORE INTO scheduled_outreach
+              (id, live_payment_event_id, customer_profile_id, channel, scheduled_at_utc, executed, executed_at_utc, status, error_message)
+              VALUES (?, ?, ?, 'EMAIL', ?, 1, ?, ?, ?)`,
+            args: [
+              `init_${eventId}_EMAIL`, eventId, input.customerProfileId,
+              nowUtc, nowUtc,
+              emailResult.status.includes("SENT") ? "SENT" : "FAILED",
+              emailResult.errorMessage || null,
+            ],
+          });
+        } catch {}
       } catch (err) {
         console.error("[Outreach] Email dispatch failed:", err);
+        // Store failed attempt
+        try {
+          await client.execute({
+            sql: `INSERT OR IGNORE INTO scheduled_outreach
+              (id, live_payment_event_id, customer_profile_id, channel, scheduled_at_utc, executed, executed_at_utc, status, error_message)
+              VALUES (?, ?, ?, 'EMAIL', ?, 1, ?, 'FAILED', ?)`,
+            args: [
+              `init_${eventId}_EMAIL`, eventId, input.customerProfileId,
+              nowUtc, nowUtc, (err as Error).message,
+            ],
+          });
+        } catch {}
       }
     } else {
       console.log("[Outreach] SKIPPED email: no email address on customer profile");
@@ -473,8 +512,34 @@ export async function processFailedPayment(
         if (smsResult.status.includes("SUPPRESSED")) {
           console.log(`[Outreach] SMS suppressed: ${smsResult.errorMessage}`);
         }
+        // Store initial outreach result in scheduled_outreach for AI Action tracking
+        try {
+          await client.execute({
+            sql: `INSERT OR IGNORE INTO scheduled_outreach
+              (id, live_payment_event_id, customer_profile_id, channel, scheduled_at_utc, executed, executed_at_utc, status, error_message)
+              VALUES (?, ?, ?, 'SMS', ?, 1, ?, ?, ?)`,
+            args: [
+              `init_${eventId}_SMS`, eventId, input.customerProfileId,
+              nowUtc, nowUtc,
+              smsResult.status.includes("SENT") ? "SENT" : (smsResult.status.includes("SUPPRESSED") ? "SUPPRESSED" : "FAILED"),
+              smsResult.errorMessage || null,
+            ],
+          });
+        } catch {}
       } catch (err) {
         console.error("[Outreach] SMS dispatch failed:", err);
+        // Store failed attempt
+        try {
+          await client.execute({
+            sql: `INSERT OR IGNORE INTO scheduled_outreach
+              (id, live_payment_event_id, customer_profile_id, channel, scheduled_at_utc, executed, executed_at_utc, status, error_message)
+              VALUES (?, ?, ?, 'SMS', ?, 1, ?, 'FAILED', ?)`,
+            args: [
+              `init_${eventId}_SMS`, eventId, input.customerProfileId,
+              nowUtc, nowUtc, (err as Error).message,
+            ],
+          });
+        } catch {}
       }
     } else {
       console.log("[Outreach] SKIPPED SMS: no phone number on customer profile");
