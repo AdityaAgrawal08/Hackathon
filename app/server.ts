@@ -36,6 +36,7 @@ import {
   appendAuditLedger,
   getAuditLedgerForEntity,
   verifyAuditLedgerChain,
+  diagnosePaymentFailure,
 } from "../packages/core/src/index.js";
 
 import {
@@ -1469,6 +1470,22 @@ app.get("/api/events/:eventId", async (req: Request, res: Response) => {
     });
     if (rows.rows.length === 0) return res.status(404).json({ error: "Event not found" });
     const row = rows.rows[0] as any;
+    const diagnosis = diagnosePaymentFailure({
+      failureCode: row.failure_code,
+      failureDescription: row.failure_description,
+      failureSource: row.failure_source,
+      failureStep: row.failure_step,
+      failureReason: row.failure_reason,
+      paymentMethod: row.payment_method,
+      cardLast4: row.card_last4,
+      cardNetwork: row.card_network,
+      cardIssuer: row.card_issuer,
+      bankCode: row.bank_code,
+      vpa: row.vpa,
+      acquirerErrorCode: row.acquirer_error_code,
+      acquirerRrn: row.acquirer_rrn,
+    });
+
     res.json({
       eventId: row.id,
       razorpayPaymentId: row.razorpay_payment_id,
@@ -1483,13 +1500,19 @@ app.get("/api/events/:eventId", async (req: Request, res: Response) => {
       failureClass: row.failure_class,
       failureCode: row.failure_code,
       failureDescription: row.failure_description,
+      failureSource: row.failure_source || "",
+      failureStep: row.failure_step || "",
+      failureReason: row.failure_reason || "",
       paymentMethod: row.payment_method,
       cardLast4: row.card_last4,
       cardNetwork: row.card_network,
+      cardIssuer: row.card_issuer,
       cardType: row.card_type,
       vpa: row.vpa,
       bankCode: row.bank_code,
+      acquirerRrn: row.acquirer_rrn || "",
       createdAt: row.created_at_utc,
+      diagnosis,
     });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });

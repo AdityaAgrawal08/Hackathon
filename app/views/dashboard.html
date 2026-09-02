@@ -518,7 +518,31 @@
 
     function getFailureReason(p) {
       const code = (p.failure_code || '').toLowerCase();
-      return FAILURE_REASONS[code] || p.failure_description || p.failure_code || 'Payment declined';
+      const reason = (p.failure_reason || '').toLowerCase();
+      const step = (p.failure_step || '').toLowerCase();
+      const source = (p.failure_source || '').toLowerCase();
+      const desc = p.failure_description || '';
+      const last4 = p.card_last4 || '';
+
+      let domainBadge = '';
+      let text = FAILURE_REASONS[code] || desc || p.failure_code || 'Payment declined';
+
+      if (reason.includes('insufficient') || code.includes('insufficient') || last4 === '0001') {
+        domainBadge = '<span style="display:inline-block; font-size:10px; font-weight:700; background:#064e3b; color:#6ee7b7; padding:1px 6px; border-radius:4px; margin-right:4px;">ISO 51: Low Bal</span>';
+        text = 'Customer account has insufficient balance';
+      } else if (reason.includes('down') || reason.includes('timeout') || code.includes('timeout') || last4 === '0002') {
+        domainBadge = '<span style="display:inline-block; font-size:10px; font-weight:700; background:#451a03; color:#fcd34d; padding:1px 6px; border-radius:4px; margin-right:4px;">ISO 91: Timeout</span>';
+        text = 'Issuer switch / CBS server timed out';
+      } else if (step.includes('authentication') || reason.includes('otp') || last4 === '0004') {
+        domainBadge = '<span style="display:inline-block; font-size:10px; font-weight:700; background:#1e1b4b; color:#c7d2fe; padding:1px 6px; border-radius:4px; margin-right:4px;">3DS: Dropped</span>';
+        text = 'OTP authentication timed out or cancelled';
+      } else if (reason.includes('expired') || code.includes('expired') || last4 === '0003') {
+        domainBadge = '<span style="display:inline-block; font-size:10px; font-weight:700; background:#4c0519; color:#fda4af; padding:1px 6px; border-radius:4px; margin-right:4px;">ISO 54: Expired</span>';
+        text = 'Instrument inactive or expired';
+      }
+
+      const metaInfo = source ? `<div style="font-size:11px; color:#64748b; margin-top:2px;">Src: ${escapeHtml(source)} • Step: ${escapeHtml(step || 'authorization')}</div>` : '';
+      return `<div>${domainBadge}<span style="font-size:12px;">${escapeHtml(text)}</span>${metaInfo}</div>`;
     }
 
     function getActionBadge(p) {
