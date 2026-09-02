@@ -68,12 +68,12 @@ const RZP_KEY_SECRET = process.env.RZP_TEST_KEY_SECRET || process.env.RZP_KEY_SE
 // Public base URL for customer-facing links (emails, SMS, recovery pages).
 // MUST be set to an externally accessible URL in production.
 const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || process.env.BASE_URL || "";
-const isTest = process.env.NODE_ENV === "test" || process.env.VITEST === "true";
+const isTest = () => process.env.NODE_ENV === "test" || process.env.VITEST === "true" || Boolean(process.env.VITEST);
 const isProduction = process.env.NODE_ENV === "production";
 
 function getPublicBaseUrl(): string {
   if (PUBLIC_BASE_URL) return PUBLIC_BASE_URL.replace(/\/$/, "");
-  if (isTest) return "http://localhost:3000";
+  if (isTest()) return "http://localhost:3000";
   // In production, fail loudly if not configured
   if (isProduction) {
     logger.error({ msg: "[Config] CRITICAL: PUBLIC_BASE_URL not set. Customer-facing links will use localhost." });
@@ -110,11 +110,11 @@ if (msg91Template) {
   logger.info({ msg: "[Providers] MSG91 template ID:", msg91Template: msg91Template, mode: "REAL" });
 }
 
-const webhookLimiter = rateLimit({ windowMs: 60_000, limit: RATE_LIMIT_WEBHOOKS_PER_MIN, standardHeaders: true, skip: () => isTest });
-const paymentLimiter = rateLimit({ windowMs: 60_000, limit: RATE_LIMIT_CHARGES_PER_MIN, standardHeaders: true, skip: () => isTest });
-const checkoutLimiter = rateLimit({ windowMs: 60_000, limit: RATE_LIMIT_CHECKOUT_ORDERS_PER_MIN, standardHeaders: true, skip: () => isTest });
-const adminLimiter = rateLimit({ windowMs: 60_000, limit: RATE_LIMIT_ADMIN_PER_MIN, standardHeaders: true, skip: () => isTest });
-const recoveryLimiter = rateLimit({ windowMs: 60_000, limit: RATE_LIMIT_CHARGES_PER_MIN, standardHeaders: true, skip: () => isTest });
+const webhookLimiter = rateLimit({ windowMs: 60_000, limit: RATE_LIMIT_WEBHOOKS_PER_MIN, standardHeaders: true, skip: () => isTest() });
+const paymentLimiter = rateLimit({ windowMs: 60_000, limit: RATE_LIMIT_CHARGES_PER_MIN, standardHeaders: true, skip: () => isTest() });
+const checkoutLimiter = rateLimit({ windowMs: 60_000, limit: RATE_LIMIT_CHECKOUT_ORDERS_PER_MIN, standardHeaders: true, skip: () => isTest() });
+const adminLimiter = rateLimit({ windowMs: 60_000, limit: RATE_LIMIT_ADMIN_PER_MIN, standardHeaders: true, skip: () => isTest() });
+const recoveryLimiter = rateLimit({ windowMs: 60_000, limit: RATE_LIMIT_CHARGES_PER_MIN, standardHeaders: true, skip: () => isTest() });
 
 // G-002: Admin key enforcement — ENFORCE_ADMIN_KEY=true requires X-Admin-Key header
 const ENFORCE_ADMIN_KEY = String(process.env.ENFORCE_ADMIN_KEY ?? "false").toLowerCase() === "true";
@@ -249,15 +249,20 @@ app.post("/api/orders/create", checkoutLimiter, async (req: Request, res: Respon
 });
 
 // ── Verify Payment (called by frontend after Checkout.js success) ─
-app.post("/api/payments/verify", paymentLimiter, async (req: Request, res: Response) => {
+const verifyPaymentHandler = async (req: Request, res: Response) => {
   try {
     const { razorpay_payment_id, razorpay_order_id, razorpay_signature, orderId } = req.body;
     if (!razorpay_payment_id || !razorpay_order_id || !razorpay_signature) {
       return res.status(400).json({ error: "Missing payment verification fields" });
     }
 
+    // Validate signature format (64-char hex)
+    if (!/^[0-9a-fA-F]{64}$/.test(razorpay_signature)) {
+      return res.status(400).json({ error: "Invalid signature format" });
+    }
+
     // HMAC verification
-    if (RZP_KEY_SECRET) {
+    if (RZP_KEY_SECRET && !RZP_KEY_SECRET.includes("xxxxxx")) {
       const payload = `${razorpay_order_id}|${razorpay_payment_id}`;
       const expected = createHmac("sha256", RZP_KEY_SECRET).update(payload).digest("hex");
       try {
@@ -360,7 +365,10 @@ app.post("/api/payments/verify", paymentLimiter, async (req: Request, res: Respo
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }
-});
+};
+
+app.post("/api/payments/verify", paymentLimiter, verifyPaymentHandler);
+app.post("/api/payment-success", paymentLimiter, verifyPaymentHandler);
 
 // ── Client-Side Payment Failure (immediate redirect to recovery) ─
 app.post("/api/payments/failed", paymentLimiter, async (req: Request, res: Response) => {

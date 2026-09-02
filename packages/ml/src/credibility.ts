@@ -11,7 +11,7 @@
  *   HIGH     — Suppress outreach, notify vendor for approval
  *   CRITICAL — Quarantine, block all outreach, require human review
  */
-import type { FailureClassId } from "../core/src/decide/catalog.js";
+import type { FailureClassId } from "@arbiter/core/decide";
 
 export interface CredibilityCustomerProfile {
   totalAttempts: number;
@@ -133,8 +133,9 @@ export function assessCredibility(input: CredibilityInput): CredibilityResult {
   }
 
   // Rule 10: Top attribution is risk-related
-  if (input.mlAttributions.length > 0) {
-    const topFeature = input.mlAttributions[0].feature;
+  const firstAttr = input.mlAttributions[0];
+  if (firstAttr) {
+    const topFeature = firstAttr.feature;
     if (topFeature === "f_class_risk" || topFeature === "f_is_risk_flagged") {
       score -= 0.10;
       reasons.push("ML top driver is risk-related feature (" + topFeature + ")");
@@ -144,8 +145,9 @@ export function assessCredibility(input: CredibilityInput): CredibilityResult {
   // Rule 11: Escalating failure amounts
   if (input.priorFailureAmountsPaise.length >= 2) {
     const sorted = [...input.priorFailureAmountsPaise].sort((a, b) => a - b);
-    const isEscalating = sorted[sorted.length - 1] > sorted[0] * 2;
-    if (isEscalating) {
+    const minVal = sorted[0];
+    const maxVal = sorted[sorted.length - 1];
+    if (minVal !== undefined && maxVal !== undefined && maxVal > minVal * 2) {
       score -= 0.10;
       reasons.push("Failure amounts show escalation pattern");
     }

@@ -14,7 +14,7 @@ describe("Federated merchant intelligence (§4.2)", () => {
   function makeSilo(id: string, weights: number[], bias = 0, samples = 100): SiloReport {
     return {
       siloId: id,
-      weights: weights.length === FEATURE_COUNT ? weights : Array(FEATURE_COUNT).fill(0).map((_, i) => weights[i % weights.length]),
+      weights: weights.length === FEATURE_COUNT ? weights : Array(FEATURE_COUNT).fill(0).map((_, i) => weights[i % weights.length] ?? 0),
       bias,
       sampleCount: samples,
       trainedAtUtc: "2026-01-01T00:00:00.000Z",
