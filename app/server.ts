@@ -33,6 +33,9 @@ import {
   RATE_LIMIT_ADMIN_PER_MIN,
   DEFAULT_LOCAL_WEBHOOK_SECRET,
   DEFAULT_LOCAL_ADMIN_SECRET,
+  appendAuditLedger,
+  getAuditLedgerForEntity,
+  verifyAuditLedgerChain,
 } from "../packages/core/src/index.js";
 
 import {
@@ -54,6 +57,9 @@ import {
   getProduct,
   processFailedPayment,
   recordSuccessfulPayment,
+  onPaymentRecovered,
+  createPromiseToPay,
+  generateUpiIntents,
 } from "./payment_workflow.js";
 import { getCustomerMessage, getVendorMessage, getErrorEntry } from "../packages/core/src/error-catalog.js";
 
@@ -294,6 +300,29 @@ const verifyPaymentHandler = async (req: Request, res: Response) => {
     }
 
     if (!customerProfileId) {
+      if (req.body.customerId || req.body.customerProfileId) {
+        customerProfileId = String(req.body.customerId || req.body.customerProfileId);
+      } else {
+        const localEvent = await dbClient.execute({
+          sql: `SELECT customer_profile_id, product_name FROM live_payment_events WHERE razorpay_order_id = ? OR id = ? ORDER BY created_at_utc DESC LIMIT 1`,
+          args: [razorpay_order_id, razorpay_order_id],
+        });
+        if (localEvent.rows.length > 0) {
+          customerProfileId = String(localEvent.rows[0].customer_profile_id);
+          productName = String(localEvent.rows[0].product_name || "");
+        } else {
+          const downsell = await dbClient.execute({
+            sql: `SELECT customer_profile_id FROM downsell_offers WHERE razorpay_order_id = ? LIMIT 1`,
+            args: [razorpay_order_id],
+          });
+          if (downsell.rows.length > 0) {
+            customerProfileId = String(downsell.rows[0].customer_profile_id);
+          }
+        }
+      }
+    }
+
+    if (!customerProfileId) {
       return res.status(400).json({ error: "Could not identify customer" });
     }
 
@@ -330,6 +359,7 @@ const verifyPaymentHandler = async (req: Request, res: Response) => {
 
     // Record successful payment
     let eventId = "";
+    let recoveryPruning = { cancelledOutreachCount: 0, auditEntryId: "" };
     try {
       eventId = await recordSuccessfulPayment(dbClient, {
         razorpayPaymentId: razorpay_payment_id,
@@ -346,6 +376,15 @@ const verifyPaymentHandler = async (req: Request, res: Response) => {
         vpa,
         bankCode,
       });
+
+      recoveryPruning = await onPaymentRecovered(dbClient, {
+        customerProfileId,
+        orderId: razorpay_order_id,
+        eventId,
+        amountPaise,
+        paymentMethod,
+        nowMs: Date.now(),
+      });
     } catch (err) {
       logger.error({ msg: "Failed to record payment", err: err });
       return res.status(500).json({ error: "Failed to record payment" });
@@ -359,9 +398,16 @@ const verifyPaymentHandler = async (req: Request, res: Response) => {
       customerProfileId,
       amountPaise,
       productName,
+      cancelledReminders: recoveryPruning.cancelledOutreachCount,
     });
 
-    res.json({ success: true, status: "captured", eventId });
+    res.json({
+      success: true,
+      status: "captured",
+      eventId,
+      cancelledReminders: recoveryPruning.cancelledOutreachCount,
+      auditEntryId: recoveryPruning.auditEntryId,
+    });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }
@@ -369,6 +415,213 @@ const verifyPaymentHandler = async (req: Request, res: Response) => {
 
 app.post("/api/payments/verify", paymentLimiter, verifyPaymentHandler);
 app.post("/api/payment-success", paymentLimiter, verifyPaymentHandler);
+
+// ── Multi-Action Recovery Portal API Endpoints (Task 3.1) ──────────
+
+// 1. 1-Tap UPI Intent URI Generator
+app.post("/api/recovery/upi-intent", recoveryLimiter, async (req: Request, res: Response) => {
+  try {
+    const { eventId } = req.body;
+    if (!eventId) return res.status(400).json({ error: "Missing eventId" });
+
+    const evResult = await dbClient.execute({
+      sql: `SELECT * FROM live_payment_events WHERE id = ?`,
+      args: [eventId],
+    });
+    if (evResult.rows.length === 0) {
+      return res.status(404).json({ error: "Event not found" });
+    }
+    const ev = evResult.rows[0] as any;
+    const amountPaise = Number(ev.amount_paise || 499900);
+
+    const intents = generateUpiIntents({
+      amountPaise,
+      merchantVpa: process.env.RAZORPAY_MERCHANT_VPA || "merchant@razorpay",
+      merchantName: "ARBITER Recovery",
+      transactionRef: eventId,
+      transactionNote: `Recovery for ${ev.product_name || "Order"}`,
+    });
+
+    res.json({
+      success: true,
+      eventId,
+      amountPaise,
+      ...intents,
+    });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 2. Promise-to-Pay Payday Delay Handler
+app.post("/api/recovery/promise", recoveryLimiter, async (req: Request, res: Response) => {
+  try {
+    const { eventId, promisedDate, notes } = req.body;
+    if (!eventId || !promisedDate) {
+      return res.status(400).json({ error: "Missing eventId or promisedDate" });
+    }
+
+    const evResult = await dbClient.execute({
+      sql: `SELECT * FROM live_payment_events WHERE id = ?`,
+      args: [eventId],
+    });
+    if (evResult.rows.length === 0) {
+      return res.status(404).json({ error: "Event not found" });
+    }
+    const ev = evResult.rows[0] as any;
+
+    const promise = await createPromiseToPay(dbClient, {
+      eventId,
+      customerProfileId: String(ev.customer_profile_id),
+      amountPaise: Number(ev.amount_paise),
+      promisedDate: String(promisedDate),
+      notes,
+      nowMs: Date.now(),
+    });
+
+    // Broadcast SSE to vendor dashboard
+    broadcastSSE("global", {
+      type: "PROMISE_TO_PAY_RECORDED",
+      eventId,
+      customerProfileId: ev.customer_profile_id,
+      amountPaise: ev.amount_paise,
+      promisedDate,
+      reminderScheduledUtc: promise.reminderScheduledUtc,
+    });
+
+    res.json({
+      success: true,
+      ...promise,
+    });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 3. Smart Downsell & Split-Pay Cart Salvage Handler
+app.post("/api/recovery/downsell", recoveryLimiter, async (req: Request, res: Response) => {
+  try {
+    const { eventId, downsellType, targetProductId } = req.body;
+    if (!eventId || !downsellType) {
+      return res.status(400).json({ error: "Missing eventId or downsellType" });
+    }
+
+    const evResult = await dbClient.execute({
+      sql: `SELECT * FROM live_payment_events WHERE id = ?`,
+      args: [eventId],
+    });
+    if (evResult.rows.length === 0) {
+      return res.status(404).json({ error: "Event not found" });
+    }
+    const ev = evResult.rows[0] as any;
+    const originalAmountPaise = Number(ev.amount_paise);
+
+    let downsellAmountPaise = originalAmountPaise;
+    let description = "";
+
+    if (downsellType === "split_3") {
+      downsellAmountPaise = Math.ceil(originalAmountPaise / 3);
+      description = `1st installment (1 of 3) for ${ev.product_name}`;
+    } else if (downsellType === "switch_monthly") {
+      const basicProduct = getProduct("prod_monthly_basic");
+      downsellAmountPaise = basicProduct ? basicProduct.pricePaise : 49900;
+      description = `Downgrade to Monthly Basic Plan`;
+    } else if (targetProductId) {
+      const targetProd = getProduct(targetProductId);
+      if (targetProd) {
+        downsellAmountPaise = targetProd.pricePaise;
+        description = `Switch to ${targetProd.name}`;
+      }
+    }
+
+    const nowMs = Date.now();
+    const nowUtc = isoUtc(nowMs);
+    const downsellId = `dwn_${nowMs}_${randomBytes(4).toString("hex")}`;
+    let orderId = `order_dwn_${nowMs}_${randomBytes(4).toString("hex")}`;
+
+    if (RZP_KEY_ID && RZP_KEY_SECRET && !RZP_KEY_ID.includes("xxxxxx")) {
+      try {
+        const auth = Buffer.from(`${RZP_KEY_ID}:${RZP_KEY_SECRET}`).toString("base64");
+        const rzpRes = await fetch("https://api.razorpay.com/v1/orders", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Basic ${auth}` },
+          body: JSON.stringify({
+            amount: downsellAmountPaise,
+            currency: "INR",
+            receipt: `rcpt_dwn_${nowMs}`,
+            notes: {
+              customer_profile_id: ev.customer_profile_id,
+              parent_event_id: eventId,
+              downsell_type: downsellType,
+              description,
+            },
+          }),
+        });
+        if (rzpRes.ok) {
+          const rzpData = (await rzpRes.json()) as { id: string };
+          if (rzpData?.id) orderId = rzpData.id;
+        }
+      } catch (err) {
+        logger.warn({ msg: "Razorpay downsell order creation failed, using local order", err });
+      }
+    }
+
+    await dbClient.execute({
+      sql: `INSERT INTO downsell_offers
+        (id, parent_event_id, customer_profile_id, downsell_type, original_amount_paise, downsell_amount_paise, razorpay_order_id, status, created_at_utc)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'OFFERED', ?)`,
+      args: [downsellId, eventId, ev.customer_profile_id, downsellType, originalAmountPaise, downsellAmountPaise, orderId, nowUtc],
+    });
+
+    await appendAuditLedger(dbClient, {
+      eventType: "DOWNSELL_OFFER_CREATED",
+      entityId: downsellId,
+      customerId: ev.customer_profile_id,
+      actor: "customer_portal",
+      nowMs,
+      payload: {
+        parentEventId: eventId,
+        downsellType,
+        originalAmountPaise,
+        downsellAmountPaise,
+        orderId,
+      },
+    });
+
+    res.json({
+      success: true,
+      downsellId,
+      orderId,
+      originalAmountPaise,
+      amountPaise: downsellAmountPaise,
+      currency: "INR",
+      keyId: RZP_KEY_ID || "rzp_test_demo",
+      description,
+    });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 4. Cryptographic SHA-256 Audit Trail Endpoints (Task 3.2 / 4.2)
+app.get("/api/audit-trail/:entityId", recoveryLimiter, async (req: Request, res: Response) => {
+  try {
+    const { entityId } = req.params;
+    const entries = await getAuditLedgerForEntity(dbClient, entityId);
+    res.json({ success: true, entityId, count: entries.length, entries });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+app.get("/api/audit-trail/verify/chain", adminLimiter, requireAdminKey, async (_req: Request, res: Response) => {
+  try {
+    const verification = await verifyAuditLedgerChain(dbClient);
+    res.json({ success: true, ...verification });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
 
 // ── Client-Side Payment Failure (immediate redirect to recovery) ─
 app.post("/api/payments/failed", paymentLimiter, async (req: Request, res: Response) => {
