@@ -139,4 +139,35 @@ describe("Task DIAG-09: Deep Razorpay Banking Diagnostics Engine", () => {
     expect(diag.customerTitle).toBe("Payment Could Not Be Completed");
     expect(diag.prescriptiveAction).toContain("Switch to 1-Tap UPI");
   });
+
+  it("API /api/events/:eventId returns deep diagnosis object with ISO code and prescriptive action", async () => {
+    const { app, dbClient } = await import("../../app/server.js");
+    const eventId = `evt_diag_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    const custId = `cust_diag_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    const phone = `98${Math.floor(10000000 + Math.random() * 90000000)}`;
+
+    await dbClient.execute({
+      sql: `INSERT INTO customer_profiles (id, name, phone, email, created_at_utc) VALUES (?, 'Diag User', ?, 'diag@example.com', datetime('now'))`,
+      args: [custId, phone],
+    });
+
+    await dbClient.execute({
+      sql: `INSERT INTO live_payment_events (id, razorpay_payment_id, razorpay_order_id, customer_profile_id, product_name, amount_paise, status, failure_code, failure_description, failure_source, failure_step, failure_reason, card_last4, acquirer_error_code, acquirer_rrn, created_at_utc)
+            VALUES (?, 'pay_diag_1', 'order_diag_1', ?, 'Test Product', 499900, 'failed', 'BAD_REQUEST_ERROR', 'Low balance', 'bank', 'payment_authorization', 'payment_insufficient_funds', '0001', '51', 'rrn_diag_123', datetime('now'))`,
+      args: [eventId, custId],
+    });
+
+    const server = app.listen(0);
+    const addr = server.address() as any;
+    const res = await fetch(`http://127.0.0.1:${addr.port}/api/events/${eventId}`);
+    const data = await res.json() as any;
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+
+    expect(res.status).toBe(200);
+    expect(data.diagnosis).toBeDefined();
+    expect(data.diagnosis.faultDomain).toBe("CUSTOMER_BALANCE");
+    expect(data.diagnosis.isoCode).toBe("ISO-8583: 51");
+    expect(data.diagnosis.customerTitle).toBe("Temporary Balance Issue");
+    expect(data.acquirerRrn).toBe("rrn_diag_123");
+  });
 });

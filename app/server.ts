@@ -710,15 +710,29 @@ app.post("/api/payments/failed", paymentLimiter, async (req: Request, res: Respo
       });
     }
 
-    // Simplified human-readable reason for the user
-    const simplifiedReason = getSimplifiedReason(failureCode, result.failureClass);
+    // Diagnosis using deep banking engine
+    const diag = diagnosePaymentFailure({
+      failureCode,
+      failureDescription: error_description,
+      failureStep: error_step,
+      failureSource: error_source,
+      failureReason: error_reason,
+      paymentMethod: method,
+      cardLast4,
+      cardNetwork,
+      cardIssuer,
+      cardType,
+      vpa,
+      bankCode,
+    });
 
     res.json({
       eventId: result.eventId,
       failureClass: result.failureClass,
       action: result.action,
       failureCode,
-      failureDescription: simplifiedReason,
+      failureDescription: diag.customerDescription,
+      diagnosis: diag,
     });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
@@ -917,6 +931,7 @@ app.post("/api/webhooks/razorpay", webhookLimiter, async (req: Request, res: Res
               // Acquirer data
               acquirerAuthCode: acquirerData.auth_code || "",
               acquirerRrn: acquirerData.rrn || "",
+              acquirerErrorCode: acquirerData.error_code || "",
 
               // Token and contact
               razorpayTokenId: payment.token_id || "",

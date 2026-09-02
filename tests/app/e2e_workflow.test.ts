@@ -38,7 +38,7 @@ beforeAll(async () => {
     payment_method TEXT, card_last4 TEXT, card_network TEXT,
     card_issuer TEXT, card_type TEXT, card_emi INTEGER DEFAULT 0,
     vpa TEXT, bank_code TEXT, is_international INTEGER DEFAULT 0,
-    acquirer_auth_code TEXT, acquirer_rrn TEXT,
+    acquirer_auth_code TEXT, acquirer_rrn TEXT, acquirer_error_code TEXT,
     razorpay_token_id TEXT, razorpay_contact TEXT, razorpay_email TEXT,
     razorpay_created_at INTEGER,
     customer_name TEXT, customer_phone TEXT, customer_email TEXT

@@ -67,6 +67,7 @@ async function runMigrations(client: Client) {
       is_international INTEGER DEFAULT 0,
       acquirer_auth_code TEXT,
       acquirer_rrn TEXT,
+      acquirer_error_code TEXT,
       razorpay_token_id TEXT,
       razorpay_contact TEXT,
       razorpay_email TEXT,
