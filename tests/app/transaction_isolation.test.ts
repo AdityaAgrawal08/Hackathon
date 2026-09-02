@@ -89,7 +89,9 @@ async function runMigrations(client: Client) {
       executed INTEGER DEFAULT 0,
       executed_at_utc TEXT,
       status TEXT,
-      error_message TEXT
+      error_message TEXT,
+      cancelled_reason TEXT,
+      cancelled_at_utc TEXT
     )`);
 }
 

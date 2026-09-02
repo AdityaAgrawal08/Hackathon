@@ -46,7 +46,8 @@ beforeAll(async () => {
   await db.execute(`CREATE TABLE IF NOT EXISTS scheduled_outreach (
     id TEXT PRIMARY KEY, live_payment_event_id TEXT, customer_profile_id TEXT,
     channel TEXT, scheduled_at_utc TEXT, executed INTEGER DEFAULT 0,
-    executed_at_utc TEXT, status TEXT, error_message TEXT
+    executed_at_utc TEXT, status TEXT, error_message TEXT,
+    cancelled_reason TEXT, cancelled_at_utc TEXT
   )`);
   await db.execute(`CREATE TABLE IF NOT EXISTS webhook_dedupe (
     provider_event_id TEXT PRIMARY KEY, first_seen_utc TEXT, swallow_count INTEGER DEFAULT 0
@@ -295,7 +296,7 @@ describe("E2E Payment Workflow", () => {
       });
 
       const outreach = await getOutreachForEvent(first.eventId);
-      const suppressed = outreach.filter((o: any) => o.status === "SUPPRESSED");
+      const suppressed = outreach.filter((o: any) => o.status === "SUPPRESSED" || o.status === "CANCELLED");
       expect(suppressed.length).toBeGreaterThan(0);
     });
   });

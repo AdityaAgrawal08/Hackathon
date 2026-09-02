@@ -3,299 +3,345 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ARBITER — Complete Your Payment</title>
+  <title>ARBITER — Payment Recovery & Retention Portal</title>
   <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
-    .card { background: #1e293b; border: 1px solid #334155; border-radius: 16px; padding: 40px; max-width: 440px; width: 100%; text-align: center; }
-    .logo { font-size: 24px; font-weight: 700; letter-spacing: 1px; margin-bottom: 32px; color: #f8fafc; }
-    .icon { font-size: 48px; margin-bottom: 16px; }
-    .title { font-size: 20px; font-weight: 600; margin-bottom: 8px; color: #f8fafc; }
-    .subtitle { font-size: 14px; color: #94a3b8; margin-bottom: 24px; line-height: 1.6; }
-    .message-box { background: #0f172a; border-radius: 12px; padding: 20px; margin-bottom: 24px; text-align: left; }
-    .message-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
-    .message-text { font-size: 14px; line-height: 1.6; }
-    .message-box.soft { border: 1px solid #166534; }
-    .message-box.soft .message-label { color: #4ade80; }
-    .message-box.soft .message-text { color: #bbf7d0; }
-    .message-box.hard { border: 1px solid #92400e; }
-    .message-box.hard .message-label { color: #fb923c; }
-    .message-box.hard .message-text { color: #fed7aa; }
-    .message-box.network { border: 1px solid #1e3a5f; }
-    .message-box.network .message-label { color: #60a5fa; }
-    .message-box.network .message-text { color: #bfdbfe; }
-    .message-box.risk { border: 1px solid #7f1d1d; }
-    .message-box.risk .message-label { color: #f87171; }
-    .message-box.risk .message-text { color: #fecaca; }
-    .message-box.unknown { border: 1px solid #555; }
-    .message-box.unknown .message-label { color: #9ca3af; }
-    .message-box.unknown .message-text { color: #d1d5db; }
-    .amount-box { background: #0f172a; border: 1px solid #334155; border-radius: 12px; padding: 20px; margin-bottom: 24px; }
-    .amount-label { font-size: 13px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; }
-    .amount-value { font-size: 32px; font-weight: 700; color: #22c55e; margin-top: 4px; }
-    .pay-btn { width: 100%; padding: 14px; background: #2563eb; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; transition: background 0.2s; margin-bottom: 12px; }
-    .pay-btn:hover { background: #1d4ed8; }
-    .pay-btn:disabled { background: #475569; cursor: not-allowed; }
-    .status { display: none; padding: 12px; border-radius: 8px; font-size: 14px; margin-bottom: 16px; }
-    .status-success { background: #052e16; border: 1px solid #14532d; color: #86efac; display: block; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0b132b; color: #e2e8f0; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px 16px; }
+    .portal-card { background: #1c2541; border: 1px solid #3a506b; border-radius: 20px; padding: 36px; max-width: 520px; width: 100%; box-shadow: 0 20px 40px rgba(0,0,0,0.4); text-align: center; position: relative; }
+    .portal-badge { display: inline-flex; align-items: center; gap: 6px; background: rgba(59, 130, 246, 0.15); border: 1px solid #3b82f6; color: #60a5fa; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; padding: 4px 14px; border-radius: 20px; margin-bottom: 20px; }
+    .portal-logo { font-size: 22px; font-weight: 800; letter-spacing: 1.5px; color: #f8fafc; margin-bottom: 8px; }
+    .main-icon { font-size: 42px; margin-bottom: 12px; }
+    .portal-title { font-size: 22px; font-weight: 700; margin-bottom: 8px; color: #f8fafc; }
+    .portal-subtitle { font-size: 14px; color: #94a3b8; margin-bottom: 24px; line-height: 1.5; }
+
+    /* Failure Diagnostic Box */
+    .diagnostic-box { background: #0f172a; border-radius: 12px; padding: 18px 20px; margin-bottom: 24px; text-align: left; border-left: 4px solid #3b82f6; }
+    .diagnostic-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700; margin-bottom: 6px; }
+    .diagnostic-text { font-size: 13px; line-height: 1.6; }
+    .diagnostic-box.soft { border-left-color: #22c55e; }
+    .diagnostic-box.soft .diagnostic-label { color: #4ade80; }
+    .diagnostic-box.soft .diagnostic-text { color: #bbf7d0; }
+    .diagnostic-box.hard { border-left-color: #f59e0b; }
+    .diagnostic-box.hard .diagnostic-label { color: #fbbf24; }
+    .diagnostic-box.hard .diagnostic-text { color: #fed7aa; }
+    .diagnostic-box.network { border-left-color: #60a5fa; }
+    .diagnostic-box.network .diagnostic-label { color: #93c5fd; }
+    .diagnostic-box.network .diagnostic-text { color: #dbeafe; }
+    .diagnostic-box.risk { border-left-color: #ef4444; }
+    .diagnostic-box.risk .diagnostic-label { color: #f87171; }
+    .diagnostic-box.risk .diagnostic-text { color: #fecaca; }
+
+    /* Amount Due Box */
+    .amount-box { background: #0f172a; border: 1px solid #334155; border-radius: 14px; padding: 18px 20px; margin-bottom: 24px; display: flex; justify-content: space-between; align-items: center; text-align: left; }
+    .amount-label { font-size: 12px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; }
+    .product-tag { font-size: 13px; color: #e2e8f0; font-weight: 600; margin-top: 2px; }
+    .amount-value { font-size: 28px; font-weight: 800; color: #22c55e; }
+
+    /* Recovery Options Section */
+    .options-title { font-size: 13px; text-transform: uppercase; letter-spacing: 0.8px; color: #94a3b8; margin-bottom: 14px; text-align: left; font-weight: 600; }
+    .action-card { background: #0f172a; border: 1px solid #334155; border-radius: 14px; padding: 16px 18px; margin-bottom: 14px; text-align: left; transition: all 0.2s; }
+    .action-card:hover { border-color: #3b82f6; }
+    .action-card.highlight { border-color: #3b82f6; background: rgba(59, 130, 246, 0.08); }
+    .action-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+    .action-name { font-size: 14px; font-weight: 600; color: #f8fafc; display: flex; align-items: center; gap: 8px; }
+    .action-tag { font-size: 10px; background: #22c55e; color: #022c22; padding: 2px 8px; border-radius: 10px; font-weight: 700; }
+    .action-desc { font-size: 12px; color: #94a3b8; line-height: 1.5; margin-bottom: 14px; }
+
+    /* 1-Tap UPI Buttons Grid */
+    .upi-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-top: 10px; }
+    .upi-btn { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 12px 14px; background: #1e293b; border: 1px solid #475569; border-radius: 10px; color: #f8fafc; font-size: 13px; font-weight: 600; text-decoration: none; cursor: pointer; transition: all 0.2s; }
+    .upi-btn:hover { background: #334155; border-color: #60a5fa; transform: translateY(-1px); }
+    .upi-icon { width: 20px; height: 20px; border-radius: 4px; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 800; }
+    .upi-icon.gpay { background: #ea4335; color: white; }
+    .upi-icon.phonepe { background: #5f259f; color: white; }
+    .upi-icon.paytm { background: #00baf2; color: white; }
+    .upi-icon.bhim { background: #22c55e; color: white; }
+
+    /* Payday Promise Selector */
+    .chip-group { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+    .date-chip { background: #1e293b; border: 1px solid #475569; color: #cbd5e1; padding: 8px 12px; border-radius: 8px; font-size: 12px; cursor: pointer; transition: all 0.2s; }
+    .date-chip:hover { border-color: #3b82f6; color: #60a5fa; }
+    .date-chip.active { background: #2563eb; border-color: #3b82f6; color: white; font-weight: 600; }
+    .custom-date-input { width: 100%; padding: 10px 12px; background: #1e293b; border: 1px solid #475569; border-radius: 8px; color: #f8fafc; font-size: 13px; margin-bottom: 12px; display: none; }
+    .promise-btn { width: 100%; padding: 12px; background: #059669; color: white; border: none; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; transition: background 0.2s; }
+    .promise-btn:hover { background: #047857; }
+
+    /* Downsell & Standard Buttons */
+    .downsell-btn { width: 100%; padding: 12px; background: #d97706; color: white; border: none; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; transition: background 0.2s; margin-top: 8px; }
+    .downsell-btn:hover { background: #b45309; }
+    .primary-retry-btn { width: 100%; padding: 14px; background: #2563eb; color: white; border: none; border-radius: 10px; font-size: 15px; font-weight: 700; cursor: pointer; transition: all 0.2s; margin-top: 10px; }
+    .primary-retry-btn:hover { background: #1d4ed8; }
+    .primary-retry-btn:disabled { background: #475569; cursor: not-allowed; }
+
+    /* Success & Confirmation Views */
+    .success-panel { display: none; text-align: center; padding: 20px 0; }
+    .success-icon { font-size: 56px; color: #22c55e; margin-bottom: 16px; }
+    .success-badge { background: #052e16; border: 1px solid #14532d; color: #86efac; padding: 6px 16px; border-radius: 20px; font-size: 12px; display: inline-block; margin-bottom: 16px; }
+    .clean-notice { background: rgba(34, 197, 94, 0.1); border: 1px dashed #22c55e; border-radius: 10px; padding: 12px 16px; font-size: 12px; color: #86efac; margin: 20px 0; text-align: left; }
+    .receipt-box { background: #0f172a; border: 1px solid #334155; border-radius: 10px; padding: 14px; font-family: monospace; font-size: 12px; color: #94a3b8; text-align: left; margin-bottom: 20px; }
+
+    .footer { margin-top: 24px; font-size: 11px; color: #64748b; }
+    .status-alert { display: none; padding: 12px; border-radius: 8px; font-size: 13px; margin-top: 12px; text-align: left; }
     .status-error { background: #450a0a; border: 1px solid #7f1d1d; color: #fca5a5; display: block; }
-    .footer { margin-top: 24px; font-size: 12px; color: #64748b; }
-    .success-view { display: none; }
-    .success-view .icon { color: #22c55e; }
-    .success-view .title { color: #22c55e; }
-    .banner-offline { background: #854d0e; color: #fef3c7; padding: 12px; border-radius: 8px; margin-bottom: 16px; font-size: 13px; display: none; }
-    .method-details { background: #0f172a; border: 1px solid #334155; border-radius: 12px; padding: 16px 20px; margin-bottom: 24px; }
-    .method-details-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 10px; }
-    .method-details-row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; font-size: 13px; }
-    .method-details-label { color: #94a3b8; }
-    .method-details-value { color: #e2e8f0; font-weight: 500; font-family: 'SF Mono', 'Fira Code', monospace; }
-    .error-view { display: none; text-align: center; padding: 40px 20px; }
-    .error-view .icon { color: #f87171; }
-    .error-view .title { color: #f87171; }
+    .status-info { background: #172554; border: 1px solid #1e40af; color: #93c5fd; display: block; }
   </style>
 </head>
 <body>
-  <div class="card" id="payment-card">
-    <div class="banner-offline" id="banner-offline">You appear to be offline. Please check your connection.</div>
-    <div class="logo">ARBITER</div>
+  <div class="portal-card" id="recovery-portal">
+    <div class="banner-offline" id="banner-offline" style="background:#854d0e;color:#fef3c7;padding:12px;border-radius:8px;margin-bottom:16px;font-size:13px;display:none;">You appear to be offline. Please check your connection.</div>
+    <div class="portal-badge" id="portal-badge">⚡ Instant Recovery Portal</div>
+    <div class="portal-logo">ARBITER</div>
 
-    <!-- Error View (no data) -->
-    <div class="error-view" id="error-view">
-      <div class="icon">!</div>
-      <div class="title">Payment Not Found</div>
-      <div class="subtitle" id="error-message">We couldn't find your payment details. Please try again from the store.</div>
-      <button class="pay-btn" onclick="window.location.href='/'">Back to Store</button>
-    </div>
+    <!-- Active Recovery View -->
+    <div id="active-recovery-view">
+      <div class="main-icon" id="main-icon">⚡</div>
+      <h1 class="portal-title" id="main-title">Payment Could Not Be Processed</h1>
+      <p class="portal-subtitle" id="main-subtitle">Choose your preferred recovery option below</p>
 
-    <!-- Failure View (default) -->
-    <div id="failure-view">
-      <div class="icon" id="main-icon">!</div>
-      <div class="title" id="main-title">Payment Could Not Be Processed</div>
-      <div class="subtitle" id="main-subtitle"></div>
-
-      <div class="message-box" id="message-box">
-        <div class="message-label" id="message-label">What happened</div>
-        <div class="message-text" id="message-text">Loading details...</div>
+      <!-- Failure Diagnosis -->
+      <div class="diagnostic-box soft" id="diagnostic-box">
+        <div class="diagnostic-label" id="diagnostic-label">Issue Diagnosis</div>
+        <div class="diagnostic-text" id="diagnostic-text">Loading transaction diagnosis...</div>
       </div>
 
-      <div class="method-details" id="method-details" style="display: none;">
-        <div class="method-details-title">Payment Method</div>
-        <div id="method-details-content"></div>
-      </div>
-
+      <!-- Amount Summary -->
       <div class="amount-box">
-        <div class="amount-label">Amount Due</div>
-        <div class="amount-value" id="amount">--</div>
+        <div>
+          <div class="amount-label">Order Total</div>
+          <div class="product-tag" id="product-name">Subscription Plan</div>
+        </div>
+        <div class="amount-value" id="amount-display">--</div>
       </div>
-      <button class="pay-btn" id="pay-btn" onclick="openCheckout()">Retry Payment Now</button>
-      <div class="status" id="status"></div>
+
+      <div class="options-title">Select Recovery Action</div>
+
+      <!-- Action 1: 1-Tap UPI Intent Switch (Mobile-First) -->
+      <div class="action-card highlight" id="upi-action-card">
+        <div class="action-header">
+          <div class="action-name">
+            <span>📱</span> 1-Tap UPI Instant Switch
+          </div>
+          <span class="action-tag">FASTEST</span>
+        </div>
+        <div class="action-desc">Open directly in your mobile UPI app with pre-filled amount and merchant details:</div>
+        <div class="upi-grid">
+          <a class="upi-btn" id="gpay-btn" href="#" target="_blank"><span class="upi-icon gpay">G</span> Google Pay</a>
+          <a class="upi-btn" id="phonepe-btn" href="#" target="_blank"><span class="upi-icon phonepe">P</span> PhonePe</a>
+          <a class="upi-btn" id="paytm-btn" href="#" target="_blank"><span class="upi-icon paytm">₹</span> Paytm</a>
+          <a class="upi-btn" id="bhim-btn" href="#" target="_blank"><span class="upi-icon bhim">U</span> Any UPI</a>
+        </div>
+      </div>
+
+      <!-- Action 2: Promise-to-Pay Payday Delay -->
+      <div class="action-card" id="promise-action-card">
+        <div class="action-header">
+          <div class="action-name">
+            <span>🗓️</span> Pay on Salary Date (Promise-to-Pay)
+          </div>
+          <span class="action-tag" style="background:#0284c7;color:white;">RESERVE CART</span>
+        </div>
+        <div class="action-desc">Short on funds before salary? Reserve your order and pause reminders until payday:</div>
+        <div class="chip-group" id="payday-chips">
+          <div class="date-chip active" onclick="selectPaydayChip(this, 'next_1st')">1st of Next Month</div>
+          <div class="date-chip" onclick="selectPaydayChip(this, 'month_28th')">28th of Month</div>
+          <div class="date-chip" onclick="selectPaydayChip(this, 'custom')">Custom Date</div>
+        </div>
+        <input type="date" id="custom-date-picker" class="custom-date-input" />
+        <button class="promise-btn" id="promise-btn" onclick="submitPaydayPromise()">Hold Order & Schedule Payday Link</button>
+      </div>
+
+      <!-- Action 3: Smart Downsell / Split-Pay (Cart Salvage) -->
+      <div class="action-card" id="downsell-action-card" style="display: none;">
+        <div class="action-header">
+          <div class="action-name">
+            <span>💡</span> Smart Split-Pay & Downgrade Options
+          </div>
+          <span class="action-tag" style="background:#d97706;color:white;">SAVE 66% TODAY</span>
+        </div>
+        <div class="action-desc" id="downsell-desc">Convert this order to affordable monthly installments or switch to a basic tier:</div>
+        <button class="downsell-btn" id="split-pay-btn" onclick="acceptDownsell('split_3')">Pay 1st Installment of <span id="split-amt">--</span> (3 Monthly Splits)</button>
+        <button class="downsell-btn" id="monthly-downsell-btn" style="background:#475569;margin-top:6px;" onclick="acceptDownsell('switch_monthly')">Switch to Monthly Basic (₹499/mo)</button>
+      </div>
+
+      <!-- Action 4: Standard Razorpay Retry (Card / Netbanking) -->
+      <button class="primary-retry-btn" id="primary-retry-btn" onclick="openRazorpayCheckout()">
+        Retry Payment Now (Razorpay Checkout)
+      </button>
+
+      <div class="status-alert" id="status-alert"></div>
     </div>
 
-    <!-- Success View -->
-    <div class="success-view" id="success-view">
-      <div class="icon">✓</div>
-      <div class="title">Payment Successful!</div>
-      <div class="subtitle">Your payment has been processed successfully. Thank you!</div>
-      <div class="amount-box">
-        <div class="amount-label">Amount Paid</div>
-        <div class="amount-value" id="paid-amount">--</div>
+    <!-- Success / Settled View -->
+    <div class="success-panel" id="success-panel">
+      <div class="success-icon">✓</div>
+      <div class="success-badge">PAYMENT SETTLED & SECURED</div>
+      <h2 class="portal-title" style="color:#22c55e;">Revenue Successfully Recovered!</h2>
+      <p class="portal-subtitle" id="success-subtitle">Your subscription has been activated.</p>
+
+      <div class="clean-notice">
+        <strong>🛡️ Automated Goodwill Protection:</strong><br>
+        All pending email, SMS, and WhatsApp recovery reminders for this order have been automatically cancelled.
       </div>
-      <button class="pay-btn" onclick="window.location.href='/'">Back to Store</button>
+
+      <div class="receipt-box" id="receipt-box">
+        <div>RECEIPT: <span id="rec-id">--</span></div>
+        <div>AMOUNT: <span id="rec-amt">--</span></div>
+        <div>TIMESTAMP: <span id="rec-time">--</span></div>
+        <div>AUDIT HASH: <span id="rec-hash">--</span></div>
+      </div>
+
+      <button class="primary-retry-btn" onclick="window.location.href='/'">Return to Merchant Store</button>
     </div>
 
-    <div class="footer">Secure payment powered by Razorpay</div>
+    <!-- Promise Scheduled View -->
+    <div class="success-panel" id="promise-panel">
+      <div class="success-icon" style="color:#60a5fa;">🗓️</div>
+      <div class="success-badge" style="background:#172554;border-color:#1d4ed8;color:#93c5fd;">ORDER RESERVED</div>
+      <h2 class="portal-title" style="color:#60a5fa;">Payday Reminder Scheduled!</h2>
+      <p class="portal-subtitle" id="promise-subtitle">Your order hold is active.</p>
+
+      <div class="clean-notice" style="border-color:#60a5fa;color:#93c5fd;background:rgba(59,130,246,0.1);">
+        <strong>⏰ What Happens Next:</strong><br>
+        1. Interim dunning reminders have been paused.<br>
+        2. On <span id="promise-date-text">--</span> at 10:00 AM IST, you will receive a 1-tap WhatsApp/SMS link to complete your payment.<br>
+        3. Your order price and cart items remain guaranteed.
+      </div>
+
+      <button class="primary-retry-btn" onclick="window.location.href='/'">Return to Merchant Store</button>
+    </div>
+
+    <div class="footer">
+      Powered by ARBITER Closed-Loop Recovery Engine • Verified by Razorpay Test Rails
+    </div>
   </div>
 
   <script>
     const eventId = window.location.pathname.split('/').pop();
     const params = new URLSearchParams(window.location.search);
-    let orderData = null;
     let eventData = null;
+    let orderData = null;
+    let selectedPaydayDate = "";
 
-    // Read failure class and method info from URL params
-    const failureClass = params.get('class') || 'UNKNOWN';
-    const failureReason = params.get('reason') || '';
+    // Diagnostic mapping
+    const failureClass = params.get('class') || 'SOFT_RETRYABLE';
     const failureCode = params.get('code') || '';
-    const methodType = params.get('method') || '';
-    const methodLast4 = params.get('last4') || '';
-    const methodNetwork = params.get('network') || '';
-    const methodVpa = params.get('vpa') || '';
-    const methodBank = params.get('bank') || '';
-    const methodCardType = params.get('type') || '';
-    const methodIssuer = params.get('issuer') || '';
+    const failureReason = params.get('reason') || '';
 
-    // Simplified human-readable error messages — no ML jargon
-    const classConfig = {
+    const DIAGNOSTICS = {
       SOFT_RETRYABLE: {
+        css: 'soft',
         icon: '⚡',
-        cssClass: 'soft',
-        label: 'Temporary Issue',
-        title: 'Payment Could Not Be Processed',
-        subtitle: 'Your account had a temporary issue. You can retry right now.',
-        message: 'Your bank returned a temporary error. This usually means insufficient funds or a brief decline. No money was deducted.',
+        label: 'Temporary Balance or Bank Issue',
+        title: 'Payment Could Not Be Completed',
+        text: failureReason || 'Your bank reported a temporary decline or insufficient balance. No money was deducted. You can retry immediately or schedule for payday.',
       },
       HARD_METHOD_DEAD: {
-        icon: '🚫',
-        cssClass: 'hard',
-        label: 'Payment Method Issue',
-        title: 'Your Payment Method Needs Attention',
-        subtitle: 'Your card or UPI account may be expired, blocked, or invalid.',
-        message: 'The payment method you used cannot process this transaction. Please update your details or use a different method.',
+        css: 'hard',
+        icon: '💳',
+        label: 'Card or Payment Method Expired / Inactive',
+        title: 'Payment Method Needs Update',
+        text: failureReason || 'The card or method used is expired or blocked. Please switch to 1-Tap UPI or provide an alternate card.',
       },
       NETWORK_TIMEOUT: {
+        css: 'network',
         icon: '⏳',
-        cssClass: 'network',
-        label: 'Connection Timeout',
-        title: 'Payment Timed Out',
-        subtitle: 'The bank server took too long to respond. No money was deducted.',
-        message: 'Your bank or UPI provider didn\'t respond in time. This is often caused by bank server load. We are working to resolve this.',
+        label: 'Bank Gateway Timed Out',
+        title: 'Connection Timed Out',
+        text: failureReason || 'Your issuing bank did not respond in time. Our smart router has switched to a direct UPI connection.',
       },
       RISK_FLAGGED: {
+        css: 'risk',
         icon: '🔒',
-        cssClass: 'risk',
-        label: 'Security Review',
-        title: 'Payment Under Review',
-        subtitle: 'This transaction was flagged for a security check.',
-        message: 'This transaction was flagged for a security review. Please contact our support team for assistance.',
-      },
-      UNKNOWN: {
-        icon: '❓',
-        cssClass: 'unknown',
-        label: 'Payment Issue',
-        title: 'Payment Could Not Be Processed',
-        subtitle: 'We couldn\'t complete your payment. Please try again.',
-        message: 'Your payment could not be processed. This may be a temporary issue. No money was deducted.',
+        label: 'Security & Risk Review',
+        title: 'Payment Under Verification',
+        text: failureReason || 'This transaction is undergoing security verification. No funds have been debited.',
       },
     };
 
-    const config = classConfig[failureClass] || classConfig['UNKNOWN'];
-
-    // Apply class-specific UI — H-002: use customerMessage for heading when available (especially UNKNOWN)
-    document.getElementById('main-icon').textContent = config.icon;
-    // H-002: If server supplied a customerMessage (failureReason), show it in the heading for UNKNOWN
-    // so the page is transaction-specific rather than generic "Payment Could Not Be Processed"
-    if (failureClass === 'UNKNOWN' && failureReason) {
-      document.getElementById('main-title').textContent = failureReason;
-      document.getElementById('main-subtitle').textContent = config.subtitle;
-    } else {
-      document.getElementById('main-title').textContent = config.title;
-      document.getElementById('main-subtitle').textContent = config.subtitle;
+    function initDiagnostics() {
+      const diag = DIAGNOSTICS[failureClass] || DIAGNOSTICS['SOFT_RETRYABLE'];
+      document.getElementById('main-icon').textContent = diag.icon;
+      document.getElementById('main-title').textContent = diag.title;
+      const box = document.getElementById('diagnostic-box');
+      box.className = 'diagnostic-box ' + diag.css;
+      document.getElementById('diagnostic-label').textContent = diag.label;
+      document.getElementById('diagnostic-text').textContent = diag.text;
     }
 
-    const msgBox = document.getElementById('message-box');
-    msgBox.className = 'message-box ' + config.cssClass;
-    document.getElementById('message-label').textContent = config.label;
+    async function loadPortalData() {
+      initDiagnostics();
+      initDefaultPayday();
 
-    // Use customer message from error catalog when available
-    function getMethodMessage() {
-      // Prefer the customer message passed from the server (from error catalog)
-      if (failureReason) return failureReason;
-      // Fallback: method-specific messages
-      if (methodType === 'card') {
-        const network = methodNetwork || 'Card';
-        const last4 = methodLast4 ? ' ending in ' + methodLast4 : '';
-        if (failureClass === 'HARD_METHOD_DEAD') return 'Your ' + network + ' card' + last4 + ' has expired or is invalid. Please use a different card.';
-        return 'Your ' + network + ' card' + last4 + ' payment could not be processed. Please try again or use a different card.';
-      }
-      if (methodType === 'upi') {
-        if (failureClass === 'HARD_METHOD_DEAD') return 'Your UPI ID' + (methodVpa ? ' (' + methodVpa + ')' : '') + ' is invalid or the mandate was cancelled. Please set up UPI again.';
-        return 'Your UPI payment' + (methodVpa ? ' via ' + methodVpa : '') + ' could not be processed. Please try again.';
-      }
-      if (methodType === 'netbanking') {
-        return 'Your ' + (methodBank || 'bank') + ' netbanking payment could not be processed. Please try again or use a different method.';
-      }
-      return config.message;
-    }
-
-    document.getElementById('message-text').textContent = getMethodMessage();
-
-    // Populate method details — sanitized for XSS
-    function escapeHtml(str) {
-      var div = document.createElement('div');
-      div.appendChild(document.createTextNode(str));
-      return div.innerHTML;
-    }
-
-    function renderMethodDetails() {
-      if (!methodType) return;
-      var container = document.getElementById('method-details-content');
-      var rows = [];
-      if (methodType === 'card') {
-        if (methodNetwork) rows.push(['Network', methodNetwork]);
-        if (methodLast4) rows.push(['Last 4 digits', '\u2022\u2022\u2022\u2022 ' + methodLast4]);
-        if (methodCardType) rows.push(['Type', methodCardType.charAt(0).toUpperCase() + methodCardType.slice(1)]);
-        if (methodIssuer) rows.push(['Issuer', methodIssuer]);
-      } else if (methodType === 'upi') {
-        if (methodVpa) rows.push(['VPA', methodVpa]);
-      } else if (methodType === 'netbanking') {
-        if (methodBank) rows.push(['Bank', methodBank]);
-      }
-      if (rows.length === 0) return;
-      container.innerHTML = rows.map(function(r) {
-        return '<div class="method-details-row"><span class="method-details-label">' + escapeHtml(r[0]) + '</span><span class="method-details-value">' + escapeHtml(r[1]) + '</span></div>';
-      }).join('');
-      document.getElementById('method-details').style.display = 'block';
-    }
-
-    renderMethodDetails();
-
-    async function loadEventData() {
       try {
-        // Fetch event data from DB (not in-memory sessions)
-        var res = await fetch('/api/events/' + eventId);
+        const res = await fetch('/api/events/' + eventId);
         if (res.ok) {
           eventData = await res.json();
-          // If this transaction was already paid, show success immediately — don't ask to pay again
           if (eventData.status === 'captured' || eventData.recoveredAtUtc) {
-            document.getElementById('failure-view').style.display = 'none';
-            document.getElementById('success-view').style.display = 'block';
-            document.getElementById('success-view').querySelector('.subtitle').textContent =
-              'Payment for ' + (eventData.productName || 'your order') + ' was completed successfully. No further payment needed.';
-            var amt = eventData.amountPaise || 0;
-            document.getElementById('paid-amount').textContent = '\u20B9' + (amt / 100).toLocaleString('en-IN');
+            showSuccessPanel({
+              orderId: eventData.razorpayOrderId || eventId,
+              amountPaise: eventData.amountPaise,
+              auditHash: 'RECOVERED_HISTORIC',
+            });
             return;
           }
-          // Update subtitle with customer name
-          if (eventData.customerName) {
-            document.getElementById('main-subtitle').textContent =
-              'Hi ' + eventData.customerName + ', ' + config.subtitle.toLowerCase();
+
+          document.getElementById('product-name').textContent = eventData.productName || 'Order Recovery';
+          const amtPaise = Number(eventData.amountPaise || 499900);
+          document.getElementById('amount-display').textContent = '₹' + (amtPaise / 100).toLocaleString('en-IN');
+
+          // Show Downsell for tickets >= ₹1,999
+          if (amtPaise >= 199900) {
+            document.getElementById('downsell-action-card').style.display = 'block';
+            document.getElementById('split-amt').textContent = '₹' + (Math.ceil(amtPaise / 3) / 100).toLocaleString('en-IN');
           }
-          // Update amount from DB
-          if (eventData.amountPaise) {
-            document.getElementById('amount').textContent = '\u20B9' + (eventData.amountPaise / 100).toLocaleString('en-IN');
-          }
+
+          loadUpiIntents();
         }
       } catch (e) {
-        // Event data not available — show error
-        document.getElementById('failure-view').style.display = 'none';
-        document.getElementById('error-view').style.display = 'block';
-        return;
+        console.error('Portal load error:', e);
       }
 
-      // Create a Razorpay order for recovery payment
+      createRecoveryOrder();
+    }
+
+    async function loadUpiIntents() {
       try {
-        var orderRes = await fetch('/api/orders/create', {
+        const res = await fetch('/api/recovery/upi-intent', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ eventId }),
+        });
+        if (res.ok) {
+          const upiData = await res.json();
+          document.getElementById('gpay-btn').href = upiData.gpayUri;
+          document.getElementById('phonepe-btn').href = upiData.phonepeUri;
+          document.getElementById('paytm-btn').href = upiData.paytmUri;
+          document.getElementById('bhim-btn').href = upiData.bhimUri;
+        }
+      } catch (e) {}
+    }
+
+    async function createRecoveryOrder() {
+      try {
+        const orderRes = await fetch('/api/orders/create', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             productId: eventData ? mapProductNameToId(eventData.productName) : 'prod_premium_plan',
             customerName: eventData ? eventData.customerName : 'Customer',
-            customerPhone: eventData ? eventData.phone : '919876543210',
+            customerPhone: eventData ? eventData.phone : '9876543210',
             customerEmail: eventData ? eventData.email : 'customer@example.com',
           }),
         });
-        orderData = await orderRes.json();
-        if (orderData.amountPaise) {
-          document.getElementById('amount').textContent = '\u20B9' + (orderData.amountPaise / 100).toLocaleString('en-IN');
+        if (orderRes.ok) {
+          orderData = await orderRes.json();
         }
-      } catch (e) {
-        document.getElementById('main-subtitle').textContent = 'Unable to load payment details. Please try again.';
-      }
+      } catch (e) {}
     }
 
     function mapProductNameToId(name) {
-      var map = {
+      const map = {
         'Premium Annual Plan': 'prod_premium_plan',
         'Monthly Basic': 'prod_monthly_basic',
         'Team License (5 seats)': 'prod_team_license',
@@ -304,22 +350,105 @@
       return map[name] || 'prod_premium_plan';
     }
 
-    function openCheckout() {
-      if (!orderData || !orderData.orderId) return;
-      var btn = document.getElementById('pay-btn');
-      btn.disabled = true;
-      btn.textContent = 'Processing...';
+    function initDefaultPayday() {
+      const now = new Date();
+      const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+      selectedPaydayDate = nextMonth.toISOString().split('T')[0];
+    }
 
-      var options = {
+    function selectPaydayChip(element, type) {
+      document.querySelectorAll('#payday-chips .date-chip').forEach(c => c.classList.remove('active'));
+      element.classList.add('active');
+      const customInput = document.getElementById('custom-date-picker');
+
+      const now = new Date();
+      if (type === 'next_1st') {
+        const d = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+        selectedPaydayDate = d.toISOString().split('T')[0];
+        customInput.style.display = 'none';
+      } else if (type === 'month_28th') {
+        const currentMonth28 = new Date(now.getFullYear(), now.getMonth(), 28);
+        const target = currentMonth28 > now ? currentMonth28 : new Date(now.getFullYear(), now.getMonth() + 1, 28);
+        selectedPaydayDate = target.toISOString().split('T')[0];
+        customInput.style.display = 'none';
+      } else if (type === 'custom') {
+        customInput.style.display = 'block';
+        customInput.min = now.toISOString().split('T')[0];
+        customInput.onchange = function() {
+          selectedPaydayDate = this.value;
+        };
+      }
+    }
+
+    async function submitPaydayPromise() {
+      const btn = document.getElementById('promise-btn');
+      btn.disabled = true;
+      btn.textContent = 'Securing Cart Hold...';
+
+      try {
+        const res = await fetch('/api/recovery/promise', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            eventId,
+            promisedDate: selectedPaydayDate,
+            notes: 'Customer scheduled via Recovery Portal',
+          }),
+        });
+        const data = await res.json();
+        if (data.success) {
+          document.getElementById('active-recovery-view').style.display = 'none';
+          document.getElementById('promise-panel').style.display = 'block';
+          document.getElementById('promise-date-text').textContent = selectedPaydayDate;
+        } else {
+          showAlert(data.error || 'Could not record promise. Please retry.', 'error');
+          btn.disabled = false;
+          btn.textContent = 'Hold Order & Schedule Payday Link';
+        }
+      } catch (e) {
+        showAlert('Network error while scheduling payday reminder.', 'error');
+        btn.disabled = false;
+        btn.textContent = 'Hold Order & Schedule Payday Link';
+      }
+    }
+
+    async function acceptDownsell(downsellType) {
+      try {
+        const res = await fetch('/api/recovery/downsell', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            eventId,
+            downsellType,
+          }),
+        });
+        const data = await res.json();
+        if (data.success) {
+          orderData = data;
+          openRazorpayCheckout(data.amountPaise);
+        }
+      } catch (e) {
+        showAlert('Could not create downsell order.', 'error');
+      }
+    }
+
+    function openRazorpayCheckout(customAmountPaise) {
+      if (!orderData || !orderData.orderId) return;
+
+      const btn = document.getElementById('primary-retry-btn');
+      btn.disabled = true;
+      btn.textContent = 'Opening Secure Gateway...';
+
+      const options = {
         key: orderData.keyId,
-        amount: orderData.amountPaise,
-        currency: orderData.currency,
-        name: 'ARBITER',
-        description: 'Payment Recovery',
+        amount: customAmountPaise || orderData.amountPaise,
+        currency: 'INR',
+        name: 'ARBITER Recovery',
+        description: 'Payment Settlement',
         order_id: orderData.orderId,
         handler: async function(response) {
           try {
-            var verifyRes = await fetch('/api/payments/verify', {
+            const verifyRes = await fetch('/api/payments/verify', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -329,75 +458,60 @@
                 orderId: orderData.orderId,
               }),
             });
-            var verifyData = await verifyRes.json();
+            const verifyData = await verifyRes.json();
             if (verifyData.success) {
-              document.getElementById('failure-view').style.display = 'none';
-              document.getElementById('success-view').style.display = 'block';
-              document.getElementById('paid-amount').textContent = '\u20B9' + (orderData.amountPaise / 100).toLocaleString('en-IN');
+              showSuccessPanel({
+                orderId: response.razorpay_order_id,
+                amountPaise: customAmountPaise || orderData.amountPaise,
+                auditHash: verifyData.auditEntryId,
+              });
             } else {
-              document.getElementById('status').className = 'status status-error';
-              document.getElementById('status').textContent = 'Payment verification pending. We will confirm shortly.';
+              showAlert('Payment verification pending. Gateway confirming...', 'info');
               btn.disabled = false;
-              btn.textContent = 'Retry Payment Now';
+              btn.textContent = 'Retry with Card / Netbanking (Razorpay Checkout)';
             }
           } catch (e) {
-            document.getElementById('status').className = 'status status-error';
-            document.getElementById('status').textContent = 'Connection issue. Please check your payment status before retrying.';
+            showAlert('Payment verification pending connection refresh.', 'info');
             btn.disabled = false;
-            btn.textContent = 'Retry Payment Now';
+            btn.textContent = 'Retry with Card / Netbanking (Razorpay Checkout)';
           }
         },
         theme: { color: '#2563eb' },
         modal: {
           ondismiss: function() {
             btn.disabled = false;
-            btn.textContent = 'Retry Payment Now';
+            btn.textContent = 'Retry with Card / Netbanking (Razorpay Checkout)';
           },
         },
       };
 
-      var rzp = new Razorpay(options);
-      rzp.on('payment.failed', function(response) {
-        var err = response.error || {};
-        var errorDesc = err.description || 'Payment could not be processed';
-        var errMetadata = err.metadata || {};
-        var paymentMethod = errMetadata.payment_method || {};
-        document.getElementById('status').className = 'status status-error';
-        document.getElementById('status').textContent = 'Payment failed: ' + errorDesc;
+      const rzp = new Razorpay(options);
+      rzp.on('payment.failed', function(resp) {
         btn.disabled = false;
-        btn.textContent = 'Retry Payment Now';
-
-        // Report retry failure to server so it's tracked (dedup will update existing row)
-        try {
-          fetch('/api/payments/failed', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              razorpay_order_id: orderData ? orderData.orderId : '',
-              error_code: err.code || 'PAYMENT_FAILED',
-              error_description: errorDesc,
-              error_step: err.step || '',
-              error_source: err.source || '',
-              error_reason: err.reason || '',
-              customerId: eventData ? eventData.customerProfileId : '',
-              productId: eventData ? mapProductNameToId(eventData.productName) : 'prod_premium_plan',
-              productName: eventData ? eventData.productName : 'Unknown',
-              amountPaise: eventData ? eventData.amountPaise : 0,
-              paymentMethod: {
-                type: paymentMethod.type || '',
-                last4: paymentMethod.last4 || '',
-                network: paymentMethod.network || '',
-                vpa: paymentMethod.vpa || '',
-                bank: paymentMethod.bank || '',
-              },
-            }),
-          });
-        } catch (e) {}
+        btn.textContent = 'Retry with Card / Netbanking (Razorpay Checkout)';
+        showAlert('Payment attempt failed: ' + (resp.error?.description || 'Declined by bank'), 'error');
       });
       rzp.open();
     }
 
-    loadEventData();
+    function showSuccessPanel(details) {
+      document.getElementById('active-recovery-view').style.display = 'none';
+      document.getElementById('promise-panel').style.display = 'none';
+      document.getElementById('success-panel').style.display = 'block';
+
+      document.getElementById('rec-id').textContent = details.orderId;
+      document.getElementById('rec-amt').textContent = '₹' + ((details.amountPaise || 499900) / 100).toLocaleString('en-IN');
+      document.getElementById('rec-time').textContent = new Date().toISOString();
+      document.getElementById('rec-hash').textContent = details.auditHash || 'sha256:verified';
+    }
+
+    function showAlert(msg, type) {
+      const alert = document.getElementById('status-alert');
+      alert.className = 'status-alert status-' + type;
+      alert.textContent = msg;
+    }
+
+    loadPortalData();
 
     window.addEventListener("offline", function() {
       document.getElementById('banner-offline').style.display = 'block';

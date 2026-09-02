@@ -8,7 +8,7 @@ import type { Client } from "@libsql/client";
 import { createHash } from "node:crypto";
 import { isoUtc, paise, formatINR, logger } from "../packages/shared/src/index.js";
 import { classifyByCode, computeFeatures, scoreWithArtifact, DEFAULT_16D_MODEL, assessCredibility } from "../packages/ml/src/index.js";
-import { decide, defaultPolicy, type DecideOutput, type FailureClassId } from "../packages/core/src/decide/index.js";
+import { decide, defaultPolicy, type DecideOutput, type FailureClassId, appendAuditLedger } from "../packages/core/src/index.js";
 import { OutreachRouter, type OutreachChannel, type OutreachPayload, type ProviderDispatchResult } from "../packages/core/src/messaging/index.js";
 import { getErrorEntry, getCustomerMessage, getVendorMessage, getFailureClass as getCatalogFailureClass } from "../packages/core/src/error-catalog.js";
 import { getGroqCustomerMessage } from "../packages/core/src/messaging/groq_customer_message.js";
@@ -677,12 +677,30 @@ export async function recordSuccessfulPayment(
       args: [params.amountPaise, params.customerProfileId],
     });
 
-    // Cancel pending outreach for this event
+    // Cancel pending outreach for this event (mark CANCELLED with audit reason)
     await client.execute({
-      sql: `UPDATE scheduled_outreach SET executed = 1, status = 'SUPPRESSED', executed_at_utc = ?
-        WHERE live_payment_event_id = ? AND executed = 0`,
-      args: [nowUtc, existingId],
+      sql: `UPDATE scheduled_outreach SET executed = 1, status = 'CANCELLED', cancelled_reason = 'PAYMENT_COMPLETED',
+            cancelled_at_utc = ?, executed_at_utc = ?
+            WHERE live_payment_event_id = ? AND (executed = 0 OR status = 'PENDING')`,
+      args: [nowUtc, nowUtc, existingId],
     });
+
+    try {
+      await appendAuditLedger(client, {
+        eventType: "PAYMENT_RECOVERED",
+        entityId: params.razorpayOrderId || existingId,
+        customerId: params.customerProfileId,
+        actor: "razorpay_gateway",
+        nowMs: params.nowMs,
+        payload: {
+          eventId: existingId,
+          orderId: params.razorpayOrderId,
+          paymentId: params.razorpayPaymentId,
+          amountPaise: params.amountPaise,
+          method: params.paymentMethod,
+        },
+      });
+    } catch {}
 
     return existingId;
   }
@@ -728,10 +746,255 @@ export async function recordSuccessfulPayment(
 
   // Cancel pending outreach
   await client.execute({
-    sql: `UPDATE scheduled_outreach SET executed = 1, status = 'SUPPRESSED', executed_at_utc = ?
-      WHERE live_payment_event_id = ? AND executed = 0`,
-    args: [nowUtc, eventId],
+    sql: `UPDATE scheduled_outreach SET executed = 1, status = 'CANCELLED', cancelled_reason = 'PAYMENT_COMPLETED',
+          cancelled_at_utc = ?, executed_at_utc = ?
+          WHERE live_payment_event_id = ? AND (executed = 0 OR status = 'PENDING')`,
+    args: [nowUtc, nowUtc, eventId],
   });
+
+  try {
+    await appendAuditLedger(client, {
+      eventType: "PAYMENT_CAPTURED",
+      entityId: params.razorpayOrderId || eventId,
+      customerId: params.customerProfileId,
+      actor: "razorpay_gateway",
+      nowMs: params.nowMs,
+      payload: {
+        eventId,
+        orderId: params.razorpayOrderId,
+        paymentId: params.razorpayPaymentId,
+        amountPaise: params.amountPaise,
+      },
+    });
+  } catch {}
 
   return eventId;
 }
+
+/**
+ * Executes post-payment recovery workflow:
+ * 1. Marks live payment event as captured / recovered.
+ * 2. Marks any associated payment_intents as SUCCEEDED.
+ * 3. Fulfills pending live_promise_to_pay.
+ * 4. Cancels all pending/scheduled dunning messages.
+ * 5. Appends immutable SHA-256 cryptographic audit ledger entry.
+ */
+export async function onPaymentRecovered(
+  client: Client,
+  params: {
+    customerProfileId: string;
+    orderId: string;
+    eventId?: string;
+    amountPaise?: number;
+    paymentMethod?: string;
+    nowMs?: number;
+  },
+): Promise<{
+  recovered: boolean;
+  cancelledOutreachCount: number;
+  auditEntryId: string;
+}> {
+  const nowMs = params.nowMs ?? Date.now();
+  const nowUtc = isoUtc(nowMs);
+
+  // 1. Mark live payment event as captured / recovered
+  let targetEventId = params.eventId;
+  if (!targetEventId && params.orderId) {
+    const ev = await client.execute({
+      sql: `SELECT id FROM live_payment_events WHERE razorpay_order_id = ? OR customer_profile_id = ? ORDER BY created_at_utc DESC LIMIT 1`,
+      args: [params.orderId, params.customerProfileId],
+    });
+    if (ev.rows.length > 0) {
+      targetEventId = String(ev.rows[0].id);
+    }
+  }
+
+  if (targetEventId) {
+    await client.execute({
+      sql: `UPDATE live_payment_events
+            SET status = 'captured', recovered_at_utc = ?, ml_action = 'PAYMENT_RECOVERED'
+            WHERE id = ?`,
+      args: [nowUtc, targetEventId],
+    });
+  }
+
+  // 2. Mark any payment_intents for this order as SUCCEEDED
+  try {
+    await client.execute({
+      sql: `UPDATE payment_intents SET status = 'SUCCEEDED', resolved_at_utc = ? WHERE order_id = ? OR customer_id = ?`,
+      args: [nowUtc, params.orderId, params.customerProfileId],
+    });
+  } catch {}
+
+  // 3. Fulfill any live_promise_to_pay
+  try {
+    await client.execute({
+      sql: `UPDATE live_promise_to_pay SET status = 'FULFILLED', resolved_at_utc = ?
+            WHERE customer_profile_id = ? AND status = 'PENDING'`,
+      args: [nowUtc, params.customerProfileId],
+    });
+  } catch {}
+
+  // 4. INSTANTLY cancel all pending/scheduled dunning messages across channels
+  const cancelRes = await client.execute({
+    sql: `UPDATE scheduled_outreach
+          SET executed = 1, status = 'CANCELLED', cancelled_reason = 'PAYMENT_COMPLETED',
+              cancelled_at_utc = ?, executed_at_utc = ?
+          WHERE (customer_profile_id = ? OR live_payment_event_id = ?) AND (executed = 0 OR status = 'PENDING')`,
+    args: [nowUtc, nowUtc, params.customerProfileId, targetEventId || ""],
+  });
+  const cancelledOutreachCount = cancelRes.rowsAffected ?? 0;
+
+  // 5. Append immutable cryptographic SHA-256 audit ledger entry
+  const audit = await appendAuditLedger(client, {
+    eventType: "RECOVERY_COMPLETED",
+    entityId: params.orderId || targetEventId || `recovery_${nowMs}`,
+    customerId: params.customerProfileId,
+    actor: "customer_portal",
+    nowMs,
+    payload: {
+      orderId: params.orderId,
+      eventId: targetEventId,
+      amountPaise: params.amountPaise,
+      paymentMethod: params.paymentMethod,
+      cancelledOutreachCount,
+    },
+  });
+
+  logger.info({
+    msg: `[onPaymentRecovered] Pruned ${cancelledOutreachCount} pending reminders for customer ${params.customerProfileId}`,
+    orderId: params.orderId,
+    auditEntryId: audit.id,
+    auditHash: audit.entryHash,
+  });
+
+  return {
+    recovered: true,
+    cancelledOutreachCount,
+    auditEntryId: audit.id,
+  };
+}
+
+/**
+ * Creates a Promise-to-Pay for a customer facing liquidity or salary timing constraints.
+ * Pauses dunning, reserves the order, and schedules a morning reminder on the promised date.
+ */
+export async function createPromiseToPay(
+  client: Client,
+  params: {
+    eventId: string;
+    customerProfileId: string;
+    amountPaise: number;
+    promisedDate: string; // ISO format: YYYY-MM-DD
+    notes?: string;
+    nowMs?: number;
+  },
+): Promise<{
+  promiseId: string;
+  promisedDate: string;
+  reminderScheduledUtc: string;
+  cancelledDunningCount: number;
+}> {
+  const nowMs = params.nowMs ?? Date.now();
+  const nowUtc = isoUtc(nowMs);
+  const promiseId = `p2p_${nowMs}_${createHash("sha256").update(`${params.eventId}${params.promisedDate}`).digest("hex").slice(0, 8)}`;
+
+  // Calculate 10:00 AM IST on the promised date (04:30 UTC)
+  const targetDate = new Date(params.promisedDate);
+  const reminderDate = new Date(Date.UTC(targetDate.getUTCFullYear(), targetDate.getUTCMonth(), targetDate.getUTCDate(), 4, 30, 0));
+  const reminderScheduledUtc = isoUtc(reminderDate.getTime());
+
+  // 1. Insert into live_promise_to_pay
+  await client.execute({
+    sql: `INSERT INTO live_promise_to_pay
+      (id, live_payment_event_id, customer_profile_id, amount_paise, promised_date, status, reminder_scheduled_utc, created_at_utc)
+      VALUES (?, ?, ?, ?, ?, 'PENDING', ?, ?)`,
+    args: [promiseId, params.eventId, params.customerProfileId, params.amountPaise, params.promisedDate, reminderScheduledUtc, nowUtc],
+  });
+
+  // 2. Update live payment event with action
+  await client.execute({
+    sql: `UPDATE live_payment_events SET ml_action = 'PROMISE_PAYDAY_SCHEDULED', outreach_next_utc = ? WHERE id = ?`,
+    args: [reminderScheduledUtc, params.eventId],
+  });
+
+  // 3. Pause interim dunning (cancel pending immediate reminders)
+  const cancelRes = await client.execute({
+    sql: `UPDATE scheduled_outreach SET executed = 1, status = 'CANCELLED', cancelled_reason = 'PROMISE_TO_PAY_ACTIVE',
+          cancelled_at_utc = ?, executed_at_utc = ?
+          WHERE (customer_profile_id = ? OR live_payment_event_id = ?) AND (executed = 0 OR status = 'PENDING')`,
+    args: [nowUtc, nowUtc, params.customerProfileId, params.eventId],
+  });
+
+  // 4. Schedule the new promise reminder outreach
+  const outreachId = `sch_p2p_${promiseId}_SMS`;
+  await client.execute({
+    sql: `INSERT OR IGNORE INTO scheduled_outreach
+      (id, live_payment_event_id, customer_profile_id, channel, scheduled_at_utc, status)
+      VALUES (?, ?, ?, 'SMS', ?, 'PENDING')`,
+    args: [outreachId, params.eventId, params.customerProfileId, reminderScheduledUtc],
+  });
+
+  // 5. Append to cryptographic audit ledger
+  await appendAuditLedger(client, {
+    eventType: "PROMISE_TO_PAY_CREATED",
+    entityId: promiseId,
+    customerId: params.customerProfileId,
+    actor: "customer_portal",
+    nowMs,
+    payload: {
+      eventId: params.eventId,
+      promisedDate: params.promisedDate,
+      amountPaise: params.amountPaise,
+      reminderScheduledUtc,
+      notes: params.notes,
+    },
+  });
+
+  return {
+    promiseId,
+    promisedDate: params.promisedDate,
+    reminderScheduledUtc,
+    cancelledDunningCount: cancelRes.rowsAffected ?? 0,
+  };
+}
+
+/**
+ * Generates mobile-optimized 1-Tap UPI Intent URI deep links conforming to NPCI standards.
+ */
+export function generateUpiIntents(params: {
+  amountPaise: number;
+  merchantVpa?: string;
+  merchantName?: string;
+  transactionRef: string;
+  transactionNote?: string;
+}): {
+  rawUpiUri: string;
+  gpayUri: string;
+  phonepeUri: string;
+  paytmUri: string;
+  bhimUri: string;
+  amountRupees: string;
+} {
+  const amountRupees = (params.amountPaise / 100).toFixed(2);
+  const vpa = params.merchantVpa || "merchant@razorpay";
+  const name = encodeURIComponent(params.merchantName || "ARBITER");
+  const note = encodeURIComponent(params.transactionNote || `Payment_Recovery_${params.transactionRef}`);
+  const ref = encodeURIComponent(params.transactionRef);
+
+  const rawUpiUri = `upi://pay?pa=${vpa}&pn=${name}&am=${amountRupees}&cu=INR&tn=${note}&tr=${ref}`;
+  const gpayUri = `upi://pay?pa=${vpa}&pn=${name}&am=${amountRupees}&cu=INR&tn=${note}&tr=${ref}&package=com.google.android.apps.nbu.paisa.user`;
+  const phonepeUri = `phonepe://pay?pa=${vpa}&pn=${name}&am=${amountRupees}&cu=INR&tn=${note}&tr=${ref}`;
+  const paytmUri = `paytmmp://pay?pa=${vpa}&pn=${name}&am=${amountRupees}&cu=INR&tn=${note}&tr=${ref}`;
+  const bhimUri = `upi://pay?pa=${vpa}&pn=${name}&am=${amountRupees}&cu=INR&tn=${note}&tr=${ref}`;
+
+  return {
+    rawUpiUri,
+    gpayUri,
+    phonepeUri,
+    paytmUri,
+    bhimUri,
+    amountRupees,
+  };
+}
+

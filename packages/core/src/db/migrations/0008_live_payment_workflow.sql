@@ -58,7 +58,9 @@ CREATE TABLE IF NOT EXISTS scheduled_outreach (
   scheduled_at_utc TEXT NOT NULL,
   executed INTEGER NOT NULL DEFAULT 0,
   executed_at_utc TEXT,
-  status TEXT CHECK(status IN ('SENT', 'FAILED', 'SUPPRESSED'))
+  status TEXT CHECK(status IN ('SENT', 'FAILED', 'SUPPRESSED', 'PENDING', 'CANCELLED')),
+  cancelled_reason TEXT,
+  cancelled_at_utc TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_scheduled_due ON scheduled_outreach(executed, scheduled_at_utc);
