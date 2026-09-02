@@ -85,6 +85,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  logger.error({ msg: "train failed", err });
+  logger.error({ msg: "train failed", error: err instanceof Error ? err.message : String(err), stack: err instanceof Error ? err.stack : undefined });
   process.exit(1);
 });
