@@ -246,6 +246,16 @@
         var res = await fetch('/api/events/' + eventId);
         if (res.ok) {
           eventData = await res.json();
+          // If this transaction was already paid, show success immediately — don't ask to pay again
+          if (eventData.status === 'captured' || eventData.recoveredAtUtc) {
+            document.getElementById('failure-view').style.display = 'none';
+            document.getElementById('success-view').style.display = 'block';
+            document.getElementById('success-view').querySelector('.subtitle').textContent =
+              'Payment for ' + (eventData.productName || 'your order') + ' was completed successfully. No further payment needed.';
+            var amt = eventData.amountPaise || 0;
+            document.getElementById('paid-amount').textContent = '\u20B9' + (amt / 100).toLocaleString('en-IN');
+            return;
+          }
           // Update subtitle with customer name
           if (eventData.customerName) {
             document.getElementById('main-subtitle').textContent =

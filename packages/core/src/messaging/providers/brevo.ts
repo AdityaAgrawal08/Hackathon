@@ -56,6 +56,8 @@ export class BrevoEmailProvider implements OutreachProvider {
       language,
       {
         customerName,
+        customerEmail: payload.recipient.email || "",
+        customerPhone: payload.recipient.phone || "",
         amountPaise: payload.amountPaise,
         merchantName: this.config.senderName || "ARBITER Store",
         instrumentDescription: payload.instrumentDescription || "Card / UPI",
@@ -90,21 +92,47 @@ export class BrevoEmailProvider implements OutreachProvider {
 
     const messageText = escapeHtml(rendered?.content || `Your payment of ${formattedAmount} needs attention.`);
 
+    // Build professional customer details + GROQ-polished reason for email body
+    const customerDetailsHtml = `
+    <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 16px; margin: 0 0 16px 0;">
+      <p style="font-size: 13px; color: #64748b; margin: 0 0 10px 0; text-transform: uppercase; letter-spacing: 0.5px;">Transaction Details</p>
+      <table style="font-size: 13px; color: #334155; width: 100%; border-collapse: collapse;">
+        <tr><td style="padding: 4px 8px; color: #64748b; width: 110px;">Customer</td><td style="padding: 4px 8px;"><strong>${escapeHtml(customerName)}</strong></td></tr>
+        ${payload.recipient.email ? `<tr><td style="padding: 4px 8px; color: #64748b;">Email</td><td style="padding: 4px 8px;">${escapeHtml(payload.recipient.email)}</td></tr>` : ""}
+        ${payload.recipient.phone ? `<tr><td style="padding: 4px 8px; color: #64748b;">Phone</td><td style="padding: 4px 8px;">${escapeHtml(payload.recipient.phone)}</td></tr>` : ""}
+        <tr><td style="padding: 4px 8px; color: #64748b;">Amount</td><td style="padding: 4px 8px;"><strong>${formattedAmount}</strong></td></tr>
+        <tr><td style="padding: 4px 8px; color: #64748b;">Transaction ID</td><td style="padding: 4px 8px;"><code style="background: #f1f5f9; padding: 2px 6px; border-radius: 3px;">${escapeHtml(payload.proposalId)}</code></td></tr>
+        ${payload.instrumentDescription ? `<tr><td style="padding: 4px 8px; color: #64748b;">Payment</td><td style="padding: 4px 8px;">${escapeHtml(payload.instrumentDescription)}</td></tr>` : ""}
+      </table>
+    </div>`.trim();
+
+    const groqReasonHtml = methodSpecificText
+      ? `<div style="background: #fef2f2; border-left: 4px solid #dc2626; padding: 12px 16px; border-radius: 0 6px 6px 0; margin: 0 0 16px 0;">
+           <p style="font-size: 14px; color: #991b1b; font-weight: 600; margin: 0 0 4px 0;">Why your payment failed:</p>
+           <p style="font-size: 14px; color: #475569; margin: 0;">${escapeHtml(methodSpecificText)}</p>
+         </div>`
+      : "";
+
     const htmlContent = `
 <!DOCTYPE html>
 <html>
 <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #1e293b; max-width: 600px; margin: 0 auto; padding: 20px;">
   <div style="background: #0f172a; padding: 24px; border-radius: 8px 8px 0 0; text-align: center;">
     <h1 style="color: #ffffff; margin: 0; font-size: 20px; letter-spacing: 1px;">ARBITER RECOVERY</h1>
+    <p style="color: #94a3b8; margin: 8px 0 0 0; font-size: 13px;">Hi ${escapeHtml(customerName)} — your payment needs attention</p>
   </div>
   <div style="background: #ffffff; padding: 32px; border: 1px solid #e2e8f0; border-top: none; border-radius: 0 0 8px 8px;">
-    <h2 style="font-size: 18px; color: #0f172a; margin-top: 0;">Payment Update</h2>
-    ${methodSpecificText ? `<p style="font-size: 15px; color: #dc2626; font-weight: bold; margin: 0 0 12px 0;">${escapeHtml(methodSpecificText)}</p>` : ""}
-    <p style="font-size: 15px; color: #475569;">Please try again using a different payment method, or retry after a few minutes.</p>
-    <div style="margin: 32px 0; text-align: center;">
+    ${customerDetailsHtml}
+    ${groqReasonHtml}
+    <div style="background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 6px; padding: 16px; margin: 0 0 24px 0;">
+      <p style="font-size: 14px; color: #0c4a6e; margin: 0 0 12px 0; font-weight: 600;">What to do:</p>
+      <p style="font-size: 13px; color: #475569; margin: 0;">Click the secure link below to retry. This link is unique to your transaction — if you've already paid, it will show your payment confirmation.</p>
+    </div>
+    <div style="margin: 0 0 24px 0; text-align: center;">
       <a href="${escapeHtml(recoveryUrl)}" style="background: #2563eb; color: #ffffff; padding: 14px 28px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">
-        Pay Again (${formattedAmount})
+        Retry Payment — ${formattedAmount}
       </a>
+      <p style="font-size: 11px; color: #94a3b8; margin: 8px 0 0 0;">Secure link for transaction ${escapeHtml(payload.proposalId.slice(0, 8))}…</p>
     </div>
 
     <p style="font-size: 13px; color: #94a3b8; border-top: 1px solid #f1f5f9; padding-top: 16px;">

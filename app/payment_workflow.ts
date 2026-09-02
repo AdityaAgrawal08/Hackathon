@@ -11,6 +11,7 @@ import { classifyByCode, computeFeatures, scoreWithArtifact, DEFAULT_16D_MODEL, 
 import { decide, defaultPolicy, type DecideOutput, type FailureClassId } from "../packages/core/src/decide/index.js";
 import { OutreachRouter, type OutreachChannel, type OutreachPayload, type ProviderDispatchResult } from "../packages/core/src/messaging/index.js";
 import { getErrorEntry, getCustomerMessage, getVendorMessage, getFailureClass as getCatalogFailureClass } from "../packages/core/src/error-catalog.js";
+import { getGroqCustomerMessage } from "../packages/core/src/messaging/groq_customer_message.js";
 
 export interface Product {
   id: string;
@@ -427,10 +428,11 @@ export async function processFailedPayment(
       recoveryUrl.searchParams.set("productName", input.productName);
     }
     // Include failure class info in URL for recovery page UI
-    // H-002: Use customerMessage from error catalog for transaction-specific explanation
+    // GROQ-polished customer message for transaction-specific heading (no PII sent to GROQ)
+    const groqCustomerMessage = await getGroqCustomerMessage(input.failureCode, input.failureDescription);
     recoveryUrl.searchParams.set("class", failureClass);
     recoveryUrl.searchParams.set("code", input.failureCode);
-    recoveryUrl.searchParams.set("reason", getCustomerMessage(input.failureCode, input.failureDescription));
+    recoveryUrl.searchParams.set("reason", groqCustomerMessage);
 
     // Include payment method details in URL so recovery page can display them
     if (input.paymentMethod) recoveryUrl.searchParams.set("method", input.paymentMethod);
@@ -455,7 +457,7 @@ export async function processFailedPayment(
       language: "EN",
       rawErrorReason: input.failureCode,
       instrumentDescription: input.failureDescription,
-      customerMessage: getCustomerMessage(input.failureCode, input.failureDescription),
+      customerMessage: groqCustomerMessage,
       vendorMessage: getVendorMessage(input.failureCode, input.failureDescription),
       // Payment method details for personalized outreach
       method: (["card", "upi", "netbanking", "wallet"].includes(input.paymentMethod || "") ? input.paymentMethod : undefined) as OutreachPayload["method"],
