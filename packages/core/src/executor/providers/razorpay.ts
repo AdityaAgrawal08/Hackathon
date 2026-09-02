@@ -23,11 +23,19 @@ import {
   type FailureClassId,
 } from "../../decide/catalog.js";
 
-const MODE = process.env.REAL_EXECUTION_MODE ?? "dry-run";
-const IS_LIVE = MODE === "live";
-const RZP_KEY_ID = process.env.RZP_TEST_KEY_ID || process.env.RZP_KEY_ID || "";
-const RZP_KEY_SECRET = process.env.RZP_TEST_KEY_SECRET || process.env.RZP_KEY_SECRET || "";
-const HAS_TEST_KEYS = Boolean(RZP_KEY_ID && RZP_KEY_SECRET);
+function getCredentials() {
+  const mode = process.env.REAL_EXECUTION_MODE ?? "dry-run";
+  const isLive = mode === "live";
+  const keyId = process.env.RZP_TEST_KEY_ID || process.env.RZP_KEY_ID || "";
+  const keySecret = process.env.RZP_TEST_KEY_SECRET || process.env.RZP_KEY_SECRET || "";
+  const hasTestKeys = Boolean(
+    keyId &&
+    keySecret &&
+    !keyId.includes("xxxxxx") &&
+    !keySecret.includes("xxxxxx")
+  );
+  return { mode, isLive, keyId, keySecret, hasTestKeys };
+}
 
 function buildPaymentLinkPayload(ctx: ProviderContext) {
   const amountRupees = (ctx.amountPaise / 100).toFixed(2);
@@ -254,16 +262,19 @@ function mockOutcome(actionId: string, failureClass: string): ExecutionOutcome {
 }
 
 export const razorpayProvider: ActionProvider = {
-  name: `razorpay-${MODE}`,
-  isLive: IS_LIVE,
+  name: "razorpay",
+  get isLive(): boolean {
+    return getCredentials().isLive;
+  },
 
   async execute(ctx: ProviderContext): Promise<ProviderResult> {
     const payload = buildPayload(ctx);
+    const { isLive, keyId, keySecret, hasTestKeys } = getCredentials();
 
-    if (IS_LIVE || HAS_TEST_KEYS) {
+    if (isLive || hasTestKeys) {
       // B-006: Real Razorpay test-mode API call
       try {
-        const auth = Buffer.from(`${RZP_KEY_ID}:${RZP_KEY_SECRET}`).toString("base64");
+        const auth = Buffer.from(`${keyId}:${keySecret}`).toString("base64");
         const response = await fetch("https://api.razorpay.com/v1/payment_links", {
           method: "POST",
           headers: {
@@ -306,6 +317,7 @@ export const razorpayProvider: ActionProvider = {
           outcome: mockOutcome(ctx.actionId, ctx.failureClass),
           dryRunPayload: payload,
           rzpResponseRef: data.id,
+          paymentLinkUrl: data.short_url,
         };
       } catch (err) {
         logger.warn({ msg: "Razorpay test-mode API call failed, falling back to dry-run", err });

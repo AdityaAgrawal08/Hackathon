@@ -12,6 +12,17 @@ export function istDayOfMonth(ms: number): number {
   return new Date(ms + IST_OFFSET_MS).getUTCDate();
 }
 
+/**
+ * TRAI quiet hours evaluation in Indian Standard Time (UTC+5:30).
+ * Compliance window: 21:00 (9:00 PM) to 09:00 (9:00 AM) IST.
+ */
+export function isQuietHoursIST(epochMs: number): boolean {
+  if (!Number.isFinite(epochMs)) return false;
+  const istDate = new Date(epochMs + IST_OFFSET_MS);
+  const istHour = istDate.getUTCHours();
+  return istHour >= 21 || istHour < 9;
+}
+
 export function circularDayDistance(a: number, b: number, modulus = 31): number {
   const d = Math.abs(((a - b) % modulus + modulus) % modulus);
   return Math.min(d, modulus - d);

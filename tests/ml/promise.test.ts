@@ -112,7 +112,7 @@ describe("pipeline records a promise when PROMISE_TO_PAY is chosen", () => {
       sql: `SELECT status FROM promise_to_pay WHERE proposal_id = ?`,
       args: [edit.newProposalId as string],
     });
-    expect((rows.rows[0] as { status: string }).status).toBe("PENDING");
+    expect((rows.rows[0] as unknown as { status: string }).status).toBe("PENDING");
   });
 });
 

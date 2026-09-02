@@ -683,7 +683,16 @@ export const RAZORPAY_ERROR_CATALOG: Record<string, ErrorCatalogEntry> = {
  */
 export function getErrorEntry(code: string): ErrorCatalogEntry {
   const normalized = (code || "").trim().toLowerCase();
-  return RAZORPAY_ERROR_CATALOG[normalized] || RAZORPAY_ERROR_CATALOG["UNKNOWN"];
+  const entry = RAZORPAY_ERROR_CATALOG[normalized];
+  if (entry) return entry;
+  const fallback = RAZORPAY_ERROR_CATALOG["UNKNOWN"];
+  if (fallback) return fallback;
+  return {
+    failureClass: "UNKNOWN",
+    recommendedAction: "vendor_review",
+    customerMessage: "Your payment could not be processed. Please try again.",
+    vendorMessage: "Unclassified failure. Manual review recommended.",
+  };
 }
 
 /**
@@ -727,7 +736,10 @@ export const ALL_ERROR_CODES = Object.keys(RAZORPAY_ERROR_CATALOG).filter((k) =>
  * Get error codes filtered by failure class.
  */
 export function getErrorCodesByClass(cls: FailureClass): string[] {
-  return ALL_ERROR_CODES.filter((code) => RAZORPAY_ERROR_CATALOG[code].failureClass === cls);
+  return ALL_ERROR_CODES.filter((code) => {
+    const entry = RAZORPAY_ERROR_CATALOG[code];
+    return entry && entry.failureClass === cls;
+  });
 }
 
 /**
@@ -737,8 +749,8 @@ export function getErrorCodesByClass(cls: FailureClass): string[] {
 export function* errorRoundRobin(): Generator<{ code: string; entry: ErrorCatalogEntry }> {
   let idx = 0;
   while (true) {
-    const code = ALL_ERROR_CODES[idx % ALL_ERROR_CODES.length];
-    yield { code, entry: RAZORPAY_ERROR_CATALOG[code] };
+    const code = ALL_ERROR_CODES[idx % ALL_ERROR_CODES.length] || "unknown";
+    yield { code, entry: getErrorEntry(code) };
     idx++;
   }
 }

@@ -6,22 +6,22 @@
  */
 import { describe, it, expect } from "vitest";
 import { deriveLabel } from "../../packages/ml/src/labels.js";
-import { buildTrainingDataset, datasetSha } from "../../packages/ml/src/dataset.js";
+import { buildTrainingDataset, datasetSha, type CorpusLike } from "../../packages/ml/src/dataset.js";
 import { FEATURE_COUNT } from "../../packages/ml/src/features.js";
 
-function handCorpus() {
+function handCorpus(): CorpusLike {
   return {
     customers: [
       {
         id: "c1",
-        paydayPattern: { "27": 3, "28": 2 },
+        paydayPattern: { "27": 3, "28": 2 } as Record<string, number>,
         channelResponsiveness: 0.7,
         priorSuccessCount: 5,
         joinedAtUtc: "2025-06-01T00:00:00.000Z",
       },
       {
         id: "c2",
-        paydayPattern: { "1": 4 },
+        paydayPattern: { "1": 4 } as Record<string, number>,
         channelResponsiveness: 0.3,
         priorSuccessCount: 4,
         joinedAtUtc: "2025-01-01T00:00:00.000Z",

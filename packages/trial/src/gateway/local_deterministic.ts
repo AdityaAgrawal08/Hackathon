@@ -226,7 +226,10 @@ export class LocalDeterministicGateway implements PaymentGateway {
     }
 
     // ── Round-robin over ALL 70+ real Razorpay error codes ──
-    const errorInjection = ROUND_ROBIN_ERRORS[roundRobinIdx % ROUND_ROBIN_ERRORS.length];
+    const errorInjection = ROUND_ROBIN_ERRORS[roundRobinIdx % ROUND_ROBIN_ERRORS.length] ?? {
+      code: "BAD_REQUEST_ERROR",
+      description: "Payment processing failed",
+    };
     roundRobinIdx++;
 
     await this.client.execute({

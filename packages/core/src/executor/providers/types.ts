@@ -28,6 +28,8 @@ export interface ProviderResult {
   dryRunPayload?: unknown;
   /** In live mode: the real Razorpay response reference. */
   rzpResponseRef?: string;
+  /** In live mode: the short URL for customer payment. */
+  paymentLinkUrl?: string;
 }
 
 export interface ActionProvider {
