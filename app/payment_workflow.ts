@@ -882,16 +882,7 @@ export async function onPaymentRecovered(
     });
   } catch {}
 
-  // 3. Fulfill any live_promise_to_pay
-  try {
-    await client.execute({
-      sql: `UPDATE live_promise_to_pay SET status = 'FULFILLED', resolved_at_utc = ?
-            WHERE customer_profile_id = ? AND status = 'PENDING'`,
-      args: [nowUtc, params.customerProfileId],
-    });
-  } catch {}
-
-  // 4. INSTANTLY cancel all pending/scheduled dunning messages across channels
+  // 3. INSTANTLY cancel all pending/scheduled dunning messages across channels
   const cancelRes = await client.execute({
     sql: `UPDATE scheduled_outreach
           SET executed = 1, status = 'CANCELLED', cancelled_reason = 'PAYMENT_COMPLETED',
@@ -928,90 +919,6 @@ export async function onPaymentRecovered(
     recovered: true,
     cancelledOutreachCount,
     auditEntryId: audit.id,
-  };
-}
-
-/**
- * Creates a Promise-to-Pay for a customer facing liquidity or salary timing constraints.
- * Pauses dunning, reserves the order, and schedules a morning reminder on the promised date.
- */
-export async function createPromiseToPay(
-  client: Client,
-  params: {
-    eventId: string;
-    customerProfileId: string;
-    amountPaise: number;
-    promisedDate: string; // ISO format: YYYY-MM-DD
-    notes?: string;
-    nowMs?: number;
-  },
-): Promise<{
-  promiseId: string;
-  promisedDate: string;
-  reminderScheduledUtc: string;
-  cancelledDunningCount: number;
-}> {
-  const nowMs = params.nowMs ?? Date.now();
-  const nowUtc = isoUtc(nowMs);
-  const promiseId = `p2p_${nowMs}_${createHash("sha256").update(`${params.eventId}${params.promisedDate}`).digest("hex").slice(0, 8)}`;
-
-  // Calculate 10:00 AM IST on the promised date (04:30 UTC)
-  const targetDate = new Date(params.promisedDate);
-  const reminderDate = new Date(Date.UTC(targetDate.getUTCFullYear(), targetDate.getUTCMonth(), targetDate.getUTCDate(), 4, 30, 0));
-  const reminderScheduledUtc = isoUtc(reminderDate.getTime());
-
-  // 1. Insert into live_promise_to_pay
-  await client.execute({
-    sql: `INSERT INTO live_promise_to_pay
-      (id, live_payment_event_id, customer_profile_id, amount_paise, promised_date, status, reminder_scheduled_utc, created_at_utc)
-      VALUES (?, ?, ?, ?, ?, 'PENDING', ?, ?)`,
-    args: [promiseId, params.eventId, params.customerProfileId, params.amountPaise, params.promisedDate, reminderScheduledUtc, nowUtc],
-  });
-
-  // 2. Update live payment event with action
-  await client.execute({
-    sql: `UPDATE live_payment_events SET ml_action = 'PROMISE_PAYDAY_SCHEDULED', outreach_next_utc = ? WHERE id = ?`,
-    args: [reminderScheduledUtc, params.eventId],
-  });
-
-  // 3. Pause interim dunning (cancel pending immediate reminders)
-  const cancelRes = await client.execute({
-    sql: `UPDATE scheduled_outreach SET executed = 1, status = 'CANCELLED', cancelled_reason = 'PROMISE_TO_PAY_ACTIVE',
-          cancelled_at_utc = ?, executed_at_utc = ?
-          WHERE (customer_profile_id = ? OR live_payment_event_id = ?) AND (executed = 0 OR status = 'PENDING')`,
-    args: [nowUtc, nowUtc, params.customerProfileId, params.eventId],
-  });
-
-  // 4. Schedule the new promise reminder outreach
-  const outreachId = `sch_p2p_${promiseId}_SMS`;
-  await client.execute({
-    sql: `INSERT OR IGNORE INTO scheduled_outreach
-      (id, live_payment_event_id, customer_profile_id, channel, scheduled_at_utc, status)
-      VALUES (?, ?, ?, 'SMS', ?, 'PENDING')`,
-    args: [outreachId, params.eventId, params.customerProfileId, reminderScheduledUtc],
-  });
-
-  // 5. Append to cryptographic audit ledger
-  await appendAuditLedger(client, {
-    eventType: "PROMISE_TO_PAY_CREATED",
-    entityId: promiseId,
-    customerId: params.customerProfileId,
-    actor: "customer_portal",
-    nowMs,
-    payload: {
-      eventId: params.eventId,
-      promisedDate: params.promisedDate,
-      amountPaise: params.amountPaise,
-      reminderScheduledUtc,
-      notes: params.notes,
-    },
-  });
-
-  return {
-    promiseId,
-    promisedDate: params.promisedDate,
-    reminderScheduledUtc,
-    cancelledDunningCount: cancelRes.rowsAffected ?? 0,
   };
 }
 

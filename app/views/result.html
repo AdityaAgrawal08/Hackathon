@@ -152,10 +152,6 @@
         ⚡ Complete Payment (<span id="btnPayAmount">₹1,999.00</span>)
       </button>
 
-      <button class="btn btn-secondary" onclick="schedulePaydayReminder()">
-        📅 Remind Me on Salary Day (28th)
-      </button>
-
       <button class="btn btn-secondary" onclick="contactSupport()" style="font-size: 12px;">
         💬 Need Help? Contact Merchant Support
       </button>
@@ -340,22 +336,6 @@
       rzp.open();
     } catch (e) {
       alert("Failed to initiate recovery. Please try again.");
-    }
-  }
-
-  async function schedulePaydayReminder() {
-    try {
-      const res = await fetch("/api/recovery/promise-to-pay", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ proposalId: sessionResult.proposalId, promisedDay: 28 })
-      });
-      const data = await res.json();
-      if (data.success) {
-        alert("✅ Scheduled! We'll send an SMS and email reminder on your salary day (28th).");
-      }
-    } catch (e) {
-      alert("Failed to schedule.");
     }
   }
 

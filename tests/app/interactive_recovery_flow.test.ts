@@ -71,21 +71,6 @@ describe("Phase 3: Interactive Payment Flow Integration Tests", () => {
     expect(data.deepLinks.paytm).toContain("paytmmp://pay?");
   });
 
-  it("Task 3.5: captures customer Promise-to-Pay for salary day and schedules reminder", async () => {
-    const res = await fetch(`${baseUrl}/api/recovery/promise-to-pay`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ proposalId: "prop_demo_123", promisedDay: 28 }),
-    });
-
-    expect(res.status).toBe(200);
-    const data = await res.json();
-
-    expect(data.success).toBe(true);
-    expect(data.promisedDay).toBe(28);
-    expect(data.scheduledReminderUtc).toBeDefined();
-  });
-
   it("Task 3.3 & 3.4: mobile payment page contains zero radio buttons and includes offline recovery handling", async () => {
     const res = await fetch(`${baseUrl}/recover`);
     const html = await res.text();

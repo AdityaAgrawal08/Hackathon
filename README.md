@@ -40,7 +40,6 @@ ARBITER detects failed payments via real Razorpay webhooks, diagnoses root cause
        ┌────────────────────────────────────────────────┐
        │ Multi-Action Customer Portal (/recover/:id)    │
        │ • 1-Tap UPI Intent (GPay, PhonePe, Paytm, BHIM)│
-       │ • "Promise-to-Pay" Payday Delay (Cart Hold)    │
        │ • Smart Downsell & 3-Part Split-Pay Salvage    │
        └───────────────────────┬────────────────────────┘
                                │ (Customer Pays)
@@ -85,9 +84,8 @@ ARBITER's core value proposition is proven empirically via a randomized 3-arm tr
 
 Customers who experience checkout failure are routed to `/recover/:eventId` on mobile/web:
 1. **1-Tap UPI Intent Switcher:** Generates direct deep links for Google Pay (`gpay://`), PhonePe (`phonepe://`), Paytm (`paytmmp://`), and BHIM (`upi://`).
-2. **"Promise-to-Pay" Payday Delay:** For liquidity-constrained customers, reserves order price and pauses reminders until salary date (1st of month, 28th, or custom date) with an automated 10:00 AM IST reminder.
-3. **Smart Downsell & Split-Pay Cart Salvage:** Offers 3-month installment plans or downgrade options for high-ticket carts ($\ge ₹1,999$).
-4. **Closed-Loop Dunning Pruning:** The millisecond recovery succeeds, all pending email/SMS dunning tasks transition to `CANCELLED` (`cancelled_reason = 'PAYMENT_COMPLETED'`).
+2. **Smart Downsell & Split-Pay Cart Salvage:** Offers 3-month installment plans or downgrade options for high-ticket carts ($\ge ₹1,999$).
+3. **Closed-Loop Dunning Pruning:** The millisecond recovery succeeds, all pending email/SMS dunning tasks transition to `CANCELLED` (`cancelled_reason = 'PAYMENT_COMPLETED'`).
 
 ---
 
@@ -96,7 +94,7 @@ Customers who experience checkout failure are routed to `/recover/:eventId` on m
 | Timestamp | Phase | Live Actions & Talking Points |
 | :--- | :--- | :--- |
 | **0:00 - 0:45** | **The Problem & Architecture** | Open Store (`localhost:3000`) $\rightarrow$ simulate ₹4,999 checkout failure. Show real Razorpay webhook hitting server, classified via 70+ deterministic error catalog. |
-| **0:45 - 2:00** | **The Customer Journey (Hero)** | Customer receives personalized SMS with 1-Tap Recovery Link. Open `/recover` on mobile: demonstrate 1-Tap UPI, Payday Promise, and Split-Pay. Customer taps "Pay via Google Pay" $\rightarrow$ instant webhook auto-cancels future dunning. |
+| **0:45 - 2:00** | **The Customer Journey (Hero)** | Customer receives personalized SMS with 1-Tap Recovery Link. Open `/recover` on mobile: demonstrate 1-Tap UPI Intent and Split-Pay. Customer taps "Pay via Google Pay" $\rightarrow$ instant webhook auto-cancels future dunning. |
 | **2:00 - 3:30** | **Batch Ablation Benchmark** | Open Vendor Dashboard (`localhost:3000/dashboard`) $\rightarrow$ click **"Run 100-Payment Benchmark"**. Show live side-by-side comparative bars: Arm 0 (18.0%) vs Arm 1 (45.0%) vs Arm 2 (61.0%), $+16.0\text{ pp}$ lift with bootstrap 95% CIs. |
 | **3:30 - 4:15** | **Governance & Audit Trail** | Show refusal: late-night event held by TRAI Quiet Hours (21:00–09:00 IST). Click transaction to inspect **SHA-256 Cryptographic Audit Trail Modal** with unbroken hash continuity. |
 | **4:15 - 5:00** | **Negative Results & Summary** | Conclude with engineering maturity: why we discarded LLM error classification (zero delta, +850ms latency) and why closed-loop retention maximizes merchant LTV. |

@@ -84,36 +84,6 @@ describe("Customer Retention & Multi-Action Recovery Portal (PORTAL-01 & PRUNE-0
     expect(data.bhimUri).toContain("upi://pay");
   });
 
-  it("Promise-to-Pay API reserves order, pauses interim dunning, and schedules morning payday outreach", async () => {
-    const promisedDate = "2026-10-01";
-    const res = await fetch(`${baseUrl}/api/recovery/promise`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        eventId: testEventId,
-        promisedDate,
-        notes: "Salary credited on the 1st",
-      }),
-    });
-
-    expect(res.status).toBe(200);
-    const data = await res.json();
-
-    expect(data.success).toBe(true);
-    expect(data.promiseId).toMatch(/^p2p_/);
-    expect(data.promisedDate).toBe(promisedDate);
-    expect(data.reminderScheduledUtc).toContain("T04:30:00"); // 10:00 AM IST
-
-    // Verify DB record in live_promise_to_pay
-    const promiseRow = await dbClient.execute({
-      sql: `SELECT * FROM live_promise_to_pay WHERE id = ?`,
-      args: [data.promiseId],
-    });
-    expect(promiseRow.rows.length).toBe(1);
-    expect(promiseRow.rows[0].status).toBe("PENDING");
-    expect(promiseRow.rows[0].promised_date).toBe(promisedDate);
-  });
-
   it("Smart Downsell & Split-Pay API generates 3-installment orders", async () => {
     const res = await fetch(`${baseUrl}/api/recovery/downsell`, {
       method: "POST",
