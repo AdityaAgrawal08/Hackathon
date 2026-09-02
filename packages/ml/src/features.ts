@@ -11,7 +11,7 @@
  */
 import { hashSeed, LTV_NORM_PAISE, clamp01, clamp } from "@arbiter/shared";
 
-export const FEATURE_VERSION = "feat-v1";
+export const FEATURE_VERSION = "feat-v2";
 
 /** Proxy average ticket used to estimate lifetime value from prior successes. */
 export const ESTIMATED_AVG_TICKET_PAISE = 50_000;

@@ -3,7 +3,6 @@ import { razorpayProvider } from "../../packages/core/src/executor/providers/raz
 import type { ProviderContext } from "../../packages/core/src/executor/providers/types.js";
 
 describe("Razorpay Test-Mode Payment Link Provider (RZP-02)", () => {
-  const originalFetch = globalThis.fetch;
   const originalKeyId = process.env.RZP_TEST_KEY_ID;
   const originalSecret = process.env.RZP_TEST_KEY_SECRET;
 
@@ -13,7 +12,6 @@ describe("Razorpay Test-Mode Payment Link Provider (RZP-02)", () => {
   });
 
   afterEach(() => {
-    globalThis.fetch = originalFetch;
     process.env.RZP_TEST_KEY_ID = originalKeyId;
     process.env.RZP_TEST_KEY_SECRET = originalSecret;
     vi.restoreAllMocks();
@@ -23,14 +21,16 @@ describe("Razorpay Test-Mode Payment Link Provider (RZP-02)", () => {
     const mockPlinkId = "plink_test_abc123";
     const mockShortUrl = "https://rzp.io/i/arbiter123";
 
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: async () => ({
-        id: mockPlinkId,
-        short_url: mockShortUrl,
-        status: "created",
-      }),
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          id: mockPlinkId,
+          short_url: mockShortUrl,
+          status: "created",
+        }),
+      } as unknown as Response;
     });
 
     const ctx: ProviderContext = {
@@ -52,17 +52,19 @@ describe("Razorpay Test-Mode Payment Link Provider (RZP-02)", () => {
 
     const result = await razorpayProvider.execute(ctx);
 
-    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(result.rzpResponseRef).toBe(mockPlinkId);
     expect(result.paymentLinkUrl).toBe(mockShortUrl);
     expect(result.outcome).toBe("SUCCEEDED");
   });
 
   it("falls back to dry-run gracefully if API call returns an error", async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: false,
-      status: 400,
-      text: async () => JSON.stringify({ error: { description: "Invalid amount" } }),
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      return {
+        ok: false,
+        status: 400,
+        text: async () => JSON.stringify({ error: { description: "Invalid amount" } }),
+      } as unknown as Response;
     });
 
     const ctx: ProviderContext = {
@@ -85,7 +87,9 @@ describe("Razorpay Test-Mode Payment Link Provider (RZP-02)", () => {
 
   it("returns FAILED for known-dead actions based on catalog multiplier", async () => {
     // RETRY_NOW on HARD_METHOD_DEAD has multiplier 0 in catalog
-    globalThis.fetch = vi.fn().mockRejectedValue(new Error("Network connection reset"));
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      throw new Error("Network connection reset");
+    });
 
     const ctx: ProviderContext = {
       proposalId: "prop_unit_test_003",
@@ -100,6 +104,8 @@ describe("Razorpay Test-Mode Payment Link Provider (RZP-02)", () => {
     };
 
     const result = await razorpayProvider.execute(ctx);
+    expect(result).toBeDefined();
     expect(result.outcome).toBe("FAILED");
+    expect(result.dryRunPayload).toBeDefined();
   });
 });

@@ -5,7 +5,7 @@ import { defaultPolicy } from "../../packages/core/src/decide/policy.js";
 import { processEvent, editProposal } from "../../packages/ml/src/pipeline.js";
 import { saveModel } from "../../packages/ml/src/registry.js";
 import { buildArtifact } from "../../packages/ml/src/artifact.js";
-import { FEATURE_NAMES } from "../../packages/ml/src/features.js";
+import { FEATURE_NAMES, FEATURE_VERSION } from "../../packages/ml/src/features.js";
 
 let client: Client;
 const NOW = Date.UTC(2026, 1, 16, 10, 0, 0);
@@ -90,8 +90,8 @@ describe("pipeline hardening", () => {
     });
     await client.execute({
       sql: `INSERT INTO features (id,event_id,feature_version,vector_json,computed_at_utc)
-            VALUES ('feat/tampered','e_drift','feat-v1','[9,9,9,9,9,9,9,9,9,9,9]',?)`,
-      args: ["2026-01-01T00:00:00.000Z"],
+            VALUES ('feat/tampered','e_drift',?,'[9,9,9,9,9,9,9,9,9,9,9]',?)`,
+      args: [FEATURE_VERSION, "2026-01-01T00:00:00.000Z"],
     });
 
     await expect(
@@ -104,7 +104,8 @@ describe("pipeline hardening", () => {
     expect(Number(proposals.rows[0]!.n)).toBe(0);
 
     const frozen = await client.execute({
-      sql: `SELECT vector_json FROM features WHERE event_id='e_drift'`,
+      sql: `SELECT vector_json FROM features WHERE event_id='e_drift' AND feature_version=?`,
+      args: [FEATURE_VERSION],
     });
     expect(String(frozen.rows[0]!.vector_json)).toBe("[9,9,9,9,9,9,9,9,9,9,9]");
   });
