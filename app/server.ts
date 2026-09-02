@@ -1226,6 +1226,25 @@ app.post("/api/vendor/decision", adminLimiter, requireAdminKey, async (req: Requ
 });
 
 // ── SSE Endpoints ────────────────────────────────────────────────
+app.get("/api/events/stream", (req: Request, res: Response) => {
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders();
+
+  const channel = "global";
+  const client: SSEClient = { res, id: randomBytes(8).toString("hex"), connectedAt: Date.now() };
+  if (!sseClients.has(channel)) sseClients.set(channel, new Set());
+  sseClients.get(channel)!.add(client);
+
+  res.write(`data: ${JSON.stringify({ type: "CONNECTED", channel })}\n\n`);
+  const heartbeat = setInterval(() => { res.write(": heartbeat\n\n"); }, 15000);
+  req.on("close", () => {
+    clearInterval(heartbeat);
+    sseClients.get(channel)?.delete(client);
+  });
+});
+
 app.get("/api/sse/:channel", (req: Request, res: Response) => {
   const { channel } = req.params;
   res.setHeader("Content-Type", "text/event-stream");
@@ -1480,6 +1499,20 @@ app.get("/api/recovery/result/:proposalId", async (req: Request, res: Response) 
     res.json(result);
   } catch (err) {
     res.status(404).json({ error: "Result not found" });
+  }
+});
+
+app.post("/api/recovery/batch", recoveryLimiter, async (req: Request, res: Response) => {
+  try {
+    const { count } = req.body || {};
+    const benchmark = await runBatchBenchmark(Number(count) || 100);
+    broadcastSSE("global", {
+      type: "BENCHMARK_COMPLETE",
+      benchmark,
+    });
+    res.json(benchmark);
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
   }
 });
 

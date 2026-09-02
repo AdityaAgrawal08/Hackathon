@@ -1247,6 +1247,29 @@ export async function runBatchBenchmark(dbClient?: Client, requestedBatchSize = 
       costSavingsFormatted: formatINR(paise(Math.max(0, controlCostPaise - arbiterCostPaise))),
     },
     bootstrap: bootstrapStats,
+    arms: {
+      arm0Control: {
+        recoveredRevenuePaise: controlRecovered,
+        recoveredFormatted: formatINR(paise(controlRecovered)),
+        recoveryRate: ((controlRecovered / totalAtRisk) * 100).toFixed(1) + "%",
+      },
+      arm1RulesBaseline: {
+        recoveredRevenuePaise: rulesBaselineRecovered,
+        recoveredFormatted: formatINR(paise(rulesBaselineRecovered)),
+        recoveryRate: ((rulesBaselineRecovered / totalAtRisk) * 100).toFixed(1) + "%",
+      },
+      arm2ArbiterML: {
+        recoveredRevenuePaise: arbiterRecovered,
+        recoveredFormatted: formatINR(paise(arbiterRecovered)),
+        recoveryRate: ((arbiterRecovered / totalAtRisk) * 100).toFixed(1) + "%",
+      },
+    },
+    bootstrap95ConfidenceInterval: {
+      rateDeltaCiLow: bootstrapStats.liftOverRules.lowPp,
+      rateDeltaCiHigh: bootstrapStats.liftOverRules.highPp,
+    },
+    costPer100Won: arbiterRecovered > 0 ? Number(((arbiterCostPaise / arbiterRecovered) * 100).toFixed(2)) : 0,
+    costPer100WonFormatted: arbiterRecovered > 0 ? `₹${Number(((arbiterCostPaise / arbiterRecovered) * 100).toFixed(2))} / ₹100 won` : "₹0.00 / ₹100 won",
     unitEconomics: {
       costPer100WonControl: controlRecovered > 0 ? Number(((controlCostPaise / controlRecovered) * 100).toFixed(2)) : 0,
       costPer100WonRules: rulesBaselineRecovered > 0 ? Number(((rulesBaselineCostPaise / rulesBaselineRecovered) * 100).toFixed(2)) : 0,

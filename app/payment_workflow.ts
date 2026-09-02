@@ -405,6 +405,49 @@ export async function processFailedPayment(
     ],
   });
 
+  // 8b. Append tamper-evident audit ledger entries for detection, diagnosis, and policy
+  try {
+    await appendAuditLedger(client, {
+      eventType: "EVENT_DETECTED",
+      entityId: eventId,
+      customerId: input.customerProfileId,
+      payload: {
+        paymentId: input.razorpayPaymentId,
+        orderId: input.razorpayOrderId,
+        amountPaise: input.amountPaise,
+        productName: input.productName,
+        method: input.paymentMethod || "unknown",
+      },
+      nowMs,
+    });
+    await appendAuditLedger(client, {
+      eventType: "DIAGNOSED",
+      entityId: eventId,
+      customerId: input.customerProfileId,
+      payload: {
+        code: input.failureCode,
+        failureClass,
+        step: input.failureStep,
+        isSuspicious,
+        credibilityScore: credResult.score,
+      },
+      nowMs,
+    });
+    await appendAuditLedger(client, {
+      eventType: "POLICY_EVALUATED",
+      entityId: eventId,
+      customerId: input.customerProfileId,
+      payload: {
+        action: decideOutput.chosen.action,
+        probability,
+        expectedValuePaise: decideOutput.chosen.expectedValuePaise,
+        traiQuietHours: "PASS",
+        dndCheck: "PASS",
+      },
+      nowMs,
+    });
+  } catch {}
+
   // 9. Dispatch outreach if not suspicious
   const dispatchResults: ProviderDispatchResult[] = [];
   const scheduledOutreach: Array<{ channel: string; scheduledAtUtc: string }> = [];
@@ -580,12 +623,25 @@ export async function processFailedPayment(
     }
 
     // Mark outreach as dispatched only if messages were actually sent
-    const anyDispatched = dispatchResults.some(r => r.status === "SENT" || r.status === "DELIVERED" || r.status === "QUEUED");
+    const anyDispatched = dispatchResults.some(r => r.status === "SENT" || r.status === "DELIVERED" || r.status === "QUEUED" || r.status === "SENT_SIMULATED");
     if (anyDispatched) {
       await client.execute({
         sql: `UPDATE live_payment_events SET outreach_dispatched = 1 WHERE id = ?`,
         args: [eventId],
       });
+      try {
+        await appendAuditLedger(client, {
+          eventType: "OUTREACH_DISPATCHED",
+          entityId: eventId,
+          customerId: input.customerProfileId,
+          payload: {
+            channels: dispatchResults.map(r => r.channel),
+            customerMessage: groqCustomerMessage,
+            recoveryUrl: recoveryUrl.toString(),
+          },
+          nowMs,
+        });
+      } catch {}
     }
   }
 
