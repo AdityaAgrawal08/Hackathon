@@ -41,7 +41,6 @@ import {
 import {
   simulateFailureTriage,
   initiateRecoveryOrder,
-  recordPromiseToPay,
   completeRecovery,
   getRecoveryResult,
   runBatchBenchmark,
@@ -58,7 +57,6 @@ import {
   processFailedPayment,
   recordSuccessfulPayment,
   onPaymentRecovered,
-  createPromiseToPay,
   generateUpiIntents,
 } from "./payment_workflow.js";
 import { getCustomerMessage, getVendorMessage, getErrorEntry } from "../packages/core/src/error-catalog.js";
@@ -453,52 +451,7 @@ app.post("/api/recovery/upi-intent", recoveryLimiter, async (req: Request, res: 
   }
 });
 
-// 2. Promise-to-Pay Payday Delay Handler
-app.post("/api/recovery/promise", recoveryLimiter, async (req: Request, res: Response) => {
-  try {
-    const { eventId, promisedDate, notes } = req.body;
-    if (!eventId || !promisedDate) {
-      return res.status(400).json({ error: "Missing eventId or promisedDate" });
-    }
-
-    const evResult = await dbClient.execute({
-      sql: `SELECT * FROM live_payment_events WHERE id = ?`,
-      args: [eventId],
-    });
-    if (evResult.rows.length === 0) {
-      return res.status(404).json({ error: "Event not found" });
-    }
-    const ev = evResult.rows[0] as any;
-
-    const promise = await createPromiseToPay(dbClient, {
-      eventId,
-      customerProfileId: String(ev.customer_profile_id),
-      amountPaise: Number(ev.amount_paise),
-      promisedDate: String(promisedDate),
-      notes,
-      nowMs: Date.now(),
-    });
-
-    // Broadcast SSE to vendor dashboard
-    broadcastSSE("global", {
-      type: "PROMISE_TO_PAY_RECORDED",
-      eventId,
-      customerProfileId: ev.customer_profile_id,
-      amountPaise: ev.amount_paise,
-      promisedDate,
-      reminderScheduledUtc: promise.reminderScheduledUtc,
-    });
-
-    res.json({
-      success: true,
-      ...promise,
-    });
-  } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
-  }
-});
-
-// 3. Smart Downsell & Split-Pay Cart Salvage Handler
+// 2. Smart Downsell & Split-Pay Cart Salvage Handler
 app.post("/api/recovery/downsell", recoveryLimiter, async (req: Request, res: Response) => {
   try {
     const { eventId, downsellType, targetProductId } = req.body;
@@ -1464,18 +1417,6 @@ app.post("/api/recovery/initiate", recoveryLimiter, async (req: Request, res: Re
     const result = await initiateRecoveryOrder(proposalId, preferredMethod || "upi", dbClient);
     if (!result) return res.status(404).json({ error: "No active recovery session found" });
     res.json(result);
-  } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
-  }
-});
-
-app.post("/api/recovery/promise-to-pay", recoveryLimiter, async (req: Request, res: Response) => {
-  try {
-    const { proposalId, promisedDay, contactPreference } = req.body || {};
-    if (!proposalId || !promisedDay) return res.status(400).json({ error: "proposalId and promisedDay required" });
-
-    const result = await recordPromiseToPay(proposalId, promisedDay, dbClient);
-    res.json({ success: true, ...result });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }

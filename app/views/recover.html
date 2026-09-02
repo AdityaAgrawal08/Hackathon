@@ -58,15 +58,6 @@
     .upi-icon.paytm { background: #00baf2; color: white; }
     .upi-icon.bhim { background: #22c55e; color: white; }
 
-    /* Payday Promise Selector */
-    .chip-group { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
-    .date-chip { background: #1e293b; border: 1px solid #475569; color: #cbd5e1; padding: 8px 12px; border-radius: 8px; font-size: 12px; cursor: pointer; transition: all 0.2s; }
-    .date-chip:hover { border-color: #3b82f6; color: #60a5fa; }
-    .date-chip.active { background: #2563eb; border-color: #3b82f6; color: white; font-weight: 600; }
-    .custom-date-input { width: 100%; padding: 10px 12px; background: #1e293b; border: 1px solid #475569; border-radius: 8px; color: #f8fafc; font-size: 13px; margin-bottom: 12px; display: none; }
-    .promise-btn { width: 100%; padding: 12px; background: #059669; color: white; border: none; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; transition: background 0.2s; }
-    .promise-btn:hover { background: #047857; }
-
     /* Downsell & Standard Buttons */
     .downsell-btn { width: 100%; padding: 12px; background: #d97706; color: white; border: none; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; transition: background 0.2s; margin-top: 8px; }
     .downsell-btn:hover { background: #b45309; }
@@ -133,25 +124,7 @@
         </div>
       </div>
 
-      <!-- Action 2: Promise-to-Pay Payday Delay -->
-      <div class="action-card" id="promise-action-card">
-        <div class="action-header">
-          <div class="action-name">
-            <span>🗓️</span> Pay on Salary Date (Promise-to-Pay)
-          </div>
-          <span class="action-tag" style="background:#0284c7;color:white;">RESERVE CART</span>
-        </div>
-        <div class="action-desc">Short on funds before salary? Reserve your order and pause reminders until payday:</div>
-        <div class="chip-group" id="payday-chips">
-          <div class="date-chip active" onclick="selectPaydayChip(this, 'next_1st')">1st of Next Month</div>
-          <div class="date-chip" onclick="selectPaydayChip(this, 'month_28th')">28th of Month</div>
-          <div class="date-chip" onclick="selectPaydayChip(this, 'custom')">Custom Date</div>
-        </div>
-        <input type="date" id="custom-date-picker" class="custom-date-input" />
-        <button class="promise-btn" id="promise-btn" onclick="submitPaydayPromise()">Hold Order & Schedule Payday Link</button>
-      </div>
-
-      <!-- Action 3: Smart Downsell / Split-Pay (Cart Salvage) -->
+      <!-- Action 2: Smart Downsell / Split-Pay (Cart Salvage) -->
       <div class="action-card" id="downsell-action-card" style="display: none;">
         <div class="action-header">
           <div class="action-name">
@@ -194,23 +167,6 @@
       <button class="primary-retry-btn" onclick="window.location.href='/'">Return to Merchant Store</button>
     </div>
 
-    <!-- Promise Scheduled View -->
-    <div class="success-panel" id="promise-panel">
-      <div class="success-icon" style="color:#60a5fa;">🗓️</div>
-      <div class="success-badge" style="background:#172554;border-color:#1d4ed8;color:#93c5fd;">ORDER RESERVED</div>
-      <h2 class="portal-title" style="color:#60a5fa;">Payday Reminder Scheduled!</h2>
-      <p class="portal-subtitle" id="promise-subtitle">Your order hold is active.</p>
-
-      <div class="clean-notice" style="border-color:#60a5fa;color:#93c5fd;background:rgba(59,130,246,0.1);">
-        <strong>⏰ What Happens Next:</strong><br>
-        1. Interim dunning reminders have been paused.<br>
-        2. On <span id="promise-date-text">--</span> at 10:00 AM IST, you will receive a 1-tap WhatsApp/SMS link to complete your payment.<br>
-        3. Your order price and cart items remain guaranteed.
-      </div>
-
-      <button class="primary-retry-btn" onclick="window.location.href='/'">Return to Merchant Store</button>
-    </div>
-
     <div class="footer">
       Powered by ARBITER Closed-Loop Recovery Engine • Verified by Razorpay Test Rails
     </div>
@@ -221,7 +177,6 @@
     const params = new URLSearchParams(window.location.search);
     let eventData = null;
     let orderData = null;
-    let selectedPaydayDate = "";
 
     // Diagnostic mapping
     const failureClass = params.get('class') || 'SOFT_RETRYABLE';
@@ -234,7 +189,7 @@
         icon: '⚡',
         label: 'Temporary Balance or Bank Issue',
         title: 'Payment Could Not Be Completed',
-        text: failureReason || 'Your bank reported a temporary decline or insufficient balance. No money was deducted. You can retry immediately or schedule for payday.',
+        text: failureReason || 'Your bank reported a temporary decline or insufficient balance. No money was deducted. You can retry immediately or switch payment methods below.',
       },
       HARD_METHOD_DEAD: {
         css: 'hard',
@@ -271,7 +226,6 @@
 
     async function loadPortalData() {
       initDiagnostics();
-      initDefaultPayday();
 
       try {
         const res = await fetch('/api/events/' + eventId);
@@ -348,68 +302,6 @@
         'Enterprise (Custom)': 'prod_enterprise',
       };
       return map[name] || 'prod_premium_plan';
-    }
-
-    function initDefaultPayday() {
-      const now = new Date();
-      const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-      selectedPaydayDate = nextMonth.toISOString().split('T')[0];
-    }
-
-    function selectPaydayChip(element, type) {
-      document.querySelectorAll('#payday-chips .date-chip').forEach(c => c.classList.remove('active'));
-      element.classList.add('active');
-      const customInput = document.getElementById('custom-date-picker');
-
-      const now = new Date();
-      if (type === 'next_1st') {
-        const d = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-        selectedPaydayDate = d.toISOString().split('T')[0];
-        customInput.style.display = 'none';
-      } else if (type === 'month_28th') {
-        const currentMonth28 = new Date(now.getFullYear(), now.getMonth(), 28);
-        const target = currentMonth28 > now ? currentMonth28 : new Date(now.getFullYear(), now.getMonth() + 1, 28);
-        selectedPaydayDate = target.toISOString().split('T')[0];
-        customInput.style.display = 'none';
-      } else if (type === 'custom') {
-        customInput.style.display = 'block';
-        customInput.min = now.toISOString().split('T')[0];
-        customInput.onchange = function() {
-          selectedPaydayDate = this.value;
-        };
-      }
-    }
-
-    async function submitPaydayPromise() {
-      const btn = document.getElementById('promise-btn');
-      btn.disabled = true;
-      btn.textContent = 'Securing Cart Hold...';
-
-      try {
-        const res = await fetch('/api/recovery/promise', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            eventId,
-            promisedDate: selectedPaydayDate,
-            notes: 'Customer scheduled via Recovery Portal',
-          }),
-        });
-        const data = await res.json();
-        if (data.success) {
-          document.getElementById('active-recovery-view').style.display = 'none';
-          document.getElementById('promise-panel').style.display = 'block';
-          document.getElementById('promise-date-text').textContent = selectedPaydayDate;
-        } else {
-          showAlert(data.error || 'Could not record promise. Please retry.', 'error');
-          btn.disabled = false;
-          btn.textContent = 'Hold Order & Schedule Payday Link';
-        }
-      } catch (e) {
-        showAlert('Network error while scheduling payday reminder.', 'error');
-        btn.disabled = false;
-        btn.textContent = 'Hold Order & Schedule Payday Link';
-      }
     }
 
     async function acceptDownsell(downsellType) {

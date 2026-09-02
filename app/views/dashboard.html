@@ -528,7 +528,7 @@
         return `<button class="action-badge" style="background:#7f1d1d;color:#fca5a5;border:none;cursor:pointer;" onclick="decide('${p.id}', 'approved')">👁 Approve</button>`;
       }
       if (p.ml_action === 'ALTERNATE_UPI_LINK') return '<span class="action-badge" style="background:#1e3a5f;color:#60a5fa">📱 1-Tap UPI Link</span>';
-      if (p.ml_action === 'PROMISE_TO_PAY') return '<span class="action-badge" style="background:#0284c7;color:white">🗓 Payday Delayed</span>';
+      if (p.ml_action === 'PROMISE_TO_PAY') return '<span class="action-badge" style="background:#0284c7;color:white">🗓 Scheduled Follow-up</span>';
       if (p.ml_action === 'RETRY_NOW') return '<span class="action-badge" style="background:#047857;color:#a7f3d0">⚡ Instant Retry</span>';
       return '<span class="action-badge" style="background:#1e3a5f;color:#60a5fa">💬 Recovery Outreach</span>';
     }
@@ -977,9 +977,6 @@
             refreshAll();
           } else if (data.type === 'PAYMENT_RECEIVED' || data.type === 'PAYMENT_RECOVERED') {
             showToast('✓ Payment recovered! Dunning reminders auto-cancelled.', 'success');
-            refreshAll();
-          } else if (data.type === 'PROMISE_TO_PAY_RECORDED') {
-            showToast('🗓️ Customer Payday Promise saved. Reminders paused.', 'success');
             refreshAll();
           }
         } catch {}
