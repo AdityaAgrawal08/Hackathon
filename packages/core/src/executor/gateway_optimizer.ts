@@ -91,8 +91,16 @@ export class GatewayOptimizer {
    * Executes the multi-gateway in-flight routing cascade.
    */
   executeCascade(input: CascadeInput): GatewayCascadeResult {
-    const sequence = input.cascadeSequence || DEFAULT_CASCADE_SEQUENCE;
-    const isTechnical = isCascadeEligible(input.initialErrorCode);
+    const sequence =
+      input.cascadeSequence && input.cascadeSequence.length > 0
+        ? input.cascadeSequence
+        : DEFAULT_CASCADE_SEQUENCE;
+    const initialErrorCode = input.initialErrorCode || "UNKNOWN";
+    const amountPaise =
+      Number.isFinite(input.amountPaise) && input.amountPaise > 0
+        ? Math.round(input.amountPaise)
+        : 0;
+    const isTechnical = isCascadeEligible(initialErrorCode);
 
     this.metrics.totalRouted++;
 
@@ -108,15 +116,15 @@ export class GatewayOptimizer {
             gatewayId: sequence[0]!,
             attemptNumber: 1,
             status: "FAILED",
-            errorCode: input.initialErrorCode,
+            errorCode: initialErrorCode,
             latencyMs: 120,
           },
         ],
         totalLatencyMs: 120,
         cogsSavedPaise: 0,
-        orderId: input.orderId,
-        amountPaise: input.amountPaise,
-        reason: `Failure code '${input.initialErrorCode}' is a consumer-side decline; in-flight cascade bypassed. Handing off to ARBITER dunning.`,
+        orderId: input.orderId || `order_${Date.now()}`,
+        amountPaise,
+        reason: `Failure code '${initialErrorCode}' is a consumer-side decline; in-flight cascade bypassed. Handing off to ARBITER dunning.`,
       };
     }
 
@@ -129,7 +137,7 @@ export class GatewayOptimizer {
       gatewayId: sequence[0]!,
       attemptNumber: 1,
       status: "FAILED",
-      errorCode: input.initialErrorCode,
+      errorCode: initialErrorCode,
       latencyMs: 380,
     });
     totalLatency += 380;
@@ -170,9 +178,9 @@ export class GatewayOptimizer {
           hops,
           totalLatencyMs: totalLatency,
           cogsSavedPaise: cogsSaved,
-          orderId: input.orderId,
-          amountPaise: input.amountPaise,
-          reason: `Primary gateway '${sequence[0]}' encountered '${input.initialErrorCode}'. Auto-cascaded in-flight to '${gatewayId}' in ${totalLatency}ms. Captured with ₹0 customer dunning cost.`,
+          orderId: input.orderId || `order_${Date.now()}`,
+          amountPaise,
+          reason: `Primary gateway '${sequence[0]}' encountered '${initialErrorCode}'. Auto-cascaded in-flight to '${gatewayId}' in ${totalLatency}ms. Captured with ₹0 customer dunning cost.`,
         };
       } else {
         hops.push({
@@ -195,8 +203,8 @@ export class GatewayOptimizer {
       hops,
       totalLatencyMs: totalLatency,
       cogsSavedPaise: 0,
-      orderId: input.orderId,
-      amountPaise: input.amountPaise,
+      orderId: input.orderId || `order_${Date.now()}`,
+      amountPaise,
       reason: `All ${sequence.length} acquirer gateways in cascade sequence failed. In-flight recovery exhausted. Handing off to ARBITER customer recovery.`,
     };
   }
