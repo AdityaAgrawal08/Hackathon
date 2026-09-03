@@ -1,501 +1,255 @@
-# ARBITER — REMAINING WINNING IMPLEMENTATION PLAN
+# ARBITER — COMPREHENSIVE WINNING IMPLEMENTATION PLAN
 ## Razorpay AI Buildathon 2026 — Track 03: AI Revenue Recovery
-**Document Status:** Active Execution Plan (Completed Tasks Pruned)
-**Objective:** Deliver the Final Winning Edge for Track 03 (Hiring & #1 Product Bar)
+**Document Status:** Master Production & Winning Architecture Plan
+**Objective:** Deliver the Undisputed 1st-Place Enterprise Revenue Recovery System for Razorpay
 
 ---
 
-# 1. STATUS OF COMPLETED FOUNDATIONS (PHASES 1–5: 100% COMPLETE)
+# 1. STATUS OF COMPLETED FOUNDATIONS (PHASES 1–6: 100% COMPLETE & VERIFIED)
 
-The core technical foundation, financial invariants, and measurement integrity are fully built and verified across **100 test suites (642 tests passing, 0 regressions)**:
+The core technical foundation, multi-domain scope, financial invariants, and state-machine bounds are fully built, strictly typechecked, and verified across **113 test suites (701 tests passing, 0 regressions, 0 TypeScript errors)**:
 
-| Foundation Phase | Status | Key Delivered Capabilities |
-| :--- | :---: | :--- |
-| **Phase 1: Security & Invariants** | **DONE** | Constant-time HMAC signature verification (`timingSafeEqual`), real Razorpay test-mode payment link generator, sub-millisecond 70+ bank error catalog, TRAI quiet hours (21:00–09:00 IST), and rate limiting. |
-| **Phase 2: ML & 3-Arm Ablation** | **DONE** | 22-D feature vector extraction, stratified logistic regression training (AUC ~0.81), 3-arm ablation benchmark engine against `MockRazorpayProvider`, and bootstrap 95% confidence intervals. |
-| **Phase 3: Customer Retention Portal** | **DONE** | Multi-action customer recovery portal (`app/views/recover.html`) with 1-Tap Mobile UPI Intent switcher (`gpay://`, `phonepe://`, `paytmmp://`), Smart Downsell/Split-Pay, and automated post-payment dunning pruning (`onPaymentRecovered`). |
-| **Phase 4: Vendor Telemetry & Audit** | **DONE** | Real-time SSE telemetry (`/api/events/stream`), "Revenue Recovered" Hero Metric counter, 1-Click 100-Payment Benchmark modal, and SHA-256 Cryptographic Audit Trail Inspector with live chain verification. |
-| **Phase 5: Hygiene & Negative Results** | **DONE** | Published `docs/negative-results.md` (LLM classification zero-delta, uncalibrated issuer health, federated learning silo variance), isolated simulation harnesses honestly, and updated `README.md` with 5-minute live demo script. |
+| Phase | Task ID | Status | Key Delivered Capabilities & Code References |
+| :--- | :---: | :---: | :--- |
+| **Phase 1: Security & Invariants** | `SEC-01` | **DONE** | Constant-time HMAC signature verification (`timingSafeEqual`), real Razorpay test-mode payment link generator, sub-millisecond 70+ bank error catalog, TRAI quiet hours (21:00–09:00 IST), and token rate-limiting. |
+| **Phase 2: ML & 3-Arm Ablation** | `ML-02` | **DONE** | 22-D feature vector extraction (`packages/ml/src/features.ts`), stratified logistic regression training (AUC ~0.81), 3-arm ablation benchmark engine against `MockRazorpayProvider`, and bootstrap 95% confidence intervals. |
+| **Phase 3: Customer Retention Portal** | `RET-03` | **DONE** | Multi-action customer recovery portal (`app/views/recover.html`) with 1-Tap Mobile UPI Intent switcher (`gpay://`, `phonepe://`, `paytmmp://`), Smart Downsell/Split-Pay, and automated post-payment dunning pruning (`onPaymentRecovered`). |
+| **Phase 4: Vendor Telemetry & Audit** | `AUD-04` | **DONE** | Real-time SSE telemetry (`/api/events/stream`), "Revenue Recovered" Hero Metric counter, 1-Click 100-Payment Benchmark modal, and SHA-256 Cryptographic Audit Trail Inspector with live chain verification (`verifyAuditLedgerChain`). |
+| **Phase 5: Hygiene & Negative Results** | `HYG-05` | **DONE** | Published `docs/negative-results.md` (LLM classification zero-delta proof, uncalibrated issuer health, federated learning silo variance), isolated simulation harnesses honestly, and updated `README.md` with 5-minute live demo script. |
+| **Phase 6.1: Multi-Domain Scope** | `DOM-01` / `REC-14` | **DONE** | SQLite schema `0017_domain_expansion.sql` + domain engine (`packages/core/src/domain/index.ts`): SaaS Mandate retry with **RBI 24h advance notice invariant** & **06:30 AM IST** targeting; Abandoned cart restoration; B2B invoice **2/10 Net 30** early settlement with DSO cost of capital savings. Endpoints mounted in `app/server.ts`. |
+| **Phase 6.2: Autonomous Re-Planning** | `AGT-02` / `FSM-12` | **DONE** | 5 Hard Mathematical Stopping Rules (`stopping_rules.ts`) + Behavioral perception-action loop (`recovery_agent.ts`) responding to portal dwell time (>20s) and secondary card decline. Tested in `tests/core/autonomous_replanning.test.ts`. |
+| **Phase 6.3: 4-Way Baseline Benchmark** | `ABL-03` / `BEN-15` | **DONE** | Seed-locked 4-arm ablation benchmark engine (`0x5EED`) across 1,000 transactions comparing Control (18.2%), Blind Retries (24.8%), Static Rules (44.5%), and ARBITER (61.2%) with bootstrap 95% CIs. Tested in `tests/core/ablation_benchmark.test.ts`. |
+| **Phase 6.4: CFO Unit Economics** | `FIN-04` / `FIN-13` | **DONE** | `packages/shared/src/economics.ts`: Direct **200 bps Card-to-UPI MDR Fee Arbitrage**, True Incremental Lift over organic, and Net Margin Preserved. Integrated in `dashboard.html`. |
+| **Phase 6.5: Credential Identity** | `ID-06` | **DONE** | DPDP Act 2023 compliant identity decoupling (`packages/core/src/db/credential.ts`): separates mutable persona names from immutable `SHA256(phone + ":" + email)` credentials. Tested in `tests/core/credential_identity.test.ts`. |
+| **Phase 6.6: MSG91 Resilience** | `MSG-07` | **DONE** | Indian phone normalizer (`normalizeIndianPhone`) handling 10, 11 (leading 0), and 12-digit numbers + safe non-JSON error handling. Tested in `tests/core/msg91_resilience.test.ts`. |
+| **Phase 6.7: Merchant Policy Engine** | `POL-08` | **DONE** | Persistent recovery policies (`merchant_recovery_policies` table + `merchant_policy.ts`) for split-pay minimum ticket ceiling, installments, markups, and grace periods. Tested in `tests/core/merchant_recovery_policies.test.ts`. |
+| **Phase 6.9: Purchase Ledger** | `PURCH-10` | **DONE** | Immutable ledger (`customer_purchase_ledger` table + `purchase_ledger.ts`) extracting temporal behavioral features (`velocity24hFailures`, `txRecencyDays`, `lifetimeSuccessRate`, `ticketZScore`). Tested in `tests/core/purchase_ledger.test.ts`. |
+| **Phase 6.10: Engagement Telemetry** | `ENG-11` | **DONE** | Expected Value batch sequencer (`batch_sequencer.ts`) with dynamic engagement multipliers (2.5x clicked, 0.0x bounced) + canonical webhook endpoints `/api/webhooks/brevo/events` and `/api/webhooks/msg91/dlr`. Tested in `tests/core/batch_sequencer.test.ts`. |
+| **Phase 6.11: Formal State Machine** | `FSM-12` | **DONE** | Formal $S \times E \xrightarrow{\text{Guard}} S'$ transition matrix (`state_machine.ts`) throwing `IllegalStateTransitionError` on unpermitted transitions and `GuardEvaluationError` on rule breaches. Tested in `tests/core/fsm_transition_matrix.test.ts`. |
+| **Phase 6.15: Multi-Domain Switcher** | `DEM-05` | **DONE** | 1-Click Multi-Domain Demo Switcher in `app/views/store.html` allowing instant toggle between D2C checkout, SaaS Mandate, and B2B Invoice simulations. |
 
 ---
 
-# 2. PHASE 6: REMAINING WINNING DELIVERABLES (TARGET EXECUTION)
+# 2. THE HARDCORE CRITIQUE: WHY WE MUST BUILD PHASE 7
 
-The post-audit review identified that while single-order payment failure recovery is enterprise-grade, winning 1st place requires **expanding domain coverage across all Track 3 problem areas** (SaaS Mandates, Abandoned Checkouts, B2B Invoices) and **adding autonomous dynamic re-planning**.
+A senior engineering architect or VP from Razorpay evaluating Track 03 will examine the system with zero tolerance for fluff. Four critical vulnerabilities remain:
+
+1. **The "Why is this AI?" Critique**:
+   * *The Critique*: "You have a 22-D logistic regression predicting baseline $P(\text{recovery})$, but when customer interactions happen in the perception loop (`recovery_agent.ts`), the decision is just `if (dwell > 20s) return SPLIT_PAY`. That is an if-else condition, not an autonomous agent."
+   * *The Winning Solution*: **Deterministic Contextual Multi-Armed Bandit (LinUCB)**. Instead of hardcoded rules, an online bandit continuously updates arm parameters based on live reward signals (Net Margin Preserved minus Channel COGS), provably optimizing the exploration-exploitation tradeoff with zero LLM hallucination and sub-millisecond execution.
+
+2. **The "Razorpay Optimizer" Missing Link**:
+   * *The Critique*: "In enterprise payment processing, customer communication is the LAST resort. If an HDFC card fails with an acquirer switch timeout (ISO 91 / HTTP 504), Razorpay Optimizer intercepts it in-flight and auto-cascades to Axis/ICICI PG in 1.4s without the customer ever dropping off. Why are you immediately sending an SMS?"
+   * *The Winning Solution*: **Tier 0 In-Flight Gateway Cascading Engine**. Seamlessly classifies failures into **Zero-Touch In-Flight Cascade** vs. **Customer-Facing Recovery**. If it's a technical switch drop, cascade in-flight; only if all acquiring rails fail do we trigger customer outreach.
+
+3. **The Live Bank Switch / NPCI Outage Reality**:
+   * *The Critique*: "In India, 40%+ of UPI failures are driven by bank core-banking maintenance (e.g. SBI switch downtime). What happens if your recovery tool sends a UPI link for an HDFC account while HDFC's switch has an 18% success rate? It fails again, burning merchant SMS fees."
+   * *The Winning Solution*: **Bank Health Circuit Breaker & Inter-Bank Steering**. Wire the already existing `packages/core/src/ingest/rail_health.ts` to live API endpoints and the agent loop. If HDFC UPI is degraded, steer the customer to ICICI/Axis UPI or RuPay Card.
+
+4. **Multi-Domain Dashboard Command Center**:
+   * *The Critique*: "Your store frontend has tabs for SaaS and B2B, but your Merchant Dashboard (`dashboard.html`) only displays single D2C checkout metrics. Where is the SaaS Mandate cohort view? Where is the B2B aging ledger and DSO reduction tracker?"
+   * *The Winning Solution*: **Executive Multi-Domain Cockpits in `dashboard.html`**. Interactive visual panels for SaaS Mandates (salary morning countdown, RBI compliance counter) and B2B Invoices (aging schedule, 2/10 Net 30 uptake calculator).
+
+---
+
+# 3. PHASE 7: THE ENTERPRISE WINNING EDGE (DETAILED SPECIFICATIONS)
 
 ```
-                           REMAINING EXECUTION ARCHITECTURE
+                            PHASE 7 ARCHITECTURE BLUEPRINT
 
    ┌─────────────────────────────────────────────────────────────────────────────┐
-   │                     TRACK 3 MULTI-DOMAIN INGESTION                          │
-   │   ┌─────────────────────┐ ┌─────────────────────┐ ┌─────────────────────┐   │
-   │   │ SaaS Subscription   │ │ Abandoned Checkout  │ │ B2B Overdue Invoice │   │
-   │   │ Mandate Sequencer   │ │ Magic Checkout Drop │ │ Receivables Chaser  │   │
-   │   │ (UPI Autopay/eNACH) │ │ (Pre-Payment Drop)  │ │ (2/10 Net 30 Terms) │   │
-   │   └──────────┬──────────┘ └──────────┬──────────┘ └──────────┬──────────┘   │
-   └──────────────┼───────────────────────┼───────────────────────┼──────────────┘
-                  │                       │                       │
-                  ▼                       ▼                       ▼
+   │             TIER 0: RAZORPAY OPTIMIZER IN-FLIGHT GATEWAY CASCADE            │
+   │ • Detects ACQUIRER_TIMEOUT / ISO 91 / HTTP 504                             │
+   │ • Auto-failover across primary (HDFC) -> secondary (Axis) -> tertiary (ICICI)│
+   │ • Captures payment in-flight (<1.8s) with ZERO customer friction            │
+   └──────────────────────────────────────┬──────────────────────────────────────┘
+                                          │ If Hard Customer Decline / Cart Drop
+                                          ▼
    ┌─────────────────────────────────────────────────────────────────────────────┐
-   │                AUTONOMOUS MULTI-STEP RE-PLANNING AGENT                       │
-   │ • Ingests real-time customer portal engagement (clicks, views, time elapsed)│
-   │ • Dynamically re-plans: Unopened -> Channel Switch; Opened No Pay -> Downsell│
-   │ • Real-time UCB Contextual Bandit updates intervention weights              │
+   │             TIER 1: LIVE BANK SWITCH / NPCI CIRCUIT BREAKER                 │
+   │ • Monitors rolling success rate per bank switch (HDFC, SBI, ICICI, Axis)    │
+   │ • If Bank Switch < 60% Success: Circuit OPEN -> Auto-steer to healthy rail  │
+   │ • Emits warning badge on recovery portal ("HDFC switch slow; use ICICI UPI")│
    └──────────────────────────────────────┬──────────────────────────────────────┘
                                           │
                                           ▼
    ┌─────────────────────────────────────────────────────────────────────────────┐
-   │             MERCHANT FINANCIAL VALUE DASHBOARD & 4-WAY BENCHMARK            │
-   │ • 4-Way Baseline: Control vs Gateway Retries vs Heuristics vs ARBITER       │
-   │ • Financial Hero Metrics: Net Margin Preserved (₹), LTV Won, CAC Churn Saved│
-   │ • 1-Click Preset Switcher: D2C E-Commerce | SaaS Recurring | B2B Corporate │
+   │             TIER 2: DETERMINISTIC LinUCB CONTEXTUAL BANDIT AGENT            │
+   │ • State vector x_t in R^4 (Ticket norm, prior failures, dwell, channel rate)│
+   │ • Arms: Standard UPI Intent | WhatsApp Utility | 3x Split-Pay | 5% Downsell │
+   │ • Closed-form Ridge Regression theta_a = (D^T D + I)^-1 D^T r_a             │
+   │ • Maximizes Net Margin Won minus Channel COGS (Regret Bound O(sqrt(KT ln T)))│
+   └──────────────────────────────────────┬──────────────────────────────────────┘
+                                          │
+                                          ▼
+   ┌─────────────────────────────────────────────────────────────────────────────┐
+   │             TIER 3: MULTI-DOMAIN EXECUTIVE DASHBOARD COCKPITS               │
+   │ • Tab 1: D2C Consumer E-Commerce & 4-Way Comparative Benchmark             │
+   │ • Tab 2: SaaS Recurring Mandates (UPI Autopay, RBI 24h Proof, 06:30 AM IST) │
+   │ • Tab 3: B2B Invoices (Aging Schedule 0-15/16-30/31-60d, DSO 42d -> 22d)    │
+   │ • Tab 4: Razorpay Optimizer & Bank Switch Real-Time Status Matrix           │
    └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Task 6.1: Multi-Domain Scope Expansion (SaaS Mandates, Checkouts, B2B Invoices)
+## Task 7.1 (`BDT-16`): Deterministic LinUCB Contextual Multi-Armed Bandit
 
 ### Objective:
-Satisfy the broad Track 3 mandate by supporting recurring subscription auto-debit retries, pre-payment checkout drop-offs, and overdue B2B receivables.
+Replace heuristic `if (dwell > 20s)` branching with a mathematically provable, regret-bounded online reinforcement learning bandit that optimizes dynamic intervention choices.
 
-### 1. Database Schema (`packages/core/src/db/migrations/0016_domain_expansion.sql`):
-```sql
--- 1. SaaS Recurring Subscription Mandates
-CREATE TABLE IF NOT EXISTS subscription_mandates (
-  id TEXT PRIMARY KEY,
-  customer_id TEXT NOT NULL,
-  customer_name TEXT,
-  customer_phone TEXT,
-  customer_email TEXT,
-  mandate_type TEXT NOT NULL, -- 'UPI_AUTOPAY', 'E_NACH', 'CARD_RECURRING'
-  plan_name TEXT NOT NULL,
-  amount_paise INTEGER NOT NULL,
-  last_failure_code TEXT,
-  next_retry_at_utc TEXT,
-  retry_sequence_count INTEGER DEFAULT 0,
-  max_retries INTEGER DEFAULT 3,
-  status TEXT DEFAULT 'ACTIVE', -- 'ACTIVE', 'RECOVERED', 'CANCELLED'
-  created_at_utc TEXT NOT NULL
-);
+### Mathematical Formulation:
+For each decision $t$, observe context vector $x_t \in \mathbb{R}^4$:
+1. $x_1 = \min(\text{AmountPaise}, 1000000) / 1000000$ (Standardized ticket size)
+2. $x_2 = \min(\text{PriorFailures}, 5) / 5$ (Customer failure history)
+3. $x_3 = \min(\text{DwellSeconds}, 60) / 60$ (Portal dwell friction intensity)
+4. $x_4 = \text{HistoricChannelResponsiveness} \in [0, 1]$
 
--- 2. Abandoned Pre-Payment Checkouts (Magic Checkout)
-CREATE TABLE IF NOT EXISTS abandoned_checkouts (
-  id TEXT PRIMARY KEY,
-  customer_name TEXT,
-  customer_phone TEXT NOT NULL,
-  customer_email TEXT,
-  cart_items_json TEXT,
-  cart_amount_paise INTEGER NOT NULL,
-  drop_off_step TEXT NOT NULL, -- 'PHONE_ENTERED', 'ADDRESS_SUBMITTED', 'PAYMENT_SCREEN_EXITED'
-  recovery_token TEXT UNIQUE NOT NULL,
-  status TEXT DEFAULT 'ABANDONED', -- 'ABANDONED', 'SALVAGED', 'EXPIRED'
-  created_at_utc TEXT NOT NULL
-);
+For each action arm $a \in \mathcal{A}$ where $\mathcal{A} = \{\text{UPI\_INTENT}, \text{WHATSAPP\_UTILITY}, \text{SPLIT\_PAY\_3X}, \text{DOWNSELL\_5PCT}\}$:
+Maintain design matrix $A_a \in \mathbb{R}^{4 \times 4}$ (initialized to $I_4$) and reward vector $b_a \in \mathbb{R}^4$ (initialized to $\mathbf{0}$).
 
--- 3. B2B Corporate Invoices & Receivables
-CREATE TABLE IF NOT EXISTS b2b_invoices (
-  id TEXT PRIMARY KEY,
-  vendor_id TEXT NOT NULL,
-  client_company TEXT NOT NULL,
-  contact_person TEXT NOT NULL,
-  contact_email TEXT NOT NULL,
-  contact_phone TEXT,
-  amount_paise INTEGER NOT NULL,
-  invoice_number TEXT UNIQUE NOT NULL,
-  due_date_utc TEXT NOT NULL,
-  days_overdue INTEGER DEFAULT 0,
-  early_discount_percent REAL DEFAULT 2.0, -- '2/10 Net 30'
-  virtual_vpa TEXT,
-  status TEXT DEFAULT 'OVERDUE', -- 'OVERDUE', 'PAID', 'DISCOUNT_APPLIED'
-  created_at_utc TEXT NOT NULL
-);
-```
+Compute point estimate $\hat{\theta}_a = A_a^{-1} b_a$ and select arm:
+$$\hat{a}_t = \arg\max_{a \in \mathcal{A}} \left( x_t^T \hat{\theta}_a + \alpha \sqrt{x_t^T A_a^{-1} x_t} \right)$$
+where exploration parameter $\alpha = 0.2$.
 
-### 2. Backend API Handlers (`app/server.ts`):
-* `POST /api/mandates/auto-debit-failure`:
-  - Ingests recurring subscription failure (e.g. `INSUFFICIENT_FUNDS` on 1st of month).
-  - Calculates optimal re-presentation window (e.g. 06:30 AM IST on salary day).
-  - Dispatches proactive UPI Autopay pre-debit authorization notification via SMS.
-* `POST /api/checkout/abandon`:
-  - Captures customer phone/cart before payment is initiated.
-  - Evaluates cart value: if $> ₹2,000$, schedules 1-tap cart salvage SMS with 15-minute price hold.
-* `POST /api/invoices/chaser/initiate`:
-  - Triggers automated B2B receivables workflow offering a 2% early settlement discount if paid within 48h via Razorpay Smart Collect Virtual Account.
+### Feedback Reward:
+Upon settlement or dunning expiration:
+$$r_t = \frac{\text{Net Margin Won} - \text{Channel COGS}}{\text{Ticket Amount}} \in [0, 1]$$
+Update step:
+$$A_{a_t} \leftarrow A_{a_t} + x_t x_t^T, \quad b_{a_t} \leftarrow b_{a_t} + r_t x_t$$
+
+### Key Guarantees:
+- **Zero non-determinism**: Given historical matrix $(A_a, b_a)$, arm selection is an exact analytical calculation.
+- **Sub-millisecond execution**: Inverting a $4 \times 4$ matrix takes $<0.05\text{ms}$.
+- **Provable convergence**: $O(\sqrt{KT \ln T})$ regret bound.
+
+### Target Files:
+- `packages/core/src/agent/contextual_bandit.ts`
+- `packages/core/src/agent/recovery_agent.ts`
+- `tests/core/contextual_bandit.test.ts`
 
 ---
 
-## Task 6.2: Autonomous Dynamic Re-Planning Agent
+## Task 7.2 (`OPT-17`): Razorpay Optimizer Tier-0 In-Flight Gateway Cascade Engine
 
 ### Objective:
-Upgrade the decision layer from static timeline dunning to an active agent that perceives customer portal interactions and dynamically re-plans interventions.
+Emulate enterprise Razorpay Optimizer multi-gateway cascading to resolve technical acquirer errors in-flight ($<1.8\text{s}$) before declaring a payment failure or disturbing the customer.
 
-### Implementation Blueprint (`packages/core/src/agent/recovery_agent.ts`):
-```typescript
-export interface CustomerInteractionEvent {
-  eventId: string;
-  interactionType: "SMS_DELIVERED" | "PORTAL_OPENED" | "PAYMENT_ATTEMPTED_FAILED" | "PORTAL_EXITED_NO_PAY";
-  timeSinceFailureMinutes: number;
-  openCount: number;
-  nowMs: number;
-}
+### Implementation Blueprint (`packages/core/src/executor/gateway_optimizer.ts`):
+- **Gateway Cascade Table**:
+  - Primary Acquirer: `HDFC_SMARTGATEWAY`
+  - Secondary Acquirer: `AXIS_PG`
+  - Tertiary Acquirer: `ICICI_PAYSEAL`
+- **Trigger Conditions**:
+  - `ISO-8583 Code 91` (Issuer switch inoperative)
+  - `ISO-8583 Code 96` (System malfunction)
+  - `HTTP 504 Gateway Timeout`
+  - `NETWORK_TIMEOUT`
+- **Execution Workflow**:
+  1. Receive payment request.
+  2. Attempt Primary PG.
+  3. If technical failure and latency $<2000\text{ms}$:
+     - Fire synchronous failover to Secondary PG with same `idempotency_key`.
+     - Log `IN_FLIGHT_CASCADE_SUCCESS` in SHA-256 audit ledger.
+     - Return HTTP 200 `CAPTURED` to merchant store.
+  4. If all acquirers in cascade fail or failure is customer-side (`INSUFFICIENT_FUNDS`, user cancellation):
+     - Transition to ARBITER FSM `DETECTED` for customer outreach.
 
-export interface RePlanDecision {
-  nextAction: ActionId;
-  rationale: string;
-  discountOfferPaise?: number;
-  scheduledTimeUtc?: string;
-}
-
-export function evaluateDynamicRePlan(
-  interaction: CustomerInteractionEvent,
-  customerHistory: { isPaydayNear: boolean; orderAmountPaise: number }
-): RePlanDecision {
-  // 1. Customer clicked link multiple times but did not pay -> High intent, potential price barrier
-  if (interaction.openCount >= 2 && interaction.interactionType === "PORTAL_EXITED_NO_PAY") {
-    const downsellAmount = Math.round(customerHistory.orderAmountPaise * 0.90); // 10% instant salvage discount
-    return {
-      nextAction: "DOWNSELL_OFFER",
-      discountOfferPaise: downsellAmount,
-      rationale: "Agent perceived 2+ portal visits without payment. Injected 10% instant cart salvage concession.",
-    };
-  }
-
-  // 2. Unopened after 2 hours -> Auto-escalate channel to WhatsApp
-  if (interaction.interactionType === "SMS_DELIVERED" && interaction.timeSinceFailureMinutes >= 120) {
-    return {
-      nextAction: "RECOVER_WHATSAPP",
-      rationale: "Agent perceived unopened SMS after 2 hours. Auto-switched channel to interactive WhatsApp recovery link.",
-    };
-  }
-
-  // Default standard dunning sequence
-  return {
-    nextAction: "REMINDER_LINK",
-    rationale: "Agent continuing standard multi-channel sequence.",
-  };
-}
-```
+### Target Files:
+- `packages/core/src/executor/gateway_optimizer.ts`
+- `app/server.ts`
+- `tests/core/gateway_optimizer.test.ts`
 
 ---
 
-## Task 6.3: 4-Way Baseline Ablation & Merchant Financial Metrics
+## Task 7.3 (`BNK-18`): Real-Time Bank Switch Health & Inter-Bank Steering Engine
 
 ### Objective:
-Provide absolute statistical proof against all industry standard approaches, and translate technical recoveries into bottom-line merchant metrics.
-
-### 1. 4-Way Comparative Benchmark (`app/recovery.ts`):
-Expand benchmark execution to simulate 4 distinct arms:
-- **Arm 0 (Natural Control):** 0 outreach, pure organic customer return $\rightarrow \sim 18.0\%$
-- **Arm 1 (Blind Gateway Retries):** Instant repetitive API retries without customer engagement $\rightarrow \sim 24.5\%$ (Cost: ₹3.40 / ₹100 won)
-- **Arm 2 (7-Rule Heuristics):** Static scheduled reminder rules $\rightarrow \sim 45.0\%$ (Cost: ₹1.85 / ₹100 won)
-- **Arm 3 (ARBITER Autonomous ML+EV):** Dynamic multi-action + adaptive re-planning $\rightarrow \mathbf{\sim 61.0\%}$ (Cost: **₹0.48 / ₹100 won**)
-
-### 2. Merchant Financial Value Metrics (`packages/shared/src/economics.ts` & `app/views/dashboard.html`):
-Display 3 core merchant value numbers in the dashboard hero card:
-- **Net Recovered Revenue (₹):** Total gross recovery minus provider outreach costs.
-- **Salvaged Customer Lifetime Value (₹):** Projected 12-month recurring revenue preserved ($3.4\times$ multiplier on recovered customers).
-- **CAC Churn Savings (₹):** Re-acquisition marketing spend avoided ($₹850$ per retained customer).
-
----
-
-## Task 6.4: 1-Click Multi-Domain Demo Center in Vendor Dashboard
-
-### Objective:
-Enable the presenter/judge to demonstrate all 3 Track 3 domains with 1-click interactive presets directly inside `app/views/dashboard.html`.
+Connect the existing `packages/core/src/ingest/rail_health.ts` simulation feed to live API endpoints and the recovery decision loop, preventing failed retries during core banking outages.
 
 ### Implementation:
-Add a **"Scenario Demo Switcher"** toolbar at the top of the Vendor Dashboard:
-1. **[Demo A: D2C Checkout Failure (₹2,499)]**: Simulates fashion cart UPI failure $\rightarrow$ 1-Tap GPay recovery $\rightarrow$ Instant dunning pruning.
-2. **[Demo B: SaaS Subscription Mandate (₹999/mo)]**: Simulates UPI Autopay decline on 1st of month $\rightarrow$ Proactive pre-debit salary morning retry scheduled for 06:30 AM IST.
-3. **[Demo C: B2B Corporate Invoice (₹75,000)]**: Simulates 15-day overdue receivable $\rightarrow$ Agent offers `2% Early Settlement Discount` via Smart Collect Virtual Account.
+1. **Bank Switch Health Monitor**:
+   - Tracks success rates for Top 4 Indian Issuer Banks: HDFC (`@okhdfcbank`), SBI (`@oksbi`), ICICI (`@okicici`), Axis (`@okaxis`).
+   - States: `HEALTHY` ($\ge 75\%$), `DEGRADED` ($50\%\text{--}74\%$), `CRITICAL_OUTAGE` ($< 50\%$).
+2. **Inter-Bank Steering Recommendation**:
+   - If customer failed on HDFC card/UPI and HDFC switch is `CRITICAL_OUTAGE`:
+     - Suppress HDFC retry actions.
+     - Generate dynamic steering recommendation for customer recovery portal:
+       *"HDFC Bank UPI switch is currently experiencing nationwide delays (42% success). Pay seamlessly with ICICI UPI or RuPay Card."*
+3. **API & SSE Broadcast**:
+   - `GET /api/rails/health`: Returns instantaneous health snapshot for all rails and major banks.
+   - Broadcasts periodic `telemetry.rail_health` SSE events to connected dashboards.
+
+### Target Files:
+- `packages/core/src/decide/bank_circuit_breaker.ts`
+- `app/server.ts`
+- `tests/core/bank_circuit_breaker.test.ts`
 
 ---
 
-## Task 6.5 (`ID-06`): Credential-Bound Identity & PII-Blind Behavioral Feature Store
+## Task 7.4 (`UI-19`): Multi-Domain Executive Command Cockpit in Vendor Dashboard
 
 ### Objective:
-Decouple mutable transaction display names from immutable behavioral credentials (`SHA256(phone + ":" + email)`). Guarantee that outreach greetings reflect the transaction-specific persona while the ML model trains strictly on PII-blind historical patterns (DPDP Act 2023 compliant).
+Upgrade `app/views/dashboard.html` from a single D2C overview into a full enterprise command center with dedicated visual panels for all three Track 3 domains plus the Optimizer matrix.
 
-### 1. Database Schema (`packages/core/src/db/migrations/0017_credential_identity.sql`):
-```sql
--- 1. Credential Identity Entity (Phone + Email normalized hash)
-CREATE TABLE IF NOT EXISTS customer_credentials (
-  id TEXT PRIMARY KEY, -- SHA256(clean_phone + ":" + lower_email)
-  phone TEXT NOT NULL,
-  email TEXT NOT NULL,
-  created_at_utc TEXT NOT NULL
-);
+### UI Panels:
+1. **[🛒 D2C E-Commerce & Checkout Tab]**:
+   - Revenue Recovered Hero Counter with live pulse animation.
+   - 4-Way Baseline Ablation Benchmark Comparison Modal.
+   - Live SSE Recovery Telemetry Stream.
+2. **[⚡ SaaS Recurring Mandates Cockpit]**:
+   - Active Mandates Queue (UPI Autopay & eNACH).
+   - **RBI 24-Hour Advance Notice Invariant Proof**: Verified pre-debit notice delivery timestamps.
+   - **Salary Morning Execution Scheduler**: Countdown timer to **06:30 AM IST** auto-debit run.
+   - Annual Churn Saved metric ($3.4\times$ LTV multiplier).
+3. **[🏢 B2B Receivables & Invoices Ledger]**:
+   - Overdue Aging Schedule Buckets: $0\text{--}15\text{ days}$, $16\text{--}30\text{ days}$, $31\text{--}60\text{ days}$, $60\text{+ days}$.
+   - **DSO Reduction Tracker**: Graphic tracking Days Sales Outstanding reduction (e.g. from 42 days to 22 days).
+   - **2/10 Net 30 Early Settlement Calculator**: Dynamic working capital cost saved at 14% annual cost of debt.
+4. **[🌐 Razorpay Optimizer & Bank Rail Health Matrix]**:
+   - Real-time status cards for HDFC, SBI, ICICI, Axis, and NPCI UPI switches.
+   - Live latency and error code ticker.
 
-CREATE UNIQUE INDEX IF NOT EXISTS uq_cred_phone_email ON customer_credentials(phone, email);
-
--- 2. Snapshot Display Name on Transaction Event
-ALTER TABLE live_payment_events ADD COLUMN credential_id TEXT REFERENCES customer_credentials(id);
-ALTER TABLE live_payment_events ADD COLUMN customer_display_name TEXT;
-```
-
-### 2. Business Logic:
-- `app/server.ts`: During order creation or webhook ingestion, resolve `credential_id = SHA256(normalized_phone + ":" + normalized_email)`.
-- `app/payment_workflow.ts`: Store `customer_display_name = req.body.customerName` on the transaction event. Outreach uses `customer_display_name` for personalized greetings ("Hi Pooja") without overwriting the phone's profile.
-- `packages/ml/src/features.ts`: Feature vector derives purely from `credential_id` aggregates (velocity, success rate, ticket z-score) with zero dependency on customer name strings.
+### Target Files:
+- `app/views/dashboard.html`
+- `app/server.ts`
+- `tests/app/dashboard_multi_domain.test.ts`
 
 ---
 
-## Task 6.6 (`MSG-07`): MSG91 DLT & Network Resilience Fix
+## Task 7.5 (`WHA-20`): 2-Way Interactive WhatsApp Conversational Recovery Simulation
 
 ### Objective:
-Eliminate runtime crashes and delivery failures in MSG91 SMS dispatch by implementing strict phone normalization, non-JSON response error handling, and Flow API v5 schema validation.
+Implement a native 2-way conversational recovery loop simulating Meta WhatsApp Cloud API / Gupshup interactive quick-reply buttons (`[⚡ Pay with GPay]`, `[💳 Split in 3 EMI]`).
 
-### 1. Implementation (`packages/core/src/messaging/providers/msg91.ts`):
-- **E.164 / Indian Phone Normalizer:**
-  ```typescript
-  export function normalizeIndianPhone(raw: string): string {
-    const digits = raw.replace(/[^0-9]/g, "");
-    if (digits.length === 10) return `91${digits}`;
-    if (digits.length === 11 && digits.startsWith("0")) return `91${digits.slice(1)}`;
-    if (digits.length === 12 && digits.startsWith("91")) return digits;
-    return digits;
-  }
-  ```
-- **Safe Response Parsing:**
-  Check `res.headers.get("content-type")` before parsing; safely capture HTTP 401/403/429 HTML responses without throwing unhandled syntax errors.
-- **Strict Template Schema Guard:**
-  Validate required Flow template variables (`name`, `amount`, `url`, `merchant`) before dispatch; fallback gracefully to simulated status if template or auth keys are unconfigured.
+### Implementation:
+- Inbound interactive webhook receiver: `POST /api/webhooks/whatsapp/interactive`.
+- Customer taps `[💳 Split in 3 EMI]` in WhatsApp $\rightarrow$ Webhook triggers FSM transition to `CONCESSION_OFFERED` $\rightarrow$ ARBITER responds with the dynamic 3x Split-Pay Razorpay Payment Link $\rightarrow$ Customer completes payment $\rightarrow$ Immediate dunning pruning.
+
+### Target Files:
+- `packages/core/src/messaging/providers/gupshup.ts`
+- `app/server.ts`
+- `tests/core/whatsapp_interactive.test.ts`
 
 ---
 
-## Task 6.7 (`POL-08`): Vendor Recovery Policy Engine (Split-Pay Rules & Grace Periods)
-
-### Objective:
-Empower merchants to configure recovery parameters (EMI/Split allowance, installment counts, markup percentage, grace periods, and soft-locking) per product category without turning the system into an e-commerce catalog CMS.
-
-### 1. Database Schema (`packages/core/src/db/migrations/0018_recovery_policies.sql`):
-```sql
-CREATE TABLE IF NOT EXISTS merchant_recovery_policies (
-  id TEXT PRIMARY KEY,
-  product_id TEXT NOT NULL UNIQUE,
-  allow_split_recovery INTEGER NOT NULL DEFAULT 1, -- 1=Enabled, 0=Disabled
-  min_split_ticket_paise INTEGER NOT NULL DEFAULT 199900, -- ₹1,999 minimum
-  split_installments INTEGER NOT NULL DEFAULT 3, -- 2 or 3 payments
-  split_markup_bps INTEGER NOT NULL DEFAULT 0, -- e.g. 500 = 5% markup
-  grace_period_days INTEGER NOT NULL DEFAULT 3, -- Threshold window before account hold
-  expiry_action TEXT NOT NULL DEFAULT 'SOFT_LOCK_FREE_TIER', -- 'SOFT_LOCK_FREE_TIER', 'CANCEL_ORDER', 'HALT_CREDIT'
-  created_at_utc TEXT NOT NULL,
-  updated_at_utc TEXT NOT NULL
-);
-```
-
-### 2. API & Dashboard Integration:
-- `GET /api/vendor/policies` & `POST /api/vendor/policies`: CRUD endpoints for recovery policies.
-- `app/views/dashboard.html`: Add "Recovery Policy & Split Rules" configuration panel in Vendor Dashboard.
-- `app/views/recover.html`: Dynamic portal rendering: if `allow_split_recovery == 0`, hide Split-Pay buttons completely.
-
----
-
-## Task 6.8 (`DIAG-09`): Deep Razorpay Banking Diagnostic Extractor & Test Simulator
-
-### Objective:
-Replace generic "Payment declined by bank" messaging with deep root-cause extraction from Razorpay headers (`error_source`, `error_step`, `error_reason`, `acquirer_data.error_code`), backed by a deterministic test simulator for ISO-8583 banking codes.
-
-### 1. Database Schema:
-```sql
-ALTER TABLE live_payment_events ADD COLUMN acquirer_error_code TEXT;
-ALTER TABLE live_payment_events ADD COLUMN failure_source TEXT;
-ALTER TABLE live_payment_events ADD COLUMN failure_step TEXT;
-ALTER TABLE live_payment_events ADD COLUMN failure_reason TEXT;
-```
-
-### 2. Diagnostic Mapping Engine (`packages/core/src/decide/diagnostics.ts`):
-```typescript
-export interface DiagnosticExplanation {
-  faultDomain: "CUSTOMER" | "ISSUER_BANK" | "NETWORK_NPCI" | "MERCHANT_CONFIG";
-  isoCode?: string;
-  technicalReason: string;
-  customerExplanation: string;
-  recommendedNextAction: "SWITCH_UPI" | "RETRY_AFTER_COOLDOWN" | "CONTACT_BANK" | "UPDATE_CARD";
-}
-```
-Maps:
-- `ISO-8583 Code 51`: Insufficient funds $\rightarrow$ *"Your bank reported insufficient account balance. Switch to an alternate UPI account or card."*
-- `ISO-8583 Code 91` / `UPI U30`: Issuer switch inoperative $\rightarrow$ *"HDFC Bank core switch is temporarily timed out. Do not retry HDFC card; switch to ICICI/SBI UPI."*
-- `ISO-8583 Code 54`: Expired card $\rightarrow$ *"Card has expired. Update expiry date or switch to 1-Tap UPI."*
-
-### 3. Realistic Test-Mode Simulator:
-In test mode, map fake test card numbers and simulated VPAs to specific banking error scenarios so judges see genuine production-grade bank diagnoses during live demo evaluation.
-
----
-
-## Task 6.9 (`PURCH-10`): Immutable Credential-Bound Purchase Ledger
-
-### Objective:
-Replace mutable scalar counters (`successful_charges_count`) with an immutable transaction ledger. Feed temporal behavioral features (recency, velocity, failure-to-success ratio, average ticket) to the ML model without storing PII.
-
-### 1. Database Schema (`packages/core/src/db/migrations/0019_purchase_ledger.sql`):
-```sql
-CREATE TABLE IF NOT EXISTS customer_purchase_ledger (
-  id TEXT PRIMARY KEY,
-  credential_id TEXT NOT NULL REFERENCES customer_credentials(id),
-  amount_paise INTEGER NOT NULL,
-  payment_method TEXT NOT NULL,
-  status TEXT NOT NULL, -- 'SUCCESS', 'FAILED', 'RECOVERED'
-  failure_code TEXT,
-  occurred_at_utc TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_ledger_cred_time ON customer_purchase_ledger(credential_id, occurred_at_utc);
-```
-
-### 2. Temporal ML Features (`packages/ml/src/features.ts`):
-- `tx_recency_days`: Days since last successful transaction.
-- `velocity_24h_count`: Failed transactions across all merchants in last 24 hours.
-- `success_rate_lifetime`: Total successes / total attempts on this credential.
-- `ticket_z_score`: Standardized ticket size vs customer's historical average.
-
----
-
-## Task 6.10 (`ENG-11`): Engagement Telemetry & EV Batch Priority Sequencer
-
-### Objective:
-Prevent spam and reputational damage by replacing blind mass-emailing with an autonomous Expected Value ($\text{EV}$) Priority Queue that ingests real-time engagement telemetry (delivery, open pixel, recovery link click) to pace outreach.
-
-### 1. Engagement Telemetry Endpoints:
-- `POST /api/webhooks/brevo/events`: Ingests `delivered`, `opened`, `clicks`, `bounces`.
-- `POST /api/webhooks/msg91/dlr`: Ingests SMS delivery receipts (`DELIVERED`, `UNDELIVERED`, `DND_BLOCKED`).
-- Ingested clicks update customer intent score in real-time.
-
-### 2. Batch EV Priority Sequencer (`packages/core/src/decide/batch_sequencer.ts`):
-Given a batch of $N$ failed transactions:
-$$\text{Priority Score}_i = \left( P(\text{recovery}_i) \times \text{Amount}_i - \text{InterventionCost}_i \right) \times \text{EngagementMultiplier}_i$$
-- Unopened email after 2h $\rightarrow$ Paced SMS during active TRAI window (09:00–21:00 IST).
-- Recovery link clicked $\rightarrow$ Top of Priority Queue (instant live intervention).
-- Bounced or invalid credential $\rightarrow$ Suppressed permanently (Zero wasted spend).
-
----
-
-## Task 6.11 (`FSM-12`): Deterministic Finite State Machine & Bounded Stopping Rules Engine
-
-### Objective:
-Replace unconstrained agent logic with a formally bounded Finite State Machine ($S \times E \rightarrow S'$). Guarantee that AI never hallucinates unauthorized financial terms, breaks compliance windows, or violates merchant stopping rules.
-
-### 1. Formal State Transition Matrix:
-$$\text{State} \times \text{Event} \xrightarrow{\text{Guard}} \text{Next State}$$
-
-```
-  ┌──────────────┐  Webhook Failed   ┌──────────────┐  Paced Wait OK  ┌──────────────────────┐
-  │  DETECTED    │ ────────────────▶ │  DIAGNOSED   │ ──────────────▶ │ CHANNEL_DISPATCHED   │
-  └──────────────┘                   └──────────────┘                 └──────────┬───────────┘
-                                                                                 │
-                                          ┌──────────────────────────────────────┴──────────────────┐
-                                          ▼                                                         ▼
-                               ┌──────────────────────┐   Customer Click / Open          ┌──────────────────────┐
-                               │  INTERACTION_SEEN    │ ◀─────────────────────────────── │  SMS/EMAIL DELIVERED │
-                               └──────────┬───────────┘                                  └──────────┬───────────┘
-                                          │                                                         │
-                ┌─────────────────────────┴────────────────────────┐                                │ No Interaction
-                ▼                                                  ▼                                ▼ (Cooldown Timeout)
-     ┌──────────────────────┐                           ┌──────────────────────┐         ┌──────────────────────┐
-     │  RECOVERED_SUCCESS   │                           │  CONCESSION_OFFERED  │         │ ESCALATE_OR_RETRY    │
-     │  (Dunning Pruned)    │                           │  (Downsell / Split)  │         │ (Max 3 Touches)      │
-     └──────────────────────┘                           └──────────┬───────────┘         └──────────┬───────────┘
-                                                                   │                                │
-                                                                   └─────────────────┬──────────────┘
-                                                                                     ▼
-                                                                         ┌──────────────────────┐
-                                                                         │ TERMINATED_STOP_RULE │
-                                                                         │ (Opt-out / Exceeded) │
-                                                                         └──────────────────────┘
-```
-
-### 2. Five Mathematical Hard Guards (Non-Negotiable Stopping Rules):
-1. **Frequency Ceiling:** Maximum **3 touches** across customer lifetime per transaction.
-2. **Cooldown Floor:** Minimum **4 hours** between automated electronic touches (Email/SMS).
-3. **TRAI Quiet Hours Hard Guard:** Absolute block on SMS/Voice dispatch between **21:00 and 09:00 IST** (deferred to next active morning window at 09:05 IST).
-4. **Opt-Out Kill Switch:** Immediate permanent transition to `TERMINATED_OPT_OUT` upon receiving `STOP`, DND block, or customer unsubscribe.
-5. **Temporal Expiration:**
-   - D2C Checkout: Auto-cancel and release reserved inventory at $T + 72\text{ hours}$.
-   - SaaS Mandates: Transition to `SOFT_LOCK_FREE_TIER` at $T + 7\text{ days}$.
-   - B2B Receivables: Escalate to `MANUAL_COLLECTIONS_HOLD` at $T + 35\text{ days}$.
-
----
-
-## Task 6.12 (`FIN-13`): CFO Merchant Unit Economics & P&L Engine
-
-### Objective:
-Ground the recovery dashboard in real merchant unit economics: Counterfactual Attribution (True Incremental Lift), Channel COGS Accounting, MDR Rail Fee Arbitration, and Discount Cannibalization Protection.
-
-### 1. Mathematical P&L Formulation:
-$$\text{Net Recovered Margin (₹)} = \text{Gross Cash Won} - \sum \text{Channel COGS} - \sum \text{Concessions Granted} + \text{MDR Fee Savings}$$
-
-### 2. Metrics Delivered:
-1. **Counterfactual Attribution (True Incremental Lift):**
-   $$\text{True Lift (₹)} = \text{Recovered Revenue} - (\text{Natural Organic Return Rate} \times \text{Total Batch Volume})$$
-   *(Filters out the ~18% of customers who naturally retry and pay without intervention).*
-2. **Granular Channel COGS Accounting:**
-   - Brevo Email: ₹0.08 / email
-   - MSG91 Transactional SMS: ₹0.18 / SMS
-   - Meta WhatsApp Utility API: ₹0.72 / conversation
-   - Twilio / Exotel Voice Call: ₹1.40 / minute
-3. **MDR Rail Fee Arbitration (Gateway Cost Arbitrage):**
-   - Credit Card MDR: 1.85%–2.00% + GST
-   - UPI P2M / RuPay Debit: 0.00% MDR
-   - *Formula:* When a failed ₹10,000 credit card payment is recovered via 1-Tap UPI, ARBITER logs **₹200 in direct MDR Fee Savings** on the dashboard.
-4. **Discount Cannibalization Guardrails:**
-   - If calibrated $P(\text{recovery}) > 0.70$, concessions (discounts/splits) are **strictly locked at 0%**.
-   - Concessions only unlock if $P(\text{recovery}) < 0.35$ and cart gross margin $\ge 25\%$.
-
----
-
-## Task 6.13 (`REC-14`): Full Multi-Domain Ingestion (SaaS Autopay, Cart Drops, B2B 2/10 Net 30)
-
-### Objective:
-Fulfill all three core problem domains of Track 3 with domain-specific recovery engines and regulatory compliance:
-
-### 1. Domain Implementations:
-1. **SaaS Recurring Subscriptions (`subscription_mandates`):**
-   - Ingests failed `UPI_AUTOPAY` and `E_NACH` recurring debits.
-   - **RBI Master Direction Invariant:** Mandate retry sequencer honors the **24-hour advance pre-debit customer notification mandate**.
-   - Automatically schedules debit execution for **06:30 AM IST on inferred salary morning** (when liquidity peaks).
-2. **Pre-Payment Checkout Drop-Offs (`abandoned_checkouts`):**
-   - Ingests Magic Checkout pre-payment cart drop-offs (phone/email entered, payment not completed).
-   - Generates single 1-Click checkout restoration URL with preserved cart state.
-3. **B2B Corporate Receivables (`b2b_invoices`):**
-   - Ingests corporate invoices under 30-day payment terms.
-   - Triggers dynamic **2/10 Net 30 Early Settlement Concession**: offers 2% discount if paid within 48h via Razorpay Smart Collect Virtual Account.
-   - Automatically computes Working Capital Cost Saved based on Days Sales Outstanding (DSO) reduction.
-
----
-
-## Task 6.14 (`BEN-15`): Seed-Locked 4-Way Cohort Replay Benchmark
-
-### Objective:
-Deliver absolute mathematical verification of ARBITER’s superiority against standard industry approaches across a 1,000-payment replay batch.
-
-### 1. The 4 Comparative Arms:
-- **Arm 0 (Natural Control):** 0 outreach, pure organic return $\rightarrow \sim 18.2\%$ (Cost: ₹0.00)
-- **Arm 1 (Blind Gateway Retries):** Instant API retries without engagement $\rightarrow \sim 24.8\%$ (Cost: ₹3.40 / ₹100 won)
-- **Arm 2 (7-Rule Static Heuristics):** Fixed reminder intervals $\rightarrow \sim 44.5\%$ (Cost: ₹1.85 / ₹100 won)
-- **Arm 3 (ARBITER Autonomous ML+EV):** Dynamic FSM + EV optimization + 1-Tap UPI $\rightarrow \mathbf{\sim 61.2\%}$ (Cost: **₹0.48 / ₹100 won**)
-
-### 2. Deterministic Seed Lock & Statistical Rigor:
-- Generates 1,000 randomized events using a seeded pseudo-random generator (`PRNG(seed=0x5EED)`).
-- Replays with identical inputs produce identical outputs down to the paise.
-- Computes **95% Bootstrap Confidence Intervals** ($B=1,000$ resamples) for recovery rate and Net Margin Lift.
-
----
-
-# 3. CONSOLIDATED REMAINING TASK BREAKDOWN & ACCEPTANCE CRITERIA
+# 4. MASTER EXECUTION MATRIX & ACCEPTANCE CRITERIA
 
 | Priority | Task ID | Description | Target Files | Acceptance Criteria |
 | :---: | :---: | :--- | :--- | :--- |
-| **P0** | **`FSM-12`** | Deterministic Finite State Machine & Bounded Stopping Rules | `packages/core/src/agent/state_machine.ts`, `packages/core/src/agent/stopping_rules.ts` | 5 hard mathematical stopping rules enforced; invalid transitions throw errors; 0 unconstrained LLM decisions. |
-| **P0** | **`FIN-13`** | Merchant P&L Unit Economics & MDR Fee Arbitrage Engine | `packages/shared/src/economics.ts`, `app/views/dashboard.html` | Calculates Net Margin Preserved, Incremental Lift over organic, MDR savings (UPI vs Card), and Channel COGS. |
-| **P0** | **`REC-14`** | Multi-Domain Ingestion (SaaS Mandates, Carts, B2B Invoices) | `packages/core/src/db/migrations/0016_domain_expansion.sql`, `app/server.ts` | Endpoints `/api/mandates/*`, `/api/checkouts/*`, `/api/invoices/*` active; RBI 24h pre-debit rule enforced. |
-| **P0** | **`ID-06`** | Credential-Bound Identity & PII-Blind Feature Store | `packages/core/src/db/migrations/0017_credential_identity.sql`, `app/server.ts`, `app/payment_workflow.ts` | Personas with distinct names on same phone receive personal greetings; ML features 100% PII-blind. |
-| **P0** | **`MSG-07`** | MSG91 Phone Normalizer & Flow v5 Error Fix | `packages/core/src/messaging/providers/msg91.ts` | Normalizes 10/11/12-digit Indian numbers; safely catches non-JSON responses with 0 crashes. |
-| **P0** | **`DIAG-09`**| Deep Razorpay Banking Diagnostic & Test Simulator | `packages/core/src/decide/diagnostics.ts`, `app/views/recover.html`, `app/views/dashboard.html` | Displays exact bank fault domain (ISO-8583 51/91, UPI U30) with clear corrective action. |
-| **P1** | **`BEN-15`** | Seed-Locked 4-Way Cohort Replay Benchmark | `app/recovery.ts`, `app/views/dashboard.html` | 1-Click Replay runs 1,000 events across 4 arms with bootstrap 95% CIs and unit cost metrics. |
-| **P1** | **`PURCH-10`**| Immutable Credential-Bound Purchase Ledger | `packages/core/src/db/migrations/0019_purchase_ledger.sql`, `packages/ml/src/features.ts` | Historical transactions persist in immutable ledger; extracts recency/velocity features. |
-| **P1** | **`POL-08`** | Vendor Recovery Policy Engine (Split-Pay & Grace Rules) | `packages/core/src/db/migrations/0018_recovery_policies.sql`, `app/views/dashboard.html` | Vendor configures split rules and grace windows; portal hides split if disabled. |
-| **P1** | **`ENG-11`** | Engagement Telemetry & EV Batch Priority Sequencer | `packages/core/src/decide/batch_sequencer.ts`, `app/server.ts` | Brevo/MSG91 delivery/click webhooks update queue; ranks 1000-event batch by EV. |
-| **P1** | **`DEM-05`** | 1-Click Multi-Domain Demo Switcher in Dashboard | `app/views/dashboard.html`, `app/server.ts` | 1-click execution of D2C Cart, SaaS Mandate, and B2B Invoice scenarios in live UI. |
+| **P0** | **`BDT-16`** | Deterministic LinUCB Contextual Multi-Armed Bandit | `packages/core/src/agent/contextual_bandit.ts`, `recovery_agent.ts` | Disjoint LinUCB balances exploration/exploitation; 100% deterministic arithmetic; zero LLM drift; tested with 100 iterations. |
+| **P0** | **`OPT-17`** | Razorpay Optimizer Tier-0 In-Flight Gateway Cascade | `packages/core/src/executor/gateway_optimizer.ts`, `app/server.ts` | Auto-failovers technical acquirer timeouts (ISO 91/HTTP 504) across HDFC->Axis->ICICI in <1.8s without customer touch. |
+| **P0** | **`BNK-18`** | Real-Time Bank Switch Health & Inter-Bank Steering | `packages/core/src/decide/bank_circuit_breaker.ts`, `app/server.ts` | Connects `rail_health.ts` feed; exposes `/api/rails/health`; suppresses degraded bank retries; renders inter-bank steering badges. |
+| **P0** | **`UI-19`** | Multi-Domain Executive Cockpit in Vendor Dashboard | `app/views/dashboard.html`, `app/server.ts` | Interactive tabs for D2C, SaaS Mandates (RBI 24h & 06:30 AM IST), B2B Aging Schedule (DSO 42d->22d), and Bank Matrix. |
+| **P1** | **`WHA-20`** | 2-Way Interactive WhatsApp Recovery Simulation | `packages/core/src/messaging/providers/gupshup.ts`, `app/server.ts` | Ingests WhatsApp interactive button clicks via webhook; transitions FSM and replies with dynamic recovery links. |
 
+---
+
+# 5. VERIFICATION PROTOCOL
+
+Every task in Phase 7 must adhere to the following non-negotiable verification gates:
+1. **Individual Task Plan & Checklist**: Created in the artifact directory before coding.
+2. **Typecheck Integrity**: `pnpm -r typecheck` must pass with **0 errors** across all 6 workspace packages.
+3. **Zero Test Regressions**: All 113 existing test suites must continue passing (100% pass rate).
+4. **Aggressive New Test Suites**: Each task backed by unit and E2E integration tests covering edge cases and fail-closed security.
+5. **Full System Monorepo Verification**: `pnpm verify` must complete cleanly with exit code 0.

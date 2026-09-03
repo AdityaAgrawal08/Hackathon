@@ -11,6 +11,7 @@ export * from "./domain/index.js";
 export * from "./agent/recovery_agent.js";
 export * from "./agent/stopping_rules.js";
 export * from "./agent/state_machine.js";
+export * from "./agent/contextual_bandit.js";
 export * from "./ledger/purchase_ledger.js";
 export type { ProposalState } from "./approval/index.js";
 
