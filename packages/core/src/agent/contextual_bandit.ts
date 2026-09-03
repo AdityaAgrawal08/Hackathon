@@ -199,16 +199,30 @@ export class LinUCBBandit {
 
     for (const action of BANDIT_ACTIONS) {
       const arm = this.arms.get(action)!;
-      const invA = invertMatrix4(arm.A);
+      let invA: number[];
+      try {
+        invA = invertMatrix4(arm.A);
+      } catch {
+        // Fail-safe to identity if corrupted
+        invA = [
+          1, 0, 0, 0,
+          0, 1, 0, 0,
+          0, 0, 1, 0,
+          0, 0, 0, 1,
+        ];
+      }
       const theta = matVecMul4(invA, arm.b);
 
-      const estimatedReward = dotProduct4(context, theta);
+      const rawEst = dotProduct4(context, theta);
+      const estimatedReward = Number.isFinite(rawEst) ? rawEst : 0;
       const invAx = matVecMul4(invA, context);
       const variance = Math.max(0, dotProduct4(context, invAx));
-      const confidenceBound = this.alpha * Math.sqrt(variance);
+      const confidenceBound = Number.isFinite(variance)
+        ? this.alpha * Math.sqrt(variance)
+        : 0;
       const ucbScore = estimatedReward + confidenceBound;
 
-      if (ucbScore > bestScore) {
+      if (Number.isFinite(ucbScore) && ucbScore > bestScore) {
         bestScore = ucbScore;
         bestAction = action;
         bestEst = estimatedReward;

@@ -14,6 +14,7 @@ import {
   QUIET_START_MIN,
   QUIET_END_MIN,
 } from "../../packages/shared/src/time.js";
+import { clamp01, clamp } from "../../packages/shared/src/math.js";
 
 const MAX_SAFE_P = Number.MAX_SAFE_INTEGER;
 
@@ -53,6 +54,21 @@ describe("money primitives — adversarial", () => {
     expect(rupeesToPaise(0.1 + 0.2)).toBe(30);
     expect(rupeesToPaise(499.999999)).toBe(50000);
     expect(rupeesToPaise(-499.5)).toBe(-49950);
+  });
+
+  it("clamp01 and clamp fail-finite on NaN, Infinity, -Infinity", () => {
+    expect(clamp01(0.5)).toBe(0.5);
+    expect(clamp01(-10)).toBe(0);
+    expect(clamp01(10)).toBe(1);
+    expect(clamp01(NaN)).toBe(0);
+    expect(clamp01(Infinity)).toBe(0);
+    expect(clamp01(-Infinity)).toBe(0);
+
+    expect(clamp(5, 0, 10)).toBe(5);
+    expect(clamp(-5, 0, 10)).toBe(0);
+    expect(clamp(15, 0, 10)).toBe(10);
+    expect(clamp(NaN, 0, 10)).toBe(0);
+    expect(clamp(Infinity, 0, 10)).toBe(0);
   });
 });
 
