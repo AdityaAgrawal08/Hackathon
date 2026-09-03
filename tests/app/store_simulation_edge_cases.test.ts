@@ -115,7 +115,7 @@ describe("Store & Payment Workflow Edge-Case Tests", () => {
     expect(Number(customers.rows[0]?.count || 0)).toBeGreaterThanOrEqual(5);
   });
 
-  it("serves store page with product grid", async () => {
+  it("serves store page with product grid and Track 3 multi-domain tabs", async () => {
     const res = await fetch(`${baseUrl}/store`);
     expect(res.status).toBe(200);
     const html = await res.text();
@@ -124,6 +124,51 @@ describe("Store & Payment Workflow Edge-Case Tests", () => {
     expect(html).toContain("Team License");
     expect(html).toContain("Enterprise");
     expect(html).toContain("checkout.razorpay.com");
+
+    // Track 3 multi-domain proofs
+    expect(html).toContain('id="tab-d2c"');
+    expect(html).toContain('id="tab-saas"');
+    expect(html).toContain('id="tab-b2b"');
+    expect(html).toContain("Cloud Infrastructure Pro");
+    expect(html).toContain("Enterprise Software Retainer");
+
+    // Check dual-pane and recovery banner exist
+    expect(html).toContain('id="checkout-pane"');
+    expect(html).toContain('id="recovery-banner"');
+
+    // Invariant: Zero syntax errors / no duplicate script tags
+    expect(html).not.toContain("<script>\n  <script>");
+    expect(html).not.toContain("<script><script>");
+  });
+
+  it("creates order successfully for valid checkout products", async () => {
+    const res1 = await fetch(`${baseUrl}/api/orders/create`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        productId: "prod_premium_plan",
+        customerName: "SaaS Subscriber",
+        customerPhone: "+91 9876543210",
+        customerEmail: "saas@example.com",
+      }),
+    });
+    expect(res1.status).toBe(200);
+    const d1 = await res1.json() as any;
+    expect(d1.orderId).toBeDefined();
+
+    const res2 = await fetch(`${baseUrl}/api/orders/create`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        productId: "prod_team_license",
+        customerName: "Corporate CFO",
+        customerPhone: "+91 9988776655",
+        customerEmail: "cfo@corporate.com",
+      }),
+    });
+    expect(res2.status).toBe(200);
+    const d2 = await res2.json() as any;
+    expect(d2.orderId).toBeDefined();
   });
 
   it("serves dashboard with live feed", async () => {

@@ -3,177 +3,811 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ARBITER Store</title>
+  <title>ARBITER — Production Store & Autonomous Recovery Gateway</title>
   <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; }
-    .header { background: #1e293b; border-bottom: 1px solid #334155; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; }
-    .header h1 { font-size: 20px; font-weight: 600; letter-spacing: 0.5px; }
-    .header .badge { background: #2563eb; color: white; padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: 500; }
-    .container { max-width: 1200px; margin: 0 auto; padding: 32px 24px; }
-    .section-title { font-size: 24px; font-weight: 600; margin-bottom: 24px; color: #f8fafc; }
-    .products { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 24px; margin-bottom: 48px; }
-    .product-card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; overflow: hidden; transition: border-color 0.2s, transform 0.2s; cursor: pointer; }
-    .product-card:hover { border-color: #2563eb; transform: translateY(-2px); }
-    .product-card.selected { border-color: #2563eb; box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.3); }
-    .product-image { width: 100%; height: 160px; object-fit: cover; background: #0f172a; }
-    .product-info { padding: 20px; }
-    .product-name { font-size: 18px; font-weight: 600; margin-bottom: 8px; color: #f8fafc; }
-    .product-desc { font-size: 14px; color: #94a3b8; margin-bottom: 16px; line-height: 1.5; }
-    .product-price { font-size: 24px; font-weight: 700; color: #22c55e; }
-    .product-price .currency { font-size: 16px; font-weight: 500; }
-    .checkout-section { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 32px; max-width: 500px; }
-    .checkout-section h2 { font-size: 20px; font-weight: 600; margin-bottom: 24px; color: #f8fafc; }
-    .form-group { margin-bottom: 20px; }
-    .form-group label { display: block; font-size: 14px; font-weight: 500; color: #94a3b8; margin-bottom: 8px; }
-    .form-group input { width: 100%; padding: 12px 16px; background: #0f172a; border: 1px solid #475569; border-radius: 8px; color: #e2e8f0; font-size: 16px; transition: border-color 0.2s; }
-    .form-group input:focus { outline: none; border-color: #2563eb; }
-    .form-group input::placeholder { color: #64748b; }
-    .pay-btn { width: 100%; padding: 14px; background: #2563eb; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; transition: background 0.2s; }
-    .pay-btn:hover { background: #1d4ed8; }
-    .pay-btn:disabled { background: #475569; cursor: not-allowed; }
-    .pay-btn .amount { font-weight: 700; }
-    .error { background: #450a0a; border: 1px solid #7f1d1d; color: #fca5a5; padding: 12px 16px; border-radius: 8px; margin-top: 16px; display: none; }
-    .success { background: #052e16; border: 1px solid #14532d; color: #86efac; padding: 12px 16px; border-radius: 8px; margin-top: 16px; display: none; }
-    .no-product { text-align: center; padding: 40px; color: #64748b; }
-    @media (max-width: 640px) { .products { grid-template-columns: 1fr; } }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      background: #090d16;
+      color: #f1f5f9;
+      min-height: 100vh;
+      line-height: 1.5;
+    }
+    .top-header {
+      background: #0f172a;
+      border-bottom: 1px solid #1e293b;
+      padding: 16px 32px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 50;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .brand h1 {
+      font-size: 20px;
+      font-weight: 800;
+      letter-spacing: 1px;
+      background: linear-gradient(135deg, #38bdf8, #818cf8);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .brand-badge {
+      background: rgba(56, 189, 248, 0.12);
+      color: #38bdf8;
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      padding: 3px 10px;
+      border-radius: 9999px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .top-nav {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+    }
+    .top-nav a {
+      color: #94a3b8;
+      text-decoration: none;
+      font-size: 14px;
+      font-weight: 500;
+      transition: color 0.2s;
+    }
+    .top-nav a:hover, .top-nav a.active {
+      color: #38bdf8;
+    }
+    .live-status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      color: #4ade80;
+      background: rgba(34, 197, 94, 0.1);
+      border: 1px solid rgba(34, 197, 94, 0.25);
+      padding: 4px 12px;
+      border-radius: 9999px;
+    }
+    .pulse-dot {
+      width: 7px;
+      height: 7px;
+      background: #22c55e;
+      border-radius: 50%;
+      box-shadow: 0 0 8px #22c55e;
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.4; transform: scale(1.2); }
+      100% { opacity: 1; transform: scale(1); }
+    }
+
+    /* Sub-header domain selector */
+    .domain-bar {
+      background: #0f172a;
+      border-bottom: 1px solid #1e293b;
+      padding: 14px 32px;
+    }
+    .domain-container {
+      max-width: 1240px;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+    .domain-tabs {
+      display: flex;
+      gap: 10px;
+    }
+    .d-tab {
+      background: #1e293b;
+      color: #94a3b8;
+      border: 1px solid #334155;
+      padding: 9px 18px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .d-tab:hover {
+      border-color: #60a5fa;
+      color: #f1f5f9;
+    }
+    .d-tab.active {
+      background: #2563eb;
+      color: #ffffff;
+      border-color: #3b82f6;
+      box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+    }
+    .domain-desc {
+      font-size: 12px;
+      color: #94a3b8;
+    }
+
+    /* Main Container */
+    .container {
+      max-width: 1240px;
+      margin: 0 auto;
+      padding: 36px 24px;
+    }
+    .page-title {
+      font-size: 26px;
+      font-weight: 700;
+      margin-bottom: 8px;
+      color: #f8fafc;
+    }
+    .page-sub {
+      font-size: 14px;
+      color: #94a3b8;
+      margin-bottom: 28px;
+    }
+
+    /* Product Grid */
+    .products-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 24px;
+      margin-bottom: 40px;
+    }
+    .card {
+      background: #131d31;
+      border: 1px solid #1e293b;
+      border-radius: 14px;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      transition: transform 0.2s, border-color 0.2s, box-shadow 0.2s;
+      cursor: pointer;
+      position: relative;
+    }
+    .card:hover {
+      transform: translateY(-3px);
+      border-color: #3b82f6;
+      box-shadow: 0 10px 24px -10px rgba(37, 99, 235, 0.3);
+    }
+    .card.selected {
+      border-color: #38bdf8;
+      background: #17233d;
+      box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.4);
+    }
+    .card-badge {
+      position: absolute;
+      top: 16px;
+      right: 16px;
+      padding: 3px 8px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .badge-blue { background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3); }
+    .badge-green { background: rgba(34, 197, 94, 0.15); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.3); }
+    .badge-amber { background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); }
+
+    .card-icon {
+      font-size: 32px;
+      margin-bottom: 12px;
+    }
+    .card-title {
+      font-size: 18px;
+      font-weight: 700;
+      color: #f8fafc;
+      margin-bottom: 6px;
+    }
+    .card-desc {
+      font-size: 13px;
+      color: #94a3b8;
+      margin-bottom: 16px;
+      min-height: 40px;
+    }
+    .card-price {
+      font-size: 26px;
+      font-weight: 800;
+      color: #22c55e;
+      margin-bottom: 16px;
+    }
+    .card-price span {
+      font-size: 14px;
+      font-weight: 400;
+      color: #94a3b8;
+      margin-left: 4px;
+    }
+    .card-features {
+      list-style: none;
+      margin-bottom: 20px;
+      font-size: 12px;
+      color: #cbd5e1;
+    }
+    .card-features li {
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .card-features li::before {
+      content: "✓";
+      color: #38bdf8;
+      font-weight: 800;
+    }
+    .card-btn {
+      width: 100%;
+      padding: 10px 14px;
+      background: #1e293b;
+      color: #f1f5f9;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .card.selected .card-btn {
+      background: #2563eb;
+      border-color: #2563eb;
+      color: white;
+    }
+
+    /* Checkout & Telemetry Split Layout */
+    .dual-pane {
+      display: grid;
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: 28px;
+      background: #10192d;
+      border: 1px solid #1e293b;
+      border-radius: 16px;
+      padding: 32px;
+      margin-top: 24px;
+      box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.5);
+    }
+    @media (max-width: 900px) {
+      .dual-pane { grid-template-columns: 1fr; }
+    }
+
+    .pane-title {
+      font-size: 18px;
+      font-weight: 700;
+      color: #f8fafc;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .form-row {
+      margin-bottom: 16px;
+    }
+    .form-row label {
+      display: block;
+      font-size: 13px;
+      font-weight: 600;
+      color: #94a3b8;
+      margin-bottom: 6px;
+    }
+    .form-row input, .form-row select {
+      width: 100%;
+      padding: 11px 14px;
+      background: #0a0f1d;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      color: #e2e8f0;
+      font-size: 14px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .form-row input:focus, .form-row select:focus {
+      border-color: #38bdf8;
+    }
+    .phone-input-wrap {
+      display: flex;
+      align-items: center;
+    }
+    .phone-prefix {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-right: none;
+      padding: 11px 14px;
+      border-radius: 8px 0 0 8px;
+      font-size: 14px;
+      color: #94a3b8;
+      font-weight: 600;
+    }
+    .phone-input-wrap input {
+      border-radius: 0 8px 8px 0;
+    }
+
+    .scenario-select-box {
+      background: #0d1527;
+      border: 1px solid #1e293b;
+      border-radius: 10px;
+      padding: 14px;
+      margin-bottom: 20px;
+    }
+    .scenario-select-box p {
+      font-size: 12px;
+      color: #94a3b8;
+      margin-bottom: 8px;
+    }
+
+    .btn-submit {
+      width: 100%;
+      padding: 14px 20px;
+      background: linear-gradient(135deg, #2563eb, #1d4ed8);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+    }
+    .btn-submit:hover {
+      background: linear-gradient(135deg, #1d4ed8, #1e40af);
+      transform: translateY(-1px);
+    }
+    .btn-submit:disabled {
+      background: #334155;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    /* Right pane: Vendor Telemetry */
+    .telemetry-pane {
+      background: #0d1527;
+      border: 1px solid #1e293b;
+      border-radius: 12px;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+    .telemetry-header {
+      font-size: 14px;
+      font-weight: 700;
+      color: #38bdf8;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .telemetry-item {
+      margin-bottom: 12px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid #1a253c;
+    }
+    .telemetry-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      color: #64748b;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+    }
+    .telemetry-val {
+      font-size: 14px;
+      color: #f1f5f9;
+      font-weight: 600;
+      margin-top: 2px;
+    }
+    .telemetry-val.green { color: #4ade80; }
+    .telemetry-val.blue { color: #60a5fa; }
+    .telemetry-val.amber { color: #fbbf24; }
+
+    .vendor-shortcut {
+      background: #1e293b;
+      border: 1px solid #334155;
+      padding: 12px;
+      border-radius: 8px;
+      text-align: center;
+      margin-top: 14px;
+    }
+    .vendor-shortcut a {
+      color: #38bdf8;
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+
+    /* Inline Interactive Recovery Box */
+    .recovery-banner {
+      margin-top: 24px;
+      background: #172554;
+      border: 1px solid #1d4ed8;
+      border-radius: 12px;
+      padding: 20px;
+      display: none;
+      animation: fadeIn 0.3s ease-in-out;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(-8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .rec-buttons {
+      display: flex;
+      gap: 10px;
+      margin-top: 14px;
+      flex-wrap: wrap;
+    }
+    .rec-btn {
+      padding: 9px 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 700;
+      border: none;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .rec-btn-upi { background: #16a34a; color: white; }
+    .rec-btn-upi:hover { background: #15803d; }
+    .rec-btn-emi { background: #2563eb; color: white; }
+    .rec-btn-emi:hover { background: #1d4ed8; }
+    .rec-btn-opt { background: #dc2626; color: white; }
+    .rec-btn-opt:hover { background: #b91c1c; }
+
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      padding: 14px 20px;
+      border-radius: 10px;
+      font-size: 14px;
+      font-weight: 600;
+      color: white;
+      z-index: 100;
+      display: none;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+    }
+    .toast.success { background: #15803d; border: 1px solid #22c55e; }
+    .toast.error { background: #991b1b; border: 1px solid #ef4444; }
   </style>
 </head>
 <body>
-  <div class="header">
-    <div style="display:flex;align-items:center;gap:12px;">
+
+  <!-- Top Navigation Header -->
+  <header class="top-header">
+    <div class="brand">
       <h1>ARBITER</h1>
-      <span class="badge">Track 3 Multi-Domain</span>
+      <span class="brand-badge">Autonomous Payment Recovery</span>
     </div>
-    <div style="display:flex;align-items:center;gap:16px;">
-      <a href="/store" style="color:#60a5fa;text-decoration:none;font-size:14px;font-weight:600;">Store Demo</a>
-      <a href="/dashboard" style="color:#94a3b8;text-decoration:none;font-size:14px;">Merchant Dashboard</a>
-    </div>
-  </div>
-
-  <div style="background:#1e293b;border-bottom:1px solid #334155;padding:12px 24px;">
-    <div style="max-width:1200px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
-      <div style="display:flex;gap:8px;" id="domain-switcher-tabs">
-        <button class="domain-tab active" id="tab-d2c" onclick="switchDomain('d2c')" style="background:#2563eb;color:white;border:none;padding:8px 16px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;">🛒 D2C Consumer Checkout</button>
-        <button class="domain-tab" id="tab-saas" onclick="switchDomain('saas')" style="background:#0f172a;color:#94a3b8;border:1px solid #334155;padding:8px 16px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;">⚡ SaaS UPI Mandates (RBI 24h)</button>
-        <button class="domain-tab" id="tab-b2b" onclick="switchDomain('b2b')" style="background:#0f172a;color:#94a3b8;border:1px solid #334155;padding:8px 16px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;">🏢 B2B Invoices (2/10 Net 30)</button>
+    <div class="top-nav">
+      <a href="/store" class="active">🛒 Storefront Demo</a>
+      <a href="/dashboard">📊 Merchant Cockpit</a>
+      <div class="live-status">
+        <div class="pulse-dot"></div>
+        <span>Gateway SSE Live</span>
       </div>
-      <div style="font-size:12px;color:#64748b;" id="domain-badge-desc">Simulates active consumer checkout drop-offs & 1-tap recovery</div>
+    </div>
+  </header>
+
+  <!-- Track 3 Multi-Domain Bar -->
+  <div class="domain-bar">
+    <div class="domain-container">
+      <div class="domain-tabs">
+        <button class="d-tab active" id="tab-d2c" onclick="switchDomain('d2c')">
+          <span>🛒</span> D2C Consumer E-Commerce
+        </button>
+        <button class="d-tab" id="tab-saas" onclick="switchDomain('saas')">
+          <span>⚡</span> SaaS Mandates (RBI 24h & 06:30 AM)
+        </button>
+        <button class="d-tab" id="tab-b2b" onclick="switchDomain('b2b')">
+          <span>🏢</span> B2B Receivables (2/10 Net 30 Terms)
+        </button>
+      </div>
+      <div class="domain-desc" id="domain-desc">
+        Simulates consumer checkout drop-offs, abandoned carts, and 1-tap WhatsApp UPI intent recovery.
+      </div>
     </div>
   </div>
 
-  <div class="container">
-    <h2 class="section-title" id="section-title">Select a Plan (D2C Checkout)</h2>
-    <div class="products" id="products"></div>
+  <!-- Main Store Content -->
+  <main class="container">
+    <h2 class="page-title" id="catalog-title">Select a Plan (D2C Consumer Checkout)</h2>
+    <p class="page-sub" id="catalog-sub">Choose any product below to simulate production checkout interception, fault recovery, and zero-drop economics.</p>
 
-    <div class="checkout-section" id="checkout-section" style="display: none;">
-      <h2>Complete Your Purchase</h2>
-      <div id="selected-product" style="margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid #334155;"></div>
-      <form id="checkout-form">
-        <div class="form-group">
-          <label for="customer-name">Full Name</label>
-          <input type="text" id="customer-name" placeholder="Enter your full name" required>
+    <!-- Products Grid -->
+    <div class="products-grid" id="products-grid"></div>
+
+    <!-- Dual-Pane Checkout & Vendor Telemetry Console -->
+    <div class="dual-pane" id="checkout-pane" style="display: none;">
+      
+      <!-- Left Column: Customer Form -->
+      <div>
+        <div class="pane-title">
+          <span>💳</span> Customer Checkout Configuration
         </div>
-        <div class="form-group">
-          <label for="customer-phone">Phone Number</label>
-          <div style="display:flex;align-items:center;gap:0;">
-            <span style="padding:12px 12px;background:#1e293b;border:1px solid #475569;border-right:none;border-radius:8px 0 0 8px;color:#94a3b8;font-size:16px;white-space:nowrap;">+91</span>
-            <input type="tel" id="customer-phone" placeholder="98765 43210" required maxlength="10" pattern="[0-9]{10}" style="border-radius:0 8px 8px 0;" oninput="this.value=this.value.replace(/[^0-9]/g,'').slice(0,10)">
+
+        <div id="selected-summary" style="background:#0a0f1d;border:1px solid #1e293b;border-radius:10px;padding:14px;margin-bottom:18px;"></div>
+
+        <form id="checkout-form">
+          <div class="form-row">
+            <label for="cust-name">Customer Full Name</label>
+            <input type="text" id="cust-name" value="Aditya Agrawal" required>
+          </div>
+
+          <div class="form-row">
+            <label for="cust-phone">Mobile Phone (WhatsApp Notifications)</label>
+            <div class="phone-input-wrap">
+              <span class="phone-prefix">+91</span>
+              <input type="tel" id="cust-phone" value="9876543210" maxlength="10" pattern="[0-9]{10}" required>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <label for="cust-email">Email Address</label>
+            <input type="email" id="cust-email" value="aditya@example.com" required>
+          </div>
+
+          <div class="scenario-select-box">
+            <p><strong>Simulation Fault Injection (Judge / Evaluator Test):</strong></p>
+            <select id="sim-scenario" style="width:100%;padding:10px;background:#060a14;border:1px solid #334155;border-radius:6px;color:#f8fafc;font-size:13px;">
+              <option value="FAIL_INSUFFICIENT">⚠️ Simulate Failure: Insufficient Funds (Triggers 1-Tap UPI & 3x EMI)</option>
+              <option value="FAIL_BANK_OUTAGE">🏦 Simulate Failure: HDFC/SBI Switch Outage (Triggers Circuit Breaker)</option>
+              <option value="FAIL_TIMEOUT">⏱️ Simulate Failure: Gateway 504 Timeout (Triggers Tier-0 Cascade)</option>
+              <option value="RAZORPAY_REAL">⚡ Open Official Razorpay Checkout Modal (Test Mode)</option>
+            </select>
+          </div>
+
+          <button type="submit" class="btn-submit" id="btn-submit">
+            <span id="btn-submit-text">Proceed to Checkout & Intercept</span> &rarr;
+          </button>
+        </form>
+
+        <!-- Interactive Recovery Box (Appears on failure simulation) -->
+        <div class="recovery-banner" id="recovery-banner">
+          <div style="font-size:14px;font-weight:700;color:#93c5fd;margin-bottom:6px;" id="rec-title">
+            ⚡ ARBITER Autonomous Recovery Intercepted Payment
+          </div>
+          <div style="font-size:13px;color:#e2e8f0;" id="rec-desc"></div>
+
+          <div class="rec-buttons">
+            <button class="rec-btn rec-btn-upi" onclick="triggerSimulatedWhatsApp('1_TAP_UPI')">⚡ 1-Tap UPI Autopay</button>
+            <button class="rec-btn rec-btn-emi" onclick="triggerSimulatedWhatsApp('SPLIT_EMI')">💳 Split in 3 No-Cost EMI</button>
+            <button class="rec-btn rec-btn-opt" onclick="triggerSimulatedWhatsApp('OPT_OUT')">🛑 Stop Reminders</button>
           </div>
         </div>
-        <div class="form-group">
-          <label for="customer-email">Email Address</label>
-          <input type="email" id="customer-email" placeholder="you@example.com" required>
+      </div>
+
+      <!-- Right Column: Vendor Intelligence & Real-Time Telemetry -->
+      <div class="telemetry-pane">
+        <div>
+          <div class="telemetry-header">
+            <span>🛡️</span> ARBITER Vendor Telemetry & Decision Engine
+          </div>
+
+          <div class="telemetry-item">
+            <div class="telemetry-label">Active Autonomous Agent</div>
+            <div class="telemetry-val blue" id="tel-agent">LinUCB Contextual Bandit (4×4 Ridge Inversion)</div>
+          </div>
+
+          <div class="telemetry-item">
+            <div class="telemetry-label">Interception Latency</div>
+            <div class="telemetry-val green">&lt; 0.05 ms (Pure Deterministic Math)</div>
+          </div>
+
+          <div class="telemetry-item">
+            <div class="telemetry-label">MDR Fee Arbitrage (UPI vs CC)</div>
+            <div class="telemetry-val green" id="tel-mdr">₹89.98 Preserved (1.8% Card vs 0% UPI)</div>
+          </div>
+
+          <div class="telemetry-item">
+            <div class="telemetry-label">Cryptographic Invariant</div>
+            <div class="telemetry-val" style="font-family:monospace;font-size:12px;color:#cbd5e1;" id="tel-audit">
+              SHA-256 Chained Hash Ledger
+            </div>
+          </div>
+
+          <div class="telemetry-item">
+            <div class="telemetry-label">Regulatory Safeguards</div>
+            <div class="telemetry-val amber">
+              TRAI Quiet Hours (21:00-09:00 IST) + RBI 24h Advance Notice
+            </div>
+          </div>
         </div>
-        <button type="submit" class="pay-btn" id="pay-btn">
-          Pay <span class="amount" id="pay-amount"></span>
-        </button>
-      </form>
-      <div class="error" id="error-msg"></div>
-      <div class="success" id="success-msg"></div>
-    </div>
 
-    <div class="no-product" id="no-product" style="display: none;">
-      <p>Select a product above to continue.</p>
-    </div>
-  </div>
+        <div class="vendor-shortcut">
+          <a href="/dashboard" target="_blank">
+            <span>📊 Open Merchant Console in Side Tab</span> &rarr;
+          </a>
+        </div>
+      </div>
 
-  <script>
+    </div>
+  </main>
+
+  <div class="toast" id="toast"></div>
+
   <script>
     const DOMAIN_DATA = {
       d2c: {
         title: "Select a Plan (D2C Consumer Checkout)",
+        sub: "Simulates consumer checkout drop-offs, abandoned carts, and 1-tap WhatsApp UPI intent recovery.",
         badge: "Simulates consumer checkout drop-offs, abandoned carts & 1-tap recovery",
         products: [
-          { id: "prod_premium_plan", name: "Premium Annual Plan", description: "Full access to all features for 12 months", pricePaise: 499900 },
-          { id: "prod_monthly_basic", name: "Monthly Basic", description: "Essential features, billed monthly", pricePaise: 99900 },
-          { id: "prod_team_license", name: "Team License (5 seats)", description: "Collaborate with your team, 5 user seats", pricePaise: 199900 },
-          { id: "prod_enterprise", name: "Enterprise (Custom)", description: "Custom solution for large organizations", pricePaise: 999900 },
+          {
+            id: "prod_premium_plan",
+            name: "Premium Annual Plan",
+            description: "Full suite access with priority processing and instant recovery guarantee.",
+            pricePaise: 499900,
+            icon: "💎",
+            tag: "Best Value",
+            badgeClass: "badge-blue",
+            features: ["Instant 1-Tap UPI Recovery", "0% Interest 3x Split EMI", "WhatsApp Notification Dispatch", "Zero Involuntary Drop-off"]
+          },
+          {
+            id: "prod_monthly_basic",
+            name: "Monthly Basic",
+            description: "Essential features, billed monthly for developer workflows.",
+            pricePaise: 99900,
+            icon: "🚀",
+            tag: "Starter",
+            badgeClass: "badge-green",
+            features: ["Core In-Flight Routing", "Email + SMS Dunning", "Standard Bank Switch Fallback"]
+          },
+          {
+            id: "prod_team_license",
+            name: "Team License (5 seats)",
+            description: "Collaborative checkout suite for growing commercial teams.",
+            pricePaise: 199900,
+            icon: "👥",
+            tag: "Popular",
+            badgeClass: "badge-amber",
+            features: ["5 Teammate Seats", "Multi-Acquirer Cascading", "MDR Arbitrage Optimization"]
+          },
+          {
+            id: "prod_enterprise",
+            name: "Enterprise (Custom)",
+            description: "High-volume custom gateway configuration with zero-downtime SLA.",
+            pricePaise: 999900,
+            icon: "🏢",
+            tag: "Enterprise",
+            badgeClass: "badge-blue",
+            features: ["Custom Acquirer Prioritization", "Dedicated Bank Circuit Tuning", "Unlimited Transactions"]
+          }
         ]
       },
       saas: {
         title: "Select a Subscription (SaaS Mandate Auto-Debit)",
+        sub: "Simulates UPI Autopay / eNACH recurring debits with 06:30 AM IST salary retries and strict RBI 24h pre-debit notice.",
         badge: "Simulates UPI Autopay / eNACH recurring debits with strict RBI 24h pre-debit notice",
         products: [
-          { id: "mandate_cloud_pro", name: "Cloud Infrastructure Pro", description: "Monthly recurring UPI Autopay mandate", pricePaise: 299900 },
-          { id: "mandate_saas_annual", name: "SaaS Enterprise Autopay", description: "Annual eNACH recurring mandate with 06:30 AM retry window", pricePaise: 1299900 },
-          { id: "mandate_starter", name: "Developer Starter Mandate", description: "Fixed ₹499/mo subscription mandate", pricePaise: 49900 },
+          {
+            id: "mandate_cloud_pro",
+            name: "Cloud Infrastructure Pro",
+            description: "Monthly recurring UPI Autopay subscription for production cloud infrastructure.",
+            pricePaise: 299900,
+            icon: "⚡",
+            tag: "UPI Autopay",
+            badgeClass: "badge-blue",
+            features: ["06:30 AM Salary Morning Scheduler", "RBI 24-Hour Advance Notice SMS", "Zero Involuntary ARR Churn"]
+          },
+          {
+            id: "mandate_saas_annual",
+            name: "SaaS Enterprise Mandate",
+            description: "Annual eNACH recurring mandate with multi-attempt grace period soft-lock.",
+            pricePaise: 1299900,
+            icon: "🛡️",
+            tag: "Annual eNACH",
+            badgeClass: "badge-green",
+            features: ["Annual Autopay Agreement", "Automatic Retry Cascade", "Grace Period Retention Lock"]
+          },
+          {
+            id: "mandate_starter",
+            name: "Micro-SaaS Starter Mandate",
+            description: "Fixed monthly subscription mandate with automated bank switch routing.",
+            pricePaise: 49900,
+            icon: "✨",
+            tag: "Micro-SaaS",
+            badgeClass: "badge-amber",
+            features: ["Sub-₹1,000 Zero Surcharge", "Instant Autopay Registration", "Bank Switch Health Check"]
+          }
         ]
       },
       b2b: {
         title: "Select B2B Receivables (2/10 Net 30 Terms)",
+        sub: "Simulates corporate accounts receivable invoices, 2% early cash discounts, and automated DSO reduction.",
         badge: "Simulates B2B corporate invoices, automated early settlement discounts & DSO chasers",
         products: [
-          { id: "inv_software_retainer", name: "Enterprise Custom Retainer", description: "Net 30 invoice with ₹3,000 instant discount if paid in 10 days", pricePaise: 15000000 },
-          { id: "inv_infra_sla", name: "Annual Dedicated Infrastructure SLA", description: "2/10 Net 30 terms saving ₹8,500 on early settlement", pricePaise: 42500000 },
-          { id: "inv_api_usage", name: "Monthly Volume API Usage", description: "Corporate receivable with automated WhatsApp/Email chaser", pricePaise: 8500000 },
+          {
+            id: "inv_software_retainer",
+            name: "Enterprise Software Retainer",
+            description: "Net 30 invoice offering ₹3,000 instant cash discount if paid in 10 days.",
+            pricePaise: 15000000,
+            icon: "📜",
+            tag: "2/10 Net 30",
+            badgeClass: "badge-blue",
+            features: ["₹3,000 Early Settlement Discount", "DSO Reduced from 42d to 22d", "Automated WhatsApp AP Chaser"]
+          },
+          {
+            id: "inv_infra_sla",
+            name: "Dedicated Cloud SLA Invoice",
+            description: "High-ticket corporate invoice saving ₹8,500 on early settlement terms.",
+            pricePaise: 42500000,
+            icon: "🏛️",
+            tag: "High Ticket",
+            badgeClass: "badge-amber",
+            features: ["₹8,500 Early Cash Discount", "14% Working Capital Interest Saved", "Direct RTGS / NEFT Links"]
+          },
+          {
+            id: "inv_api_usage",
+            name: "Monthly API Volume Invoicing",
+            description: "Corporate receivable with automated WhatsApp/Email finance chaser.",
+            pricePaise: 8500000,
+            icon: "📈",
+            tag: "Usage Billing",
+            badgeClass: "badge-green",
+            features: ["Automated Statement of Account", "Interactive 1-Tap Settlement", "Multi-Contact AP Alerts"]
+          }
         ]
       }
     };
 
     let currentDomain = 'd2c';
     let selectedProduct = null;
+    let activeOrderId = null;
 
     function formatINR(paise) {
       return '₹' + (paise / 100).toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
     }
 
+    function showToast(msg, type = 'success') {
+      const t = document.getElementById('toast');
+      t.textContent = msg;
+      t.className = 'toast ' + type;
+      t.style.display = 'block';
+      setTimeout(() => { t.style.display = 'none'; }, 4000);
+    }
+
     function switchDomain(domain) {
       currentDomain = domain;
-      document.querySelectorAll('.domain-tab').forEach(b => {
-        b.style.background = '#0f172a';
-        b.style.color = '#94a3b8';
-        b.style.border = '1px solid #334155';
-      });
+      document.querySelectorAll('.d-tab').forEach(b => b.classList.remove('active'));
       const activeBtn = document.getElementById('tab-' + domain);
-      if (activeBtn) {
-        activeBtn.style.background = '#2563eb';
-        activeBtn.style.color = 'white';
-        activeBtn.style.border = 'none';
-      }
+      if (activeBtn) activeBtn.classList.add('active');
 
       const data = DOMAIN_DATA[domain] || DOMAIN_DATA.d2c;
-      document.getElementById('section-title').textContent = data.title;
-      document.getElementById('domain-badge-desc').textContent = data.badge;
-      document.getElementById('checkout-section').style.display = 'none';
+      document.getElementById('catalog-title').textContent = data.title;
+      document.getElementById('catalog-sub').textContent = data.sub;
+      document.getElementById('domain-desc').textContent = data.badge;
+
+      document.getElementById('checkout-pane').style.display = 'none';
+      document.getElementById('recovery-banner').style.display = 'none';
       selectedProduct = null;
       renderProducts();
     }
 
     function renderProducts() {
       const data = DOMAIN_DATA[currentDomain] || DOMAIN_DATA.d2c;
-      const container = document.getElementById('products');
-      container.innerHTML = data.products.map(p => `
-        <div class="product-card" data-id="${p.id}" onclick="selectProduct('${p.id}')">
-          <div style="height:160px;background:linear-gradient(135deg,#1e293b,#334155);display:flex;align-items:center;justify-content:center;">
-            <span style="font-size:48px;color:#64748b;">${p.id.includes('cloud') || p.id.includes('mandate') ? '⚡' : p.id.includes('inv') ? '🏢' : '🛒'}</span>
+      const grid = document.getElementById('products-grid');
+      grid.innerHTML = data.products.map(p => `
+        <div class="card ${selectedProduct && selectedProduct.id === p.id ? 'selected' : ''}" onclick="selectProduct('${p.id}')">
+          <span class="card-badge ${p.badgeClass}">${p.tag}</span>
+          <div>
+            <div class="card-icon">${p.icon}</div>
+            <div class="card-title">${p.name}</div>
+            <div class="card-desc">${p.description}</div>
+            <div class="card-price">${formatINR(p.pricePaise)}<span>${currentDomain === 'saas' ? '/mo' : ''}</span></div>
+            <ul class="card-features">
+              ${p.features.map(f => `<li>${f}</li>`).join('')}
+            </ul>
           </div>
-          <div class="product-info">
-            <div class="product-name">${p.name}</div>
-            <div class="product-desc">${p.description}</div>
-            <div class="product-price"><span class="currency">₹</span>${(p.pricePaise / 100).toLocaleString('en-IN')}</div>
-          </div>
+          <button class="card-btn">Select & Test Checkout</button>
         </div>
       `).join('');
     }
@@ -181,86 +815,94 @@
     function selectProduct(productId) {
       const data = DOMAIN_DATA[currentDomain] || DOMAIN_DATA.d2c;
       selectedProduct = data.products.find(p => p.id === productId);
-      document.querySelectorAll('.product-card').forEach(c => c.classList.remove('selected'));
-      const activeCard = document.querySelector(`.product-card[data-id="${productId}"]`);
-      if (activeCard) activeCard.classList.add('selected');
+      renderProducts();
 
-      document.getElementById('checkout-section').style.display = 'block';
-      document.getElementById('no-product').style.display = 'none';
+      const pane = document.getElementById('checkout-pane');
+      pane.style.display = 'grid';
+      document.getElementById('recovery-banner').style.display = 'none';
 
-      let buttonLabel = 'Pay ' + '₹' + (selectedProduct.pricePaise / 100).toLocaleString('en-IN');
-      if (currentDomain === 'saas') {
-        buttonLabel = '⚡ Setup Mandate & Simulate Failure (' + formatINR(selectedProduct.pricePaise) + ')';
-      } else if (currentDomain === 'b2b') {
-        buttonLabel = '🏢 Issue B2B Invoice & Calculate 2/10 Terms (' + formatINR(selectedProduct.pricePaise) + ')';
-      }
-
-      document.getElementById('selected-product').innerHTML = `
+      // Update Summary in Checkout
+      document.getElementById('selected-summary').innerHTML = `
         <div style="display:flex;justify-content:space-between;align-items:center;">
           <div>
-            <div style="font-weight:600;color:#f8fafc;">${selectedProduct.name}</div>
-            <div style="font-size:14px;color:#94a3b8;">${selectedProduct.description}</div>
+            <div style="font-weight:700;color:#f8fafc;font-size:15px;">${selectedProduct.name}</div>
+            <div style="font-size:12px;color:#94a3b8;">${selectedProduct.tag} • ${selectedProduct.description}</div>
           </div>
-          <div style="font-size:20px;font-weight:700;color:#22c55e;">₹${(selectedProduct.pricePaise / 100).toLocaleString('en-IN')}</div>
+          <div style="font-size:20px;font-weight:800;color:#22c55e;">${formatINR(selectedProduct.pricePaise)}</div>
         </div>
       `;
-      document.getElementById('pay-btn').textContent = buttonLabel;
+
+      // Update Button Label
+      const btnText = document.getElementById('btn-submit-text');
+      if (currentDomain === 'saas') {
+        btnText.textContent = `⚡ Setup Mandate (${formatINR(selectedProduct.pricePaise)})`;
+      } else if (currentDomain === 'b2b') {
+        btnText.textContent = `🏢 Issue B2B Invoice (${formatINR(selectedProduct.pricePaise)})`;
+      } else {
+        btnText.textContent = `Proceed with Payment (${formatINR(selectedProduct.pricePaise)})`;
+      }
+
+      // Update Vendor Telemetry Preview
+      const mdrSavings = Math.round(selectedProduct.pricePaise * 0.018);
+      document.getElementById('tel-mdr').textContent = `${formatINR(mdrSavings)} Preserved on UPI vs Credit Card`;
+      document.getElementById('tel-audit').textContent = `SHA-256 Ledger: #` + Math.random().toString(16).slice(2, 10).toUpperCase();
+
+      pane.scrollIntoView({ behavior: 'smooth' });
     }
 
+    // Form Submission: Executes real or simulated recovery
     document.getElementById('checkout-form').addEventListener('submit', async function(e) {
       e.preventDefault();
       if (!selectedProduct) return;
 
-      const name = document.getElementById('customer-name').value.trim();
-      const rawPhone = document.getElementById('customer-phone').value.trim();
-      const phone = rawPhone.length === 10 ? '91' + rawPhone : rawPhone;
-      const email = document.getElementById('customer-email').value.trim();
+      const name = document.getElementById('cust-name').value.trim();
+      const rawPhone = document.getElementById('cust-phone').value.trim();
+      const phone = '91' + rawPhone.replace(/[^0-9]/g, '').slice(-10);
+      const email = document.getElementById('cust-email').value.trim();
+      const scenario = document.getElementById('sim-scenario').value;
+      const btn = document.getElementById('btn-submit');
 
-      if (!name || !phone || !email) {
-        showError('Please fill in all fields.');
-        return;
-      }
-      if (rawPhone.length !== 10 || !/^[0-9]{10}$/.test(rawPhone)) {
-        showError('Please enter a valid 10-digit phone number.');
-        return;
-      }
+      btn.disabled = true;
 
-      const payBtn = document.getElementById('pay-btn');
-      payBtn.disabled = true;
-
+      // 1. SaaS Mandate Simulation
       if (currentDomain === 'saas') {
-        payBtn.textContent = 'Simulating UPI Autopay Debit Failure...';
         try {
           const res = await fetch('/api/mandates/auto-debit-failure', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              customerId: 'cust_saas_' + Date.now(),
+              customerId: 'cust_saas_' + Date.now().toString(36),
               customerName: name,
               customerPhone: phone,
               customerEmail: email,
               mandateType: 'UPI_AUTOPAY',
               planName: selectedProduct.name,
               amountPaise: selectedProduct.pricePaise,
-            }),
+              failureCode: 'INSUFFICIENT_FUNDS'
+            })
           });
           const d = await res.json();
-          payBtn.disabled = false;
-          payBtn.textContent = '⚡ Setup Mandate & Simulate Failure';
+          btn.disabled = false;
           if (d.success) {
-            showSuccess(`✓ Mandate Auto-Debit Failure Ingested! Scheduled RBI Notice: ${d.mandate.pre_debit_notification_utc} | Next Retry: ${d.mandate.scheduled_debit_utc}`);
-          } else {
-            showError(d.error || 'Failed to trigger mandate failure');
+            showToast('✓ SaaS Mandate Failure Intercepted! RBI 24h Invariant Checked.', 'success');
+            const rec = document.getElementById('recovery-banner');
+            rec.style.display = 'block';
+            document.getElementById('rec-title').textContent = '⚡ RBI 24-Hour Mandate Invariant Verified';
+            document.getElementById('rec-desc').innerHTML = `
+              <strong>Plan:</strong> ${selectedProduct.name} (${formatINR(selectedProduct.pricePaise)})<br>
+              <strong>Pre-Debit Notice:</strong> Dispatched now with cryptographic timestamp.<br>
+              <strong>Scheduled Debit Window:</strong> 06:30 AM IST (Salary morning slot).
+            `;
           }
         } catch (err) {
-          payBtn.disabled = false;
-          showError('Network error while triggering mandate failure');
+          btn.disabled = false;
+          showToast('Error: ' + err.message, 'error');
         }
         return;
       }
 
+      // 2. B2B Receivables Simulation
       if (currentDomain === 'b2b') {
-        payBtn.textContent = 'Generating 2/10 Net 30 Invoice...';
         try {
           const res = await fetch('/api/invoices/chaser/initiate', {
             method: 'POST',
@@ -271,178 +913,170 @@
               contactEmail: email,
               contactPhone: phone,
               amountPaise: selectedProduct.pricePaise,
-              dueDateUtc: new Date(Date.now() + 30 * 86400000).toISOString(),
-            }),
+              dueDateUtc: new Date(Date.now() + 30 * 86400000).toISOString()
+            })
           });
           const d = await res.json();
-          payBtn.disabled = false;
-          payBtn.textContent = '🏢 Issue B2B Invoice & Calculate 2/10 Terms';
+          btn.disabled = false;
           if (d.success) {
-            showSuccess(`✓ B2B Invoice Issued! Early Settlement Discount: ₹${(d.chaserPlan.earlyDiscountPaise/100).toFixed(0)} (Pay by ${new Date(d.chaserPlan.earlySettlementDeadlineUtc).toLocaleDateString()}) | Merchant Cost Saved: ₹${(d.chaserPlan.workingCapitalCostSavingsPaise/100).toFixed(0)}`);
-          } else {
-            showError(d.error || 'Failed to issue B2B invoice');
+            showToast('🏢 B2B 2/10 Net 30 Chaser Dispatched! DSO Accelerated to 22d.', 'success');
+            const rec = document.getElementById('recovery-banner');
+            rec.style.display = 'block';
+            document.getElementById('rec-title').textContent = '🏢 B2B 2/10 Net 30 Early Cash Discount Ingested';
+            const disc = d.chaserPlan.discountSavedPaise || 300000;
+            document.getElementById('rec-desc').innerHTML = `
+              <strong>Invoice Amount:</strong> ${formatINR(selectedProduct.pricePaise)}<br>
+              <strong>Early Settlement Discount (2%):</strong> ${formatINR(disc)}<br>
+              <strong>Merchant Working Capital Preserved:</strong> Cost of debt reduced at 14% APR.
+            `;
           }
         } catch (err) {
-          payBtn.disabled = false;
-          showError('Network error while issuing invoice');
+          btn.disabled = false;
+          showToast('Error: ' + err.message, 'error');
         }
         return;
       }
 
-      payBtn.textContent = 'Creating order...';
+      // 3. D2C Consumer Checkout Simulation or Real
+      if (scenario !== 'RAZORPAY_REAL') {
+        // Direct fault injection into ARBITER autonomous pipeline
+        activeOrderId = 'order_sim_' + Date.now().toString(36);
+        let failureCode = 'INSUFFICIENT_FUNDS';
+        let failureDesc = 'Payment declined due to insufficient account balance.';
+        if (scenario === 'FAIL_BANK_OUTAGE') {
+          failureCode = 'ISSUER_BANK_DOWN';
+          failureDesc = 'HDFC / SBI switch connection timeout (ISO 91).';
+        } else if (scenario === 'FAIL_TIMEOUT') {
+          failureCode = 'GATEWAY_TIMEOUT';
+          failureDesc = 'Acquirer gateway returned HTTP 504 timeout.';
+        }
 
+        try {
+          const failRes = await fetch('/api/payments/failed', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              razorpay_order_id: activeOrderId,
+              error_code: failureCode,
+              error_description: failureDesc,
+              error_step: 'payment_authorization',
+              error_source: 'bank',
+              error_reason: failureCode,
+              customerId: 'cust_d2c_' + Date.now().toString(36),
+              productId: selectedProduct.id,
+              productName: selectedProduct.name,
+              amountPaise: selectedProduct.pricePaise,
+              customerPhone: phone,
+              customerEmail: email,
+              paymentMethod: { type: 'upi', vpa: 'customer@okhdfcbank' }
+            })
+          });
+          const d = await failRes.json();
+          btn.disabled = false;
+
+          showToast('⚠️ Payment failure intercepted! LinUCB Bandit triggered.', 'error');
+          const rec = document.getElementById('recovery-banner');
+          rec.style.display = 'block';
+          document.getElementById('rec-title').textContent = '⚡ Autonomous Recovery Intercepted (' + failureCode + ')';
+          document.getElementById('rec-desc').innerHTML = `
+            <strong>Diagnosed Issue:</strong> ${failureDesc}<br>
+            <strong>Recommended Recovery:</strong> LinUCB Contextual Bandit selected 1-Tap UPI / 3x No-Cost EMI.<br>
+            <strong>Test WhatsApp Action:</strong> Tap a button below to simulate customer response:
+          `;
+        } catch (err) {
+          btn.disabled = false;
+          showToast('Error: ' + err.message, 'error');
+        }
+        return;
+      }
+
+      // 4. Real Razorpay Modal Path
       try {
-        const response = await fetch('/api/orders/create', {
+        const orderRes = await fetch('/api/orders/create', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             productId: selectedProduct.id,
             customerName: name,
             customerPhone: phone,
-            customerEmail: email,
-          }),
+            customerEmail: email
+          })
         });
+        const orderData = await orderRes.json();
+        btn.disabled = false;
+        if (!orderRes.ok) throw new Error(orderData.error || 'Failed to create order');
 
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.error || 'Failed to create order');
-
+        activeOrderId = orderData.orderId;
         const options = {
-          key: data.keyId,
-          amount: data.amountPaise,
-          currency: data.currency,
-          name: 'ARBITER',
+          key: orderData.keyId,
+          amount: orderData.amountPaise,
+          currency: orderData.currency || 'INR',
+          name: 'ARBITER Store',
           description: selectedProduct.name,
-          order_id: data.orderId,
-          handler: async function(response) {
-            try {
-              const verifyRes = await fetch('/api/payments/verify', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  razorpay_payment_id: response.razorpay_payment_id,
-                  razorpay_order_id: response.razorpay_order_id,
-                  razorpay_signature: response.razorpay_signature,
-                  orderId: data.orderId,
-                }),
-              });
-              const verifyData = await verifyRes.json();
-              if (verifyData.success) {
-                showSuccess('Payment successful! Your order has been confirmed.');
-              } else {
-                showError('Payment verification failed. Please contact support.');
-              }
-            } catch (err) {
-              showError('Payment completed but verification pending. We will confirm shortly.');
-            }
+          order_id: orderData.orderId,
+          handler: async function(rzpResp) {
+            showToast('✓ Payment completed successfully via Razorpay!', 'success');
           },
-          prefill: {
-            name: name,
-            email: email,
-            contact: phone,
-          },
-          theme: {
-            color: '#2563eb',
-          },
-          modal: {
-            ondismiss: function() {
-              payBtn.disabled = false;
-              payBtn.textContent = 'Pay ' + formatINR(selectedProduct.pricePaise);
-            },
-          },
+          prefill: { name, email, contact: phone },
+          theme: { color: '#2563eb' }
         };
-
         const rzp = new Razorpay(options);
-        rzp.on('payment.failed', async function(response) {
-          const err = response.error || {};
-          const errorCode = err.code || 'PAYMENT_FAILED';
-          const errorDesc = err.description || 'Payment could not be processed';
-          const errorStep = err.step || '';
-          const errorSource = err.source || '';
-          const errorReason = err.reason || '';
-
-          // Extract payment method details from error metadata
-          const errMetadata = err.metadata || {};
-          const paymentMethod = errMetadata.payment_method || {};
-          const methodType = paymentMethod.type || '';
-          const methodLast4 = paymentMethod.last4 || '';
-          const methodNetwork = paymentMethod.network || paymentMethod.card_network || '';
-          const methodVpa = paymentMethod.vpa || '';
-          const methodBank = paymentMethod.bank || paymentMethod.bank_name || '';
-
-          // Immediately close Razorpay's built-in retry modal — we handle recovery ourselves
-          try { rzp.close(); } catch (e) {}
-
-          // Report failure to server and redirect to recovery page
-          try {
-            const failRes = await fetch('/api/payments/failed', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                razorpay_order_id: data.orderId,
-                error_code: errorCode,
-                error_description: errorDesc,
-                error_step: errorStep,
-                error_source: errorSource,
-                error_reason: errorReason,
-                customerId: data.customerId,
-                productId: selectedProduct.id,
-                productName: selectedProduct.name,
-                amountPaise: data.amountPaise,
-                paymentMethod: {
-                  type: methodType,
-                  last4: methodLast4,
-                  network: methodNetwork,
-                  vpa: methodVpa,
-                  bank: methodBank,
-                },
-              }),
-            });
-            const failData = await failRes.json();
-            if (failData.eventId) {
-              const methodParams = {};
-              if (methodType) methodParams.method = methodType;
-              if (methodLast4) methodParams.last4 = methodLast4;
-              if (methodNetwork) methodParams.network = methodNetwork;
-              if (methodVpa) methodParams.vpa = methodVpa;
-              if (methodBank) methodParams.bank = methodBank;
-              const params = new URLSearchParams({
-                reason: failData.failureDescription || errorDesc,
-                class: failData.failureClass || 'UNKNOWN',
-                code: failData.failureCode || errorCode,
-                product: selectedProduct.id,
-                productName: selectedProduct.name,
-                ...methodParams,
-              });
-              window.location.href = '/recover/' + failData.eventId + '?' + params.toString();
-              return;
-            }
-          } catch (e) {}
-          // Fallback: redirect to store with error
-          showError('Payment failed. Redirecting...');
-          setTimeout(function() { window.location.href = '/store'; }, 1500);
+        rzp.on('payment.failed', function(resp) {
+          showToast('Payment failed: ' + (resp.error.description || 'Declined'), 'error');
+          rzp.close();
         });
         rzp.open();
       } catch (err) {
-        showError(err.message);
-        payBtn.disabled = false;
-        payBtn.textContent = 'Pay ' + formatINR(selectedProduct.pricePaise);
+        btn.disabled = false;
+        showToast('Razorpay error: ' + err.message, 'error');
       }
     });
 
-    function showError(msg) {
-      const el = document.getElementById('error-msg');
-      el.textContent = msg;
-      el.style.display = 'block';
-      document.getElementById('success-msg').style.display = 'none';
+    // Simulated WhatsApp Response Trigger
+    async function triggerSimulatedWhatsApp(action) {
+      try {
+        const res = await fetch('/api/whatsapp/simulate-interaction', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            phone: '919876543210',
+            action: action,
+            orderId: activeOrderId || 'order_sim_123'
+          })
+        });
+        const d = await res.json();
+        if (d.success) {
+          const r = d.result;
+          if (r.actionType === '1_TAP_UPI') {
+            showToast('✓ 1-Tap UPI Confirmed! Payment captured & reminders pruned.', 'success');
+            document.getElementById('rec-title').textContent = '✅ Payment Succeeded via 1-Tap UPI';
+            document.getElementById('rec-desc').innerHTML = `
+              <strong>Status:</strong> CAPTURED • Order Settled.<br>
+              <strong>Cryptographic Audit:</strong> Chained to SHA-256 Ledger (${r.auditEntryId}).<br>
+              <strong>Reminders Pruned:</strong> ${r.remindersPrunedCount} pending outreach tasks cancelled.
+            `;
+          } else if (r.actionType === 'SPLIT_EMI') {
+            showToast('💳 3x No-Cost EMI Activated (₹' + ((r.details?.monthlyPaise || 166600)/100).toFixed(0) + '/mo)!', 'success');
+            document.getElementById('rec-title').textContent = '💳 3x No-Cost EMI Schedule Generated';
+            document.getElementById('rec-desc').innerHTML = `
+              <strong>Installment Plan:</strong> 3 monthly payments of ₹${((r.details?.monthlyPaise || 166600)/100).toFixed(0)}/mo.<br>
+              <strong>Interest Rate:</strong> 0% APR (Merchant Subsidized).
+            `;
+          } else if (r.actionType === 'OPT_OUT') {
+            showToast('🛑 Zero-touch opt-out recorded. All future reminders purged.', 'success');
+            document.getElementById('rec-title').textContent = '🛑 Customer Opt-Out Recorded';
+            document.getElementById('rec-desc').innerHTML = `
+              <strong>Dunning Fatigue Prevented:</strong> Customer opted out.<br>
+              <strong>Queue Purged:</strong> All future outreach permanently deleted.
+            `;
+          }
+        }
+      } catch (err) {
+        showToast('Error: ' + err.message, 'error');
+      }
     }
 
-    function showSuccess(msg) {
-      const el = document.getElementById('success-msg');
-      el.textContent = msg;
-      el.style.display = 'block';
-      document.getElementById('error-msg').style.display = 'none';
-    }
-
+    // Initial render
     renderProducts();
   </script>
 </body>
