@@ -221,18 +221,20 @@ export class WhatsAppInteractiveManager {
     const nowUtc = isoUtc(Date.now());
 
     // 1. Prune pending scheduled outreach reminders for this phone
-    try {
-      const updateResult = await dbClient.execute({
-        sql: `UPDATE scheduled_outreach
-              SET executed = 1
-              WHERE executed = 0 AND customer_profile_id IN (
-                SELECT id FROM customer_profiles WHERE phone LIKE ?
-              )`,
-        args: [`%${cleanPhone.slice(-10)}%`],
-      });
-      remindersPrunedCount = updateResult.rowsAffected ?? 0;
-    } catch (err) {
-      logger.warn({ msg: "Could not prune scheduled outreach", err });
+    if (cleanPhone.length >= 7) {
+      try {
+        const updateResult = await dbClient.execute({
+          sql: `UPDATE scheduled_outreach
+                SET executed = 1
+                WHERE executed = 0 AND customer_profile_id IN (
+                  SELECT id FROM customer_profiles WHERE phone LIKE ?
+                )`,
+          args: [`%${cleanPhone.slice(-10)}%`],
+        });
+        remindersPrunedCount = updateResult.rowsAffected ?? 0;
+      } catch (err) {
+        logger.warn({ msg: "Could not prune scheduled outreach", err });
+      }
     }
 
     // 2. Mark live payment event as captured if orderId is known
@@ -337,30 +339,32 @@ export class WhatsAppInteractiveManager {
     let remindersPrunedCount = 0;
 
     // 1. Mark customer profile as opted_out
-    try {
-      await dbClient.execute({
-        sql: `UPDATE customer_profiles
-              SET opted_out = 1
-              WHERE phone LIKE ?`,
-        args: [`%${cleanPhone.slice(-10)}%`],
-      });
-    } catch (err) {
-      logger.warn({ msg: "Could not set opted_out on customer_profile", err });
-    }
+    if (cleanPhone.length >= 7) {
+      try {
+        await dbClient.execute({
+          sql: `UPDATE customer_profiles
+                SET opted_out = 1
+                WHERE phone LIKE ?`,
+          args: [`%${cleanPhone.slice(-10)}%`],
+        });
+      } catch (err) {
+        logger.warn({ msg: "Could not set opted_out on customer_profile", err });
+      }
 
-    // 2. Purge all future scheduled reminders
-    try {
-      const del = await dbClient.execute({
-        sql: `UPDATE scheduled_outreach
-              SET executed = 1
-              WHERE executed = 0 AND customer_profile_id IN (
-                SELECT id FROM customer_profiles WHERE phone LIKE ?
-              )`,
-        args: [`%${cleanPhone.slice(-10)}%`],
-      });
-      remindersPrunedCount = del.rowsAffected ?? 0;
-    } catch (err) {
-      logger.warn({ msg: "Could not purge scheduled outreach on opt-out", err });
+      // 2. Purge all future scheduled reminders
+      try {
+        const del = await dbClient.execute({
+          sql: `UPDATE scheduled_outreach
+                SET executed = 1
+                WHERE executed = 0 AND customer_profile_id IN (
+                  SELECT id FROM customer_profiles WHERE phone LIKE ?
+                )`,
+          args: [`%${cleanPhone.slice(-10)}%`],
+        });
+        remindersPrunedCount = del.rowsAffected ?? 0;
+      } catch (err) {
+        logger.warn({ msg: "Could not purge scheduled outreach on opt-out", err });
+      }
     }
 
     // 3. Audit opt-out event
@@ -402,17 +406,19 @@ export class WhatsAppInteractiveManager {
     const nextDayMs = Date.now() + 24 * 60 * 60 * 1000;
     const rescheduledToUtc = isoUtc(nextDayMs);
 
-    try {
-      await dbClient.execute({
-        sql: `UPDATE scheduled_outreach
-              SET scheduled_at_utc = ?
-              WHERE executed = 0 AND customer_profile_id IN (
-                SELECT id FROM customer_profiles WHERE phone LIKE ?
-              )`,
-        args: [rescheduledToUtc, `%${cleanPhone.slice(-10)}%`],
-      });
-    } catch (err) {
-      logger.warn({ msg: "Could not postpone scheduled outreach", err });
+    if (cleanPhone.length >= 7) {
+      try {
+        await dbClient.execute({
+          sql: `UPDATE scheduled_outreach
+                SET scheduled_at_utc = ?
+                WHERE executed = 0 AND customer_profile_id IN (
+                  SELECT id FROM customer_profiles WHERE phone LIKE ?
+                )`,
+          args: [rescheduledToUtc, `%${cleanPhone.slice(-10)}%`],
+        });
+      } catch (err) {
+        logger.warn({ msg: "Could not postpone scheduled outreach", err });
+      }
     }
 
     const audit = await appendAuditLedger(dbClient, {
