@@ -47,6 +47,8 @@ import {
   defaultGatewayOptimizer,
   isCascadeEligible,
   defaultBankCircuitBreaker,
+  defaultWhatsAppInteractiveManager,
+  parseWhatsAppWebhook,
   type MerchantRecoveryPolicy,
   type SubscriptionMandate,
   type AbandonedCheckout,
@@ -2190,6 +2192,45 @@ app.post("/api/banks/circuit-breaker/evaluate", (req: Request, res: Response) =>
       nowMs ? Number(nowMs) : Date.now(),
     );
     res.json({ success: true, evaluation });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// ── 2-Way Interactive WhatsApp Webhook & Simulator (WHA-20) ─────
+app.post("/api/webhooks/whatsapp", async (req: Request, res: Response) => {
+  try {
+    const parsed = parseWhatsAppWebhook(req.body);
+    const result = await defaultWhatsAppInteractiveManager.processInboundAction(dbClient, parsed);
+
+    broadcastSSE("global", {
+      type: "whatsapp.interaction",
+      action: parsed.actionType,
+      phone: parsed.phone,
+      status: result.status,
+      remindersPrunedCount: result.remindersPrunedCount,
+    });
+
+    res.json({ success: true, result });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+app.post("/api/whatsapp/simulate-interaction", async (req: Request, res: Response) => {
+  try {
+    const parsed = parseWhatsAppWebhook(req.body);
+    const result = await defaultWhatsAppInteractiveManager.processInboundAction(dbClient, parsed);
+
+    broadcastSSE("global", {
+      type: "whatsapp.interaction",
+      action: parsed.actionType,
+      phone: parsed.phone,
+      status: result.status,
+      remindersPrunedCount: result.remindersPrunedCount,
+    });
+
+    res.json({ success: true, result });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }

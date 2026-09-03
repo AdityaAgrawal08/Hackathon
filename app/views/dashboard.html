@@ -308,6 +308,22 @@
         <div id="customer-details-content" style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;"></div>
       </div>
 
+      <!-- 2-Way Interactive WhatsApp Simulator Bar (Task 7.5 / WHA-20) -->
+      <div class="sim-bar" style="border: 1px solid #14532d; background: #052e16;">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 18px;">📱</span>
+          <div>
+            <strong style="font-size: 13px; color: #86efac;">Meta WhatsApp 2-Way Quick-Reply Simulator:</strong>
+            <span style="font-size: 12px; color: #cbd5e1; margin-left: 6px;">Simulate customer button clicks within the 24h service session window:</span>
+          </div>
+        </div>
+        <div style="display: flex; gap: 8px;">
+          <button class="analysis-btn" style="background: #16a34a; font-size: 12px;" onclick="simulateWhatsAppClick('BTN_1_TAP_UPI')">⚡ 1-Tap UPI</button>
+          <button class="analysis-btn" style="background: #2563eb; font-size: 12px;" onclick="simulateWhatsAppClick('BTN_SPLIT_EMI')">💳 Split in 3 EMI</button>
+          <button class="analysis-btn" style="background: #dc2626; font-size: 12px;" onclick="simulateWhatsAppClick('STOP')">🛑 Stop Reminders</button>
+        </div>
+      </div>
+
       <!-- Failed Payments Table -->
       <div>
         <div class="toolbar">
@@ -1524,6 +1540,33 @@
         `;
       } catch (err) {
         showToast('Evaluation failed: ' + err.message, 'error');
+      }
+    }
+
+    async function simulateWhatsAppClick(action) {
+      try {
+        const res = await fetch('/api/whatsapp/simulate-interaction', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            phone: '919876543210',
+            customerName: 'Aditya Demo Customer',
+            action: action,
+            orderId: 'order_live_wha_' + Date.now().toString(36)
+          })
+        });
+        const data = await res.json();
+        const r = data.result;
+        if (r.actionType === '1_TAP_UPI') {
+          showToast('✓ WhatsApp 1-Tap UPI confirmed! Reminders pruned & payment captured.', 'success');
+          refreshAll();
+        } else if (r.actionType === 'SPLIT_EMI') {
+          showToast('💳 WhatsApp No-Cost EMI activated! 3 monthly installments generated.', 'success');
+        } else if (r.actionType === 'OPT_OUT') {
+          showToast('🛑 Zero-touch opt-out recorded! All future reminders purged.', 'success');
+        }
+      } catch (err) {
+        showToast('Error: ' + err.message, 'error');
       }
     }
 
