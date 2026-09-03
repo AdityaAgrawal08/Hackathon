@@ -108,10 +108,11 @@ export class BankCircuitBreakerManager {
    * Deterministic function of IST time-of-day plus minute-seeded jitter.
    */
   getBankHealth(nowMs: number = Date.now()): BankSwitchHealth[] {
-    const istMs = nowMs + 330 * 60_000;
+    const safeNowMs = Number.isFinite(nowMs) ? nowMs : Date.now();
+    const istMs = safeNowMs + 330 * 60_000;
     const istHour = (istMs % 86_400_000) / 3_600_000;
 
-    const seed = hashSeed(`bank_switch:${Math.floor(nowMs / 60_000)}`);
+    const seed = hashSeed(`bank_switch:${Math.floor(safeNowMs / 60_000)}`);
     const jitter = ((seed % 1000) / 1000 - 0.5) * 0.08;
 
     // 1. SBI: Nightly CBS batch maintenance dip between 01:30 and 03:30 AM IST
@@ -140,8 +141,11 @@ export class BankCircuitBreakerManager {
       const base = baseRates[bankId];
       const override = this.overrides.get(bankId);
 
-      const successRate = override?.successRate ?? base.rate;
-      const latencyMs = override?.latencyMs ?? base.latency;
+      const rawRate = override?.successRate ?? base.rate;
+      const successRate = clamp01(rawRate);
+      const latencyMs = Number.isFinite(override?.latencyMs)
+        ? Math.max(50, Math.round(override!.latencyMs!))
+        : base.latency;
 
       let status: BankHealthStatus = "HEALTHY";
       let circuitState: CircuitBreakerState = "CLOSED";
@@ -175,8 +179,9 @@ export class BankCircuitBreakerManager {
     preferredMethod: "upi" | "cards" | "netbanking" = "upi",
     nowMs: number = Date.now(),
   ): SteeringRecommendation {
+    const safeNowMs = Number.isFinite(nowMs) ? nowMs : Date.now();
     const bankId = resolveBankFromIdentifier(identifier);
-    const bankHealths = this.getBankHealth(nowMs);
+    const bankHealths = this.getBankHealth(safeNowMs);
 
     // Find the current bank's state (if recognized)
     const currentBank = bankId ? bankHealths.find((b) => b.bankId === bankId) : null;
@@ -228,12 +233,13 @@ export class BankCircuitBreakerManager {
    * Generates a composite snapshot combining payment rails and bank switches.
    */
   getCompositeSnapshot(nowMs: number = Date.now()): CompositeHealthSnapshot {
-    const overallRailHealth = simulatedRailHealth(nowMs);
-    const banks = this.getBankHealth(nowMs);
+    const safeNowMs = Number.isFinite(nowMs) ? nowMs : Date.now();
+    const overallRailHealth = simulatedRailHealth(safeNowMs);
+    const banks = this.getBankHealth(safeNowMs);
     const activeOutagesCount = banks.filter((b) => b.circuitState === "OPEN").length;
 
     return {
-      timestampUtc: new Date(nowMs).toISOString(),
+      timestampUtc: new Date(safeNowMs).toISOString(),
       overallRailHealth,
       banks,
       activeOutagesCount,
