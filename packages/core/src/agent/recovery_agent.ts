@@ -6,6 +6,11 @@
  * and deterministically re-plans the next optimal recovery action.
  */
 import { evaluateStoppingRules, type StoppingRuleContext } from "./stopping_rules.js";
+import {
+  LinUCBBandit,
+  defaultRecoveryBandit,
+  type ArmSelectionResult,
+} from "./contextual_bandit.js";
 
 export type InteractionType =
   | "SMS_DELIVERED"
@@ -37,14 +42,17 @@ export interface AgentRePlanResult {
   concessionType?: "SPLIT_PAY" | "INSTANT_DISCOUNT_5PCT";
   concessionPaise?: number;
   scheduledAtUtc?: string;
+  banditSelection?: ArmSelectionResult;
 }
 
 /**
- * Evaluates dynamic customer behavioral telemetry and re-plans next action.
+ * Evaluates dynamic customer behavioral telemetry and re-plans next action using
+ * the regret-bounded LinUCB contextual bandit bounded by 5 hard stopping rules.
  */
 export function rePlanRecoveryAction(
   event: CustomerInteractionEvent,
   stoppingCtx: StoppingRuleContext,
+  bandit: LinUCBBandit = defaultRecoveryBandit,
 ): AgentRePlanResult {
   const nowMs = event.nowMs || Date.now();
 
@@ -67,6 +75,13 @@ export function rePlanRecoveryAction(
   }
 
   const amountPaise = event.cartAmountPaise || 499900;
+  const context = LinUCBBandit.buildContext(
+    amountPaise,
+    stoppingCtx.touchCount,
+    event.dwellTimeSeconds || 0,
+    0.6,
+  );
+  const banditSelection = bandit.selectArm(context);
 
   // 3. Scenario A: Portal Exited without Pay after viewing (> 20s dwell)
   // High friction / sticker shock -> Autonomous Downsell / Split-Pay Concession
@@ -76,18 +91,20 @@ export function rePlanRecoveryAction(
       const splitAmount = Math.round(amountPaise / 3);
       return {
         action: "TRIGGER_DOWNSELL_SPLIT",
-        reason: `Customer viewed portal for ${event.dwellTimeSeconds}s and dropped off. Triggering 3x Split-Pay (₹${(splitAmount / 100).toFixed(0)}/mo) to eliminate friction.`,
+        reason: `Customer viewed portal for ${event.dwellTimeSeconds}s and dropped off (LinUCB score ${banditSelection.ucbScore}). Triggering 3x Split-Pay (₹${(splitAmount / 100).toFixed(0)}/mo) to eliminate friction.`,
         concessionType: "SPLIT_PAY",
         concessionPaise: splitAmount,
+        banditSelection,
       };
     } else {
       // 5% instant discount
       const discountPaise = Math.round(amountPaise * 0.05);
       return {
         action: "TRIGGER_DOWNSELL_SPLIT",
-        reason: `Customer viewed portal for ${event.dwellTimeSeconds}s and dropped off. Triggering 5% instant checkout concession.`,
+        reason: `Customer viewed portal for ${event.dwellTimeSeconds}s and dropped off (LinUCB score ${banditSelection.ucbScore}). Triggering 5% instant checkout concession.`,
         concessionType: "INSTANT_DISCOUNT_5PCT",
         concessionPaise: discountPaise,
+        banditSelection,
       };
     }
   }
@@ -98,6 +115,7 @@ export function rePlanRecoveryAction(
     return {
       action: "SWITCH_TO_1TAP_UPI",
       reason: "Secondary card attempt declined in portal. Automatically promoting 1-Tap Mobile UPI Intent.",
+      banditSelection,
     };
   }
 
@@ -109,11 +127,13 @@ export function rePlanRecoveryAction(
     return {
       action: "SWITCH_TO_WHATSAPP",
       reason: "Primary notification unopened after 2h. Channel-switching to high-open WhatsApp utility notification.",
+      banditSelection,
     };
   }
 
   return {
     action: "NO_ACTION",
     reason: "Interaction observed. User within standard active consideration window.",
+    banditSelection,
   };
 }

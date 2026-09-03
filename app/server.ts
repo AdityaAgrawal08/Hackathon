@@ -44,6 +44,9 @@ import {
   runFourWayAblationBenchmark,
   getMerchantPolicy,
   upsertMerchantPolicy,
+  defaultGatewayOptimizer,
+  isCascadeEligible,
+  defaultBankCircuitBreaker,
   type MerchantRecoveryPolicy,
   type SubscriptionMandate,
   type AbandonedCheckout,
@@ -606,6 +609,42 @@ app.post("/api/payments/failed", paymentLimiter, async (req: Request, res: Respo
     // Use the REAL error code from Razorpay — never overwrite with demo codes
     const failureCode = error_code || "UNKNOWN";
     const paymentId = razorpay_payment_id || `pay_client_${Date.now()}`;
+
+    // ── Tier 0: In-Flight Gateway Optimizer Cascade ──────────────────
+    const optimizerRequested = req.query.optimizer === "true" || req.body.use_optimizer === true;
+    if (optimizerRequested && isCascadeEligible(failureCode)) {
+      const cascadeResult = defaultGatewayOptimizer.executeCascade({
+        orderId: razorpay_order_id,
+        amountPaise: validatedAmount,
+        initialErrorCode: failureCode,
+        idempotencyKey: `idem_cascade_${razorpay_order_id}`,
+      });
+
+      if (cascadeResult.recoveredInFlight) {
+        await appendAuditLedger(dbClient, {
+          eventType: "IN_FLIGHT_CASCADE_RECOVERED",
+          entityId: razorpay_order_id,
+          actor: "RAZORPAY_OPTIMIZER",
+          payload: cascadeResult as any,
+        });
+
+        logger.info({
+          msg: `[Optimizer] Payment ${razorpay_order_id} recovered in-flight via ${cascadeResult.winningGateway}`,
+          latencyMs: cascadeResult.totalLatencyMs,
+          cogsSavedPaise: cascadeResult.cogsSavedPaise,
+        });
+
+        return res.json({
+          success: true,
+          inFlightRecovered: true,
+          status: "CAPTURED",
+          winningGateway: cascadeResult.winningGateway,
+          latencyMs: cascadeResult.totalLatencyMs,
+          cogsSavedPaise: cascadeResult.cogsSavedPaise,
+          reason: cascadeResult.reason,
+        });
+      }
+    }
 
     // Deduplication: check if this payment_id already has an event
     const existingEvent = await dbClient.execute({
@@ -1658,8 +1697,8 @@ app.post("/api/events/:eventId/interaction", async (req: Request, res: Response)
 // 1. SaaS Recurring Subscription Mandates (UPI Autopay, eNACH)
 app.post("/api/mandates/auto-debit-failure", async (req: Request, res: Response) => {
   try {
+    const customerId = req.body.customerId || req.body.mandateId || `cust_${Date.now()}`;
     const {
-      customerId,
       customerName,
       customerPhone,
       customerEmail,
@@ -1669,8 +1708,8 @@ app.post("/api/mandates/auto-debit-failure", async (req: Request, res: Response)
       failureCode = "BAD_REQUEST_PAYMENT_UPI_AUTOPAY_DECLINED",
     } = req.body;
 
-    if (!customerId || !customerPhone) {
-      return res.status(400).json({ error: "customerId and customerPhone are required" });
+    if (!customerPhone) {
+      return res.status(400).json({ error: "customerPhone is required" });
     }
 
     const mandateId = `man_${Date.now()}_${randomBytes(4).toString("hex")}`;
@@ -1888,21 +1927,21 @@ app.get("/api/checkout/restore/:token", async (req: Request, res: Response) => {
 // 3. B2B Corporate Invoices & Receivables (2/10 Net 30 Terms)
 app.post("/api/invoices/chaser/initiate", async (req: Request, res: Response) => {
   try {
+    const clientCompany = req.body.clientCompany || req.body.buyerName;
+    const contactEmail = req.body.contactEmail;
+    const invoiceNumber = req.body.invoiceNumber || `INV-${Date.now().toString(36).toUpperCase()}`;
+    const amountPaise = req.body.amountPaise || req.body.invoiceAmountPaise || 15000000;
     const {
       vendorId = "acme_corp",
-      clientCompany,
       contactPerson,
-      contactEmail,
       contactPhone,
-      amountPaise = 15000000, // ₹1,50,000
-      invoiceNumber,
       dueDateUtc,
       daysOverdue = 15,
       earlyDiscountPercent = 2.0,
     } = req.body;
 
-    if (!clientCompany || !contactEmail || !invoiceNumber) {
-      return res.status(400).json({ error: "clientCompany, contactEmail, and invoiceNumber are required" });
+    if (!clientCompany || !contactEmail) {
+      return res.status(400).json({ error: "clientCompany and contactEmail are required" });
     }
 
     const invoiceId = `inv_${Date.now()}_${randomBytes(4).toString("hex")}`;
@@ -2090,6 +2129,67 @@ app.post("/api/vendor/policies", async (req: Request, res: Response) => {
     });
 
     res.json({ success: true, policy: updated });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// ── Razorpay Optimizer Tier-0 In-Flight Gateway Cascade ──────────
+app.post("/api/optimizer/route", async (req: Request, res: Response) => {
+  try {
+    const {
+      orderId = `order_${Date.now()}`,
+      amountPaise = 499900,
+      errorCode = "GATEWAY_TIMEOUT",
+      idempotencyKey = `idem_opt_${Date.now()}`,
+      cascadeSequence,
+      mockGatewayOutcomes,
+    } = req.body;
+
+    const result = defaultGatewayOptimizer.executeCascade({
+      orderId,
+      amountPaise: Number(amountPaise),
+      initialErrorCode: errorCode,
+      idempotencyKey,
+      cascadeSequence,
+      mockGatewayOutcomes,
+    });
+
+    res.json({ success: true, result });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+app.get("/api/optimizer/metrics", (req: Request, res: Response) => {
+  try {
+    const metrics = defaultGatewayOptimizer.getMetrics();
+    res.json({ success: true, metrics });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// ── Bank Switch Health & Inter-Bank Steering Circuit Breaker ────
+app.get("/api/rails/health", (req: Request, res: Response) => {
+  try {
+    const nowMs = req.query.now ? Number(req.query.now) : Date.now();
+    const snapshot = defaultBankCircuitBreaker.getCompositeSnapshot(nowMs);
+    res.json({ success: true, snapshot });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+app.post("/api/banks/circuit-breaker/evaluate", (req: Request, res: Response) => {
+  try {
+    const { identifier = "", preferredMethod = "upi", nowMs } = req.body;
+    const evaluation = defaultBankCircuitBreaker.evaluate(
+      identifier,
+      preferredMethod,
+      nowMs ? Number(nowMs) : Date.now(),
+    );
+    res.json({ success: true, evaluation });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }
