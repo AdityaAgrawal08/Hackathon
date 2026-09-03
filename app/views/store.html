@@ -42,11 +42,29 @@
 </head>
 <body>
   <div class="header">
-    <h1>ARBITER</h1>
-    <span class="badge">Test Mode</span>
+    <div style="display:flex;align-items:center;gap:12px;">
+      <h1>ARBITER</h1>
+      <span class="badge">Track 3 Multi-Domain</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:16px;">
+      <a href="/store" style="color:#60a5fa;text-decoration:none;font-size:14px;font-weight:600;">Store Demo</a>
+      <a href="/dashboard" style="color:#94a3b8;text-decoration:none;font-size:14px;">Merchant Dashboard</a>
+    </div>
   </div>
+
+  <div style="background:#1e293b;border-bottom:1px solid #334155;padding:12px 24px;">
+    <div style="max-width:1200px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+      <div style="display:flex;gap:8px;" id="domain-switcher-tabs">
+        <button class="domain-tab active" id="tab-d2c" onclick="switchDomain('d2c')" style="background:#2563eb;color:white;border:none;padding:8px 16px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;">🛒 D2C Consumer Checkout</button>
+        <button class="domain-tab" id="tab-saas" onclick="switchDomain('saas')" style="background:#0f172a;color:#94a3b8;border:1px solid #334155;padding:8px 16px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;">⚡ SaaS UPI Mandates (RBI 24h)</button>
+        <button class="domain-tab" id="tab-b2b" onclick="switchDomain('b2b')" style="background:#0f172a;color:#94a3b8;border:1px solid #334155;padding:8px 16px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;">🏢 B2B Invoices (2/10 Net 30)</button>
+      </div>
+      <div style="font-size:12px;color:#64748b;" id="domain-badge-desc">Simulates active consumer checkout drop-offs & 1-tap recovery</div>
+    </div>
+  </div>
+
   <div class="container">
-    <h2 class="section-title">Select a Plan</h2>
+    <h2 class="section-title" id="section-title">Select a Plan (D2C Checkout)</h2>
     <div class="products" id="products"></div>
 
     <div class="checkout-section" id="checkout-section" style="display: none;">
@@ -82,25 +100,74 @@
   </div>
 
   <script>
-    const PRODUCTS = [
-      { id: "prod_premium_plan", name: "Premium Annual Plan", description: "Full access to all features for 12 months", pricePaise: 499900 },
-      { id: "prod_monthly_basic", name: "Monthly Basic", description: "Essential features, billed monthly", pricePaise: 99900 },
-      { id: "prod_team_license", name: "Team License (5 seats)", description: "Collaborate with your team, 5 user seats", pricePaise: 199900 },
-      { id: "prod_enterprise", name: "Enterprise (Custom)", description: "Custom solution for large organizations", pricePaise: 999900 },
-    ];
+  <script>
+    const DOMAIN_DATA = {
+      d2c: {
+        title: "Select a Plan (D2C Consumer Checkout)",
+        badge: "Simulates consumer checkout drop-offs, abandoned carts & 1-tap recovery",
+        products: [
+          { id: "prod_premium_plan", name: "Premium Annual Plan", description: "Full access to all features for 12 months", pricePaise: 499900 },
+          { id: "prod_monthly_basic", name: "Monthly Basic", description: "Essential features, billed monthly", pricePaise: 99900 },
+          { id: "prod_team_license", name: "Team License (5 seats)", description: "Collaborate with your team, 5 user seats", pricePaise: 199900 },
+          { id: "prod_enterprise", name: "Enterprise (Custom)", description: "Custom solution for large organizations", pricePaise: 999900 },
+        ]
+      },
+      saas: {
+        title: "Select a Subscription (SaaS Mandate Auto-Debit)",
+        badge: "Simulates UPI Autopay / eNACH recurring debits with strict RBI 24h pre-debit notice",
+        products: [
+          { id: "mandate_cloud_pro", name: "Cloud Infrastructure Pro", description: "Monthly recurring UPI Autopay mandate", pricePaise: 299900 },
+          { id: "mandate_saas_annual", name: "SaaS Enterprise Autopay", description: "Annual eNACH recurring mandate with 06:30 AM retry window", pricePaise: 1299900 },
+          { id: "mandate_starter", name: "Developer Starter Mandate", description: "Fixed ₹499/mo subscription mandate", pricePaise: 49900 },
+        ]
+      },
+      b2b: {
+        title: "Select B2B Receivables (2/10 Net 30 Terms)",
+        badge: "Simulates B2B corporate invoices, automated early settlement discounts & DSO chasers",
+        products: [
+          { id: "inv_software_retainer", name: "Enterprise Custom Retainer", description: "Net 30 invoice with ₹3,000 instant discount if paid in 10 days", pricePaise: 15000000 },
+          { id: "inv_infra_sla", name: "Annual Dedicated Infrastructure SLA", description: "2/10 Net 30 terms saving ₹8,500 on early settlement", pricePaise: 42500000 },
+          { id: "inv_api_usage", name: "Monthly Volume API Usage", description: "Corporate receivable with automated WhatsApp/Email chaser", pricePaise: 8500000 },
+        ]
+      }
+    };
 
+    let currentDomain = 'd2c';
     let selectedProduct = null;
 
     function formatINR(paise) {
       return '₹' + (paise / 100).toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
     }
 
+    function switchDomain(domain) {
+      currentDomain = domain;
+      document.querySelectorAll('.domain-tab').forEach(b => {
+        b.style.background = '#0f172a';
+        b.style.color = '#94a3b8';
+        b.style.border = '1px solid #334155';
+      });
+      const activeBtn = document.getElementById('tab-' + domain);
+      if (activeBtn) {
+        activeBtn.style.background = '#2563eb';
+        activeBtn.style.color = 'white';
+        activeBtn.style.border = 'none';
+      }
+
+      const data = DOMAIN_DATA[domain] || DOMAIN_DATA.d2c;
+      document.getElementById('section-title').textContent = data.title;
+      document.getElementById('domain-badge-desc').textContent = data.badge;
+      document.getElementById('checkout-section').style.display = 'none';
+      selectedProduct = null;
+      renderProducts();
+    }
+
     function renderProducts() {
+      const data = DOMAIN_DATA[currentDomain] || DOMAIN_DATA.d2c;
       const container = document.getElementById('products');
-      container.innerHTML = PRODUCTS.map(p => `
+      container.innerHTML = data.products.map(p => `
         <div class="product-card" data-id="${p.id}" onclick="selectProduct('${p.id}')">
           <div style="height:160px;background:linear-gradient(135deg,#1e293b,#334155);display:flex;align-items:center;justify-content:center;">
-            <span style="font-size:48px;color:#64748b;">${p.id.includes('premium') ? '★' : p.id.includes('basic') ? '◆' : p.id.includes('team') ? '⬡' : '⬢'}</span>
+            <span style="font-size:48px;color:#64748b;">${p.id.includes('cloud') || p.id.includes('mandate') ? '⚡' : p.id.includes('inv') ? '🏢' : '🛒'}</span>
           </div>
           <div class="product-info">
             <div class="product-name">${p.name}</div>
@@ -112,12 +179,21 @@
     }
 
     function selectProduct(productId) {
-      selectedProduct = PRODUCTS.find(p => p.id === productId);
+      const data = DOMAIN_DATA[currentDomain] || DOMAIN_DATA.d2c;
+      selectedProduct = data.products.find(p => p.id === productId);
       document.querySelectorAll('.product-card').forEach(c => c.classList.remove('selected'));
-      document.querySelector(`.product-card[data-id="${productId}"]`).classList.add('selected');
+      const activeCard = document.querySelector(`.product-card[data-id="${productId}"]`);
+      if (activeCard) activeCard.classList.add('selected');
 
       document.getElementById('checkout-section').style.display = 'block';
       document.getElementById('no-product').style.display = 'none';
+
+      let buttonLabel = 'Pay ' + '₹' + (selectedProduct.pricePaise / 100).toLocaleString('en-IN');
+      if (currentDomain === 'saas') {
+        buttonLabel = '⚡ Setup Mandate & Simulate Failure (' + formatINR(selectedProduct.pricePaise) + ')';
+      } else if (currentDomain === 'b2b') {
+        buttonLabel = '🏢 Issue B2B Invoice & Calculate 2/10 Terms (' + formatINR(selectedProduct.pricePaise) + ')';
+      }
 
       document.getElementById('selected-product').innerHTML = `
         <div style="display:flex;justify-content:space-between;align-items:center;">
@@ -128,7 +204,7 @@
           <div style="font-size:20px;font-weight:700;color:#22c55e;">₹${(selectedProduct.pricePaise / 100).toLocaleString('en-IN')}</div>
         </div>
       `;
-      document.getElementById('pay-amount').textContent = '₹' + (selectedProduct.pricePaise / 100).toLocaleString('en-IN');
+      document.getElementById('pay-btn').textContent = buttonLabel;
     }
 
     document.getElementById('checkout-form').addEventListener('submit', async function(e) {
@@ -151,6 +227,68 @@
 
       const payBtn = document.getElementById('pay-btn');
       payBtn.disabled = true;
+
+      if (currentDomain === 'saas') {
+        payBtn.textContent = 'Simulating UPI Autopay Debit Failure...';
+        try {
+          const res = await fetch('/api/mandates/auto-debit-failure', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              customerId: 'cust_saas_' + Date.now(),
+              customerName: name,
+              customerPhone: phone,
+              customerEmail: email,
+              mandateType: 'UPI_AUTOPAY',
+              planName: selectedProduct.name,
+              amountPaise: selectedProduct.pricePaise,
+            }),
+          });
+          const d = await res.json();
+          payBtn.disabled = false;
+          payBtn.textContent = '⚡ Setup Mandate & Simulate Failure';
+          if (d.success) {
+            showSuccess(`✓ Mandate Auto-Debit Failure Ingested! Scheduled RBI Notice: ${d.mandate.pre_debit_notification_utc} | Next Retry: ${d.mandate.scheduled_debit_utc}`);
+          } else {
+            showError(d.error || 'Failed to trigger mandate failure');
+          }
+        } catch (err) {
+          payBtn.disabled = false;
+          showError('Network error while triggering mandate failure');
+        }
+        return;
+      }
+
+      if (currentDomain === 'b2b') {
+        payBtn.textContent = 'Generating 2/10 Net 30 Invoice...';
+        try {
+          const res = await fetch('/api/invoices/chaser/initiate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              invoiceNumber: 'INV-' + Math.floor(1000 + Math.random() * 9000),
+              clientCompany: name + ' Technologies Pvt Ltd',
+              contactEmail: email,
+              contactPhone: phone,
+              amountPaise: selectedProduct.pricePaise,
+              dueDateUtc: new Date(Date.now() + 30 * 86400000).toISOString(),
+            }),
+          });
+          const d = await res.json();
+          payBtn.disabled = false;
+          payBtn.textContent = '🏢 Issue B2B Invoice & Calculate 2/10 Terms';
+          if (d.success) {
+            showSuccess(`✓ B2B Invoice Issued! Early Settlement Discount: ₹${(d.chaserPlan.earlyDiscountPaise/100).toFixed(0)} (Pay by ${new Date(d.chaserPlan.earlySettlementDeadlineUtc).toLocaleDateString()}) | Merchant Cost Saved: ₹${(d.chaserPlan.workingCapitalCostSavingsPaise/100).toFixed(0)}`);
+          } else {
+            showError(d.error || 'Failed to issue B2B invoice');
+          }
+        } catch (err) {
+          payBtn.disabled = false;
+          showError('Network error while issuing invoice');
+        }
+        return;
+      }
+
       payBtn.textContent = 'Creating order...';
 
       try {

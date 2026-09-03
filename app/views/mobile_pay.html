@@ -132,6 +132,12 @@
       <div id="lbl-status-text">Ready to checkout via UPI or Card</div>
     </div>
 
+    <!-- Error Alert Banner -->
+    <div class="banner" id="banner-error" style="display:none; background:#450a0a; border:1px solid #dc2626; color:#fca5a5;">
+      <span>⚠️</span>
+      <div id="lbl-error-text">Payment could not be processed.</div>
+    </div>
+
     <!-- Dynamic Desktop UPI QR Section (Task 3.2) -->
     <div id="qr-container" style="text-align: center; display: none;">
       <div class="qr-section">
@@ -283,7 +289,12 @@
         document.getElementById("banner-offline").style.display = "flex";
         pollStatusWithBackoff();
       } else {
-        alert("Payment Error: " + (error?.description || error?.reason || "Declined by bank"));
+        const errBanner = document.getElementById("banner-error");
+        const errText = document.getElementById("lbl-error-text");
+        if (errBanner && errText) {
+          errText.innerText = (error?.description || error?.reason || "Payment declined by bank. Please try an alternate method.");
+          errBanner.style.display = "flex";
+        }
       }
     }
 

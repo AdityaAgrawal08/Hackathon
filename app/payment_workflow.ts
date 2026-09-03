@@ -8,7 +8,7 @@ import type { Client } from "@libsql/client";
 import { createHash } from "node:crypto";
 import { isoUtc, paise, formatINR, logger } from "../packages/shared/src/index.js";
 import { classifyByCode, computeFeatures, scoreWithArtifact, DEFAULT_16D_MODEL, assessCredibility } from "../packages/ml/src/index.js";
-import { decide, defaultPolicy, type DecideOutput, type FailureClassId, appendAuditLedger } from "../packages/core/src/index.js";
+import { decide, defaultPolicy, type DecideOutput, type FailureClassId, appendAuditLedger, diagnosePaymentFailure } from "../packages/core/src/index.js";
 import { OutreachRouter, type OutreachChannel, type OutreachPayload, type ProviderDispatchResult } from "../packages/core/src/messaging/index.js";
 import { getErrorEntry, getCustomerMessage, getVendorMessage, getFailureClass as getCatalogFailureClass } from "../packages/core/src/error-catalog.js";
 import { getGroqCustomerMessage } from "../packages/core/src/messaging/groq_customer_message.js";
@@ -89,6 +89,7 @@ export interface FailedPaymentInput {
   // Razorpay webhook: acquirer data
   acquirerAuthCode?: string;  // Bank authorization code
   acquirerRrn?: string;       // Network Reference Number (RRN)
+  acquirerErrorCode?: string; // Acquirer response error code (ISO-8583/NPCI)
 
   // Razorpay webhook: token and contact
   razorpayTokenId?: string;   // Saved instrument token
@@ -336,13 +337,13 @@ export async function processFailedPayment(
        failure_class, ml_probability, ml_action, outreach_dispatched, vendor_notified, created_at_utc,
        payment_method, card_last4, card_network, card_issuer, card_type, card_emi,
        vpa, bank_code, is_international,
-       acquirer_auth_code, acquirer_rrn,
+       acquirer_auth_code, acquirer_rrn, acquirer_error_code,
        razorpay_token_id, razorpay_contact, razorpay_email, razorpay_created_at,
        customer_name, customer_phone, customer_email)
       VALUES (?, ?, ?, ?, ?, ?, 'failed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
               ?, ?, ?, ?, ?, ?,
               ?, ?, ?,
-              ?, ?,
+              ?, ?, ?,
               ?, ?, ?, ?,
               ?, ?, ?)`,
     args: [
@@ -375,6 +376,7 @@ export async function processFailedPayment(
       input.isInternational ? 1 : 0,
       input.acquirerAuthCode || null,
       input.acquirerRrn || null,
+      input.acquirerErrorCode || null,
       input.razorpayTokenId || null,
       input.razorpayContact || null,
       input.razorpayEmail || null,
@@ -420,6 +422,21 @@ export async function processFailedPayment(
       },
       nowMs,
     });
+    const auditDiag = diagnosePaymentFailure({
+      failureCode: input.failureCode,
+      failureDescription: input.failureDescription,
+      failureStep: input.failureStep,
+      failureSource: input.failureSource,
+      failureReason: input.failureReason,
+      paymentMethod: input.paymentMethod,
+      cardLast4: input.cardLast4,
+      cardNetwork: input.cardNetwork,
+      cardIssuer: input.cardIssuer,
+      bankCode: input.bankCode,
+      vpa: input.vpa,
+      acquirerErrorCode: input.acquirerErrorCode,
+      acquirerRrn: input.acquirerRrn,
+    });
     await appendAuditLedger(client, {
       eventType: "DIAGNOSED",
       entityId: eventId,
@@ -430,6 +447,8 @@ export async function processFailedPayment(
         step: input.failureStep,
         isSuspicious,
         credibilityScore: credResult.score,
+        faultDomain: auditDiag.faultDomain,
+        isoCode: auditDiag.isoCode,
       },
       nowMs,
     });
