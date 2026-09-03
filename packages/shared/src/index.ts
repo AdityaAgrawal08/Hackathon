@@ -5,3 +5,4 @@ export * from "./ltv.js";
 export * from "./math.js";
 export * from "./logger.js";
 export * from "./costs.js";
+export * from "./economics.js";

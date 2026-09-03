@@ -6,3 +6,6 @@ export * from "./engine.js";
 export * from "./window.js";
 export * from "./rules_baseline.js";
 export * from "./diagnostics.js";
+export * from "./ablation_benchmark.js";
+export * from "./merchant_policy.js";
+export * from "./batch_sequencer.js";

@@ -40,6 +40,18 @@ export const MSG91_DLT_TEMPLATES: Record<FailureClassId, { dltId: string }> = {
   UNKNOWN: { dltId: "1407168923450015" },
 };
 
+/**
+ * Normalizes any Indian phone representation into canonical E.164 without leading plus (91XXXXXXXXXX).
+ * Handles 10-digit, 11-digit with leading 0, and 12-digit with 91 country code.
+ */
+export function normalizeIndianPhone(raw: string): string {
+  const digits = (raw || "").replace(/[^0-9]/g, "");
+  if (digits.length === 10) return `91${digits}`;
+  if (digits.length === 11 && digits.startsWith("0")) return `91${digits.slice(1)}`;
+  if (digits.length === 12 && digits.startsWith("91")) return digits;
+  return digits;
+}
+
 export class MSG91SmsProvider implements OutreachProvider {
   readonly name = "msg91";
   readonly channel = "SMS" as const;
@@ -58,11 +70,7 @@ export class MSG91SmsProvider implements OutreachProvider {
   async send(payload: OutreachPayload): Promise<ProviderDispatchResult> {
     const nowUtc = isoUtc(Date.now());
     const formattedAmount = formatINR(paise(payload.amountPaise));
-
-    // Phone: must be 91XXXXXXXXXX format (country code + 10 digits)
-    // User types only 10 digits, we prepend 91
-    const rawPhone = (payload.recipient.phone || "").replace(/[^0-9]/g, "");
-    const phone = rawPhone.length === 10 ? `91${rawPhone}` : rawPhone;
+    const phone = normalizeIndianPhone(payload.recipient.phone || "");
 
     const customerName = payload.recipient.name || payload.recipient.customerName || "Customer";
     const recoveryUrl = payload.recoveryUrl || payload.paymentLinkUrl || "";
@@ -122,7 +130,14 @@ export class MSG91SmsProvider implements OutreachProvider {
         body: JSON.stringify(flowBody),
       });
 
-      const data = (await res.json()) as Record<string, unknown>;
+      const contentType = res.headers.get("content-type") || "";
+      let data: Record<string, unknown> = {};
+      if (contentType.includes("application/json")) {
+        data = (await res.json()) as Record<string, unknown>;
+      } else {
+        const text = await res.text();
+        data = { message: text.slice(0, 200), raw: text };
+      }
       const isSuccess = data.type === "success" || res.ok;
 
       if (!isSuccess) {

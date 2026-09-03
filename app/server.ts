@@ -37,6 +37,18 @@ import {
   getAuditLedgerForEntity,
   verifyAuditLedgerChain,
   diagnosePaymentFailure,
+  scheduleMandateRetry,
+  generateCartRecoveryLink,
+  calculateEarlySettlementDiscount,
+  rePlanRecoveryAction,
+  runFourWayAblationBenchmark,
+  getMerchantPolicy,
+  upsertMerchantPolicy,
+  type MerchantRecoveryPolicy,
+  type SubscriptionMandate,
+  type AbandonedCheckout,
+  type B2BInvoice,
+  type CustomerInteractionEvent,
 } from "../packages/core/src/index.js";
 
 import {
@@ -1340,6 +1352,37 @@ app.post("/api/webhooks/providers/msg91", webhookLimiter, async (req: Request, r
   } catch { res.json({ received: true }); }
 });
 
+// Canonical aliases for Engagement Telemetry (Task 6.10 / ENG-11)
+app.post("/api/webhooks/brevo/events", webhookLimiter, async (req: Request, res: Response) => {
+  try {
+    const event = req.body || {};
+    broadcastSSE("global", {
+      type: "telemetry.engagement",
+      provider: "brevo",
+      event: event.event,
+      email: event.email,
+    });
+    res.json({ status: "ok", received: true });
+  } catch {
+    res.json({ status: "ok", received: true });
+  }
+});
+
+app.post("/api/webhooks/msg91/dlr", webhookLimiter, async (req: Request, res: Response) => {
+  try {
+    const event = req.body || {};
+    broadcastSSE("global", {
+      type: "telemetry.engagement",
+      provider: "msg91",
+      status: event.status,
+      mobile: event.mobile,
+    });
+    res.json({ status: "ok", received: true });
+  } catch {
+    res.json({ status: "ok", received: true });
+  }
+});
+
 app.post("/api/webhooks/providers/gupshup", webhookLimiter, async (req: Request, res: Response) => {
   // G-004: Verify Gupshup webhook signature when secret is configured
   const sig = extractSignature(req);
@@ -1534,6 +1577,408 @@ app.get("/api/events/:eventId", async (req: Request, res: Response) => {
   }
 });
 
+app.post("/api/events/:eventId/interaction", async (req: Request, res: Response) => {
+  try {
+    const { eventId } = req.params;
+    const {
+      interactionType = "PORTAL_OPENED",
+      dwellTimeSeconds = 0,
+      failedPaymentMethod,
+    } = req.body;
+
+    const eventResult = await dbClient.execute({
+      sql: `SELECT * FROM live_payment_events WHERE id = ?`,
+      args: [eventId],
+    });
+
+    if (eventResult.rows.length === 0) {
+      return res.status(404).json({ error: "Event not found" });
+    }
+
+    const eventRow = eventResult.rows[0];
+    const createdMs = new Date(String(eventRow.created_at_utc)).getTime();
+    const nowMs = Date.now();
+    const timeSinceFailureMinutes = Math.round((nowMs - createdMs) / (60 * 1000));
+
+    const interactionEvent: CustomerInteractionEvent = {
+      eventId,
+      interactionType,
+      timeSinceFailureMinutes,
+      dwellTimeSeconds: Number(dwellTimeSeconds),
+      failedPaymentMethod,
+      cartAmountPaise: Number(eventRow.amount_paise),
+      nowMs,
+    };
+
+    const rePlanResult = rePlanRecoveryAction(interactionEvent, {
+      touchCount: Number(eventRow.retry_count || 1),
+      lastTouchAtUtc: String(eventRow.last_outreach_utc || eventRow.created_at_utc),
+      isOptedOut: false,
+      createdAtUtc: String(eventRow.created_at_utc),
+      domain: "D2C_CHECKOUT",
+      nowMs,
+    });
+
+    // Append to immutable audit ledger
+    await appendAuditLedger(dbClient, {
+      eventType: "RE_PLANNED",
+      entityId: eventId,
+      customerId: String(eventRow.customer_profile_id || "anon"),
+      payload: {
+        interactionType,
+        dwellTimeSeconds,
+        action: rePlanResult.action,
+        reason: rePlanResult.reason,
+        concessionType: rePlanResult.concessionType,
+        concessionPaise: rePlanResult.concessionPaise,
+      },
+      nowMs,
+    });
+
+    broadcastSSE("global", {
+      type: "recovery.replanned",
+      eventId,
+      interactionType,
+      rePlanResult,
+    });
+
+    res.json({
+      success: true,
+      eventId,
+      interactionType,
+      rePlanResult,
+    });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// ── Track 3 Multi-Domain Endpoints ──────────────────────────────────────────
+
+// 1. SaaS Recurring Subscription Mandates (UPI Autopay, eNACH)
+app.post("/api/mandates/auto-debit-failure", async (req: Request, res: Response) => {
+  try {
+    const {
+      customerId,
+      customerName,
+      customerPhone,
+      customerEmail,
+      mandateType = "UPI_AUTOPAY",
+      planName = "Pro Subscription",
+      amountPaise = 299900,
+      failureCode = "BAD_REQUEST_PAYMENT_UPI_AUTOPAY_DECLINED",
+    } = req.body;
+
+    if (!customerId || !customerPhone) {
+      return res.status(400).json({ error: "customerId and customerPhone are required" });
+    }
+
+    const mandateId = `man_${Date.now()}_${randomBytes(4).toString("hex")}`;
+    const nowMs = Date.now();
+    const nowUtc = isoUtc(nowMs);
+
+    // Check if mandate already exists to increment retry sequence count
+    const existing = await dbClient.execute({
+      sql: `SELECT * FROM subscription_mandates WHERE customer_id = ? AND plan_name = ?`,
+      args: [customerId, planName],
+    });
+
+    let retrySequenceCount = 0;
+    let actualMandateId = mandateId;
+
+    if (existing.rows.length > 0) {
+      const row = existing.rows[0];
+      actualMandateId = String(row.id);
+      retrySequenceCount = Number(row.retry_sequence_count || 0) + 1;
+    }
+
+    const mandateObj: SubscriptionMandate = {
+      id: actualMandateId,
+      customerId,
+      customerName: customerName || "Customer",
+      customerPhone,
+      customerEmail,
+      mandateType: mandateType as any,
+      planName,
+      amountPaise: Number(amountPaise),
+      lastFailureCode: failureCode,
+      retrySequenceCount,
+      maxRetries: 3,
+      status: retrySequenceCount >= 3 ? "SOFT_LOCK" : "ACTIVE",
+      createdAtUtc: nowUtc,
+    };
+
+    const retryPlan = scheduleMandateRetry(mandateObj, failureCode, nowMs);
+
+    if (existing.rows.length > 0) {
+      await dbClient.execute({
+        sql: `UPDATE subscription_mandates
+              SET last_failure_code = ?, next_retry_at_utc = ?, pre_debit_notified_at_utc = ?,
+                  retry_sequence_count = ?, status = ?
+              WHERE id = ?`,
+        args: [
+          failureCode,
+          retryPlan.scheduledDebitAtUtc,
+          retryPlan.preDebitNotificationAtUtc,
+          retrySequenceCount,
+          mandateObj.status,
+          actualMandateId,
+        ],
+      });
+    } else {
+      await dbClient.execute({
+        sql: `INSERT INTO subscription_mandates
+              (id, customer_id, customer_name, customer_phone, customer_email, mandate_type,
+               plan_name, amount_paise, last_failure_code, next_retry_at_utc, pre_debit_notified_at_utc,
+               retry_sequence_count, max_retries, status, created_at_utc)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [
+          actualMandateId,
+          customerId,
+          mandateObj.customerName,
+          customerPhone,
+          customerEmail || null,
+          mandateType,
+          planName,
+          mandateObj.amountPaise,
+          failureCode,
+          retryPlan.scheduledDebitAtUtc,
+          retryPlan.preDebitNotificationAtUtc,
+          retrySequenceCount,
+          3,
+          mandateObj.status,
+          nowUtc,
+        ],
+      });
+    }
+
+    broadcastSSE("global", {
+      type: "mandate.failure",
+      mandateId: actualMandateId,
+      planName,
+      amountPaise: mandateObj.amountPaise,
+      retryPlan,
+    });
+
+    res.json({
+      success: true,
+      mandate: mandateObj,
+      retryPlan,
+    });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+app.get("/api/mandates", async (_req: Request, res: Response) => {
+  try {
+    const rows = await dbClient.execute(`SELECT * FROM subscription_mandates ORDER BY created_at_utc DESC LIMIT 50`);
+    res.json({ mandates: rows.rows });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 2. Abandoned Pre-Payment Checkouts (Magic Checkout)
+app.post("/api/checkout/abandon", async (req: Request, res: Response) => {
+  try {
+    const {
+      customerName,
+      customerPhone,
+      customerEmail,
+      cartItems = [],
+      cartAmountPaise = 149900,
+      dropOffStep = "PAYMENT_SCREEN_EXITED",
+    } = req.body;
+
+    if (!customerPhone) {
+      return res.status(400).json({ error: "customerPhone is required" });
+    }
+
+    const checkoutId = `chk_${Date.now()}_${randomBytes(4).toString("hex")}`;
+    const recoveryToken = `tok_cart_${randomBytes(8).toString("hex")}`;
+    const nowUtc = isoUtc(Date.now());
+    const cartItemsJson = JSON.stringify(cartItems.length > 0 ? cartItems : [{ id: "cart_item_1", name: "Premium Cart Order", pricePaise: cartAmountPaise }]);
+
+    const checkoutObj: AbandonedCheckout = {
+      id: checkoutId,
+      customerName: customerName || "Shopper",
+      customerPhone,
+      customerEmail,
+      cartItemsJson,
+      cartAmountPaise: Number(cartAmountPaise),
+      dropOffStep: dropOffStep as any,
+      recoveryToken,
+      status: "ABANDONED",
+      createdAtUtc: nowUtc,
+    };
+
+    await dbClient.execute({
+      sql: `INSERT INTO abandoned_checkouts
+            (id, customer_name, customer_phone, customer_email, cart_items_json,
+             cart_amount_paise, drop_off_step, recovery_token, status, created_at_utc)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [
+        checkoutId,
+        checkoutObj.customerName || null,
+        customerPhone,
+        customerEmail || null,
+        cartItemsJson,
+        checkoutObj.cartAmountPaise,
+        dropOffStep,
+        recoveryToken,
+        "ABANDONED",
+        nowUtc,
+      ],
+    });
+
+    const host = req.get("host") || "localhost:3000";
+    const protocol = req.protocol || "http";
+    const recoveryLink = generateCartRecoveryLink(checkoutObj, `${protocol}://${host}`);
+
+    broadcastSSE("global", {
+      type: "checkout.abandoned",
+      checkoutId,
+      cartAmountPaise: checkoutObj.cartAmountPaise,
+      recoveryLink,
+    });
+
+    res.json({
+      success: true,
+      checkout: checkoutObj,
+      recoveryLink,
+    });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+app.get("/api/checkout/restore/:token", async (req: Request, res: Response) => {
+  try {
+    const { token } = req.params;
+    const result = await dbClient.execute({
+      sql: `SELECT * FROM abandoned_checkouts WHERE recovery_token = ?`,
+      args: [token],
+    });
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Cart restoration token expired or invalid" });
+    }
+
+    const row = result.rows[0];
+    let cartItems = [];
+    try {
+      cartItems = JSON.parse(String(row.cart_items_json || "[]"));
+    } catch {}
+
+    res.json({
+      restored: true,
+      checkoutId: row.id,
+      customerName: row.customer_name,
+      customerPhone: row.customer_phone,
+      cartAmountPaise: row.cart_amount_paise,
+      cartItems,
+      status: row.status,
+    });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 3. B2B Corporate Invoices & Receivables (2/10 Net 30 Terms)
+app.post("/api/invoices/chaser/initiate", async (req: Request, res: Response) => {
+  try {
+    const {
+      vendorId = "acme_corp",
+      clientCompany,
+      contactPerson,
+      contactEmail,
+      contactPhone,
+      amountPaise = 15000000, // ₹1,50,000
+      invoiceNumber,
+      dueDateUtc,
+      daysOverdue = 15,
+      earlyDiscountPercent = 2.0,
+    } = req.body;
+
+    if (!clientCompany || !contactEmail || !invoiceNumber) {
+      return res.status(400).json({ error: "clientCompany, contactEmail, and invoiceNumber are required" });
+    }
+
+    const invoiceId = `inv_${Date.now()}_${randomBytes(4).toString("hex")}`;
+    const nowUtc = isoUtc(Date.now());
+    const virtualVpa = `smartcollect.${vendorId.toLowerCase().replace(/[^a-z0-9]/g, "")}@razorpay`;
+
+    const invoiceObj: B2BInvoice = {
+      id: invoiceId,
+      vendorId,
+      clientCompany,
+      contactPerson: contactPerson || "Accounts Payable",
+      contactEmail,
+      contactPhone,
+      amountPaise: Number(amountPaise),
+      invoiceNumber,
+      dueDateUtc: dueDateUtc || nowUtc,
+      daysOverdue: Number(daysOverdue),
+      earlyDiscountPercent: Number(earlyDiscountPercent),
+      virtualVpa,
+      status: "OVERDUE",
+      createdAtUtc: nowUtc,
+    };
+
+    const chaserPlan = calculateEarlySettlementDiscount(invoiceObj, Date.now());
+
+    await dbClient.execute({
+      sql: `INSERT INTO b2b_invoices
+            (id, vendor_id, client_company, contact_person, contact_email, contact_phone,
+             amount_paise, invoice_number, due_date_utc, days_overdue, early_discount_percent,
+             virtual_vpa, status, created_at_utc)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [
+        invoiceId,
+        vendorId,
+        clientCompany,
+        invoiceObj.contactPerson,
+        contactEmail,
+        contactPhone || null,
+        invoiceObj.amountPaise,
+        invoiceNumber,
+        invoiceObj.dueDateUtc,
+        invoiceObj.daysOverdue,
+        invoiceObj.earlyDiscountPercent,
+        virtualVpa,
+        "OVERDUE",
+        nowUtc,
+      ],
+    });
+
+    broadcastSSE("global", {
+      type: "invoice.chaser_initiated",
+      invoiceId,
+      invoiceNumber,
+      clientCompany,
+      chaserPlan,
+    });
+
+    res.json({
+      success: true,
+      invoice: invoiceObj,
+      chaserPlan,
+    });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+app.get("/api/invoices", async (_req: Request, res: Response) => {
+  try {
+    const rows = await dbClient.execute(`SELECT * FROM b2b_invoices ORDER BY created_at_utc DESC LIMIT 50`);
+    res.json({ invoices: rows.rows });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
 // ── Scheduled Outreach Sweeper ───────────────────────────────────
 async function sweepScheduledOutreach() {
   try {
@@ -1592,6 +2037,61 @@ app.get("/api/recovery/batch-report", async (_req: Request, res: Response) => {
   } catch (err) {
     logger.error({ msg: "[BatchReport] Error", err: (err as Error).message });
     res.status(500).json({ error: "Failed to generate batch report" });
+  }
+});
+
+// ── 4-Way Comparative Baseline Ablation Benchmark (Task 6.3 / BEN-15) ──
+app.get("/api/benchmark/four-way", (req: Request, res: Response) => {
+  try {
+    const size = parseInt(req.query.size as string, 10) || 1000;
+    const seed = parseInt(req.query.seed as string, 16) || 0x5eed;
+    const report = runFourWayAblationBenchmark(size, seed);
+    res.json(report);
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// ── Merchant Recovery Policy Engine (Task 6.7 / POL-08) ─────────────
+app.get("/api/vendor/policies", async (req: Request, res: Response) => {
+  try {
+    const productId = (req.query.productId as string) || "prod_premium_plan";
+    const policy = await getMerchantPolicy(dbClient, productId);
+    res.json({ success: true, policy });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+app.post("/api/vendor/policies", async (req: Request, res: Response) => {
+  try {
+    const {
+      productId,
+      allowSplitRecovery = true,
+      minSplitTicketPaise = 199900,
+      splitInstallments = 3,
+      splitMarkupBps = 0,
+      gracePeriodDays = 3,
+      expiryAction = "SOFT_LOCK_FREE_TIER",
+    } = req.body;
+
+    if (!productId) {
+      return res.status(400).json({ error: "productId is required" });
+    }
+
+    const updated = await upsertMerchantPolicy(dbClient, {
+      productId,
+      allowSplitRecovery: Boolean(allowSplitRecovery),
+      minSplitTicketPaise: Number(minSplitTicketPaise),
+      splitInstallments: Number(splitInstallments),
+      splitMarkupBps: Number(splitMarkupBps),
+      gracePeriodDays: Number(gracePeriodDays),
+      expiryAction,
+    });
+
+    res.json({ success: true, policy: updated });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
   }
 });
 
