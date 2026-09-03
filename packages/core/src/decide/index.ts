@@ -9,3 +9,4 @@ export * from "./diagnostics.js";
 export * from "./ablation_benchmark.js";
 export * from "./merchant_policy.js";
 export * from "./batch_sequencer.js";
+export * from "./bank_circuit_breaker.js";

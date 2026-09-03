@@ -46,6 +46,7 @@ import {
   upsertMerchantPolicy,
   defaultGatewayOptimizer,
   isCascadeEligible,
+  defaultBankCircuitBreaker,
   type MerchantRecoveryPolicy,
   type SubscriptionMandate,
   type AbandonedCheckout,
@@ -2164,6 +2165,31 @@ app.get("/api/optimizer/metrics", (req: Request, res: Response) => {
   try {
     const metrics = defaultGatewayOptimizer.getMetrics();
     res.json({ success: true, metrics });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// ── Bank Switch Health & Inter-Bank Steering Circuit Breaker ────
+app.get("/api/rails/health", (req: Request, res: Response) => {
+  try {
+    const nowMs = req.query.now ? Number(req.query.now) : Date.now();
+    const snapshot = defaultBankCircuitBreaker.getCompositeSnapshot(nowMs);
+    res.json({ success: true, snapshot });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+app.post("/api/banks/circuit-breaker/evaluate", (req: Request, res: Response) => {
+  try {
+    const { identifier = "", preferredMethod = "upi", nowMs } = req.body;
+    const evaluation = defaultBankCircuitBreaker.evaluate(
+      identifier,
+      preferredMethod,
+      nowMs ? Number(nowMs) : Date.now(),
+    );
+    res.json({ success: true, evaluation });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }
