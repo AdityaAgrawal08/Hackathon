@@ -1697,8 +1697,8 @@ app.post("/api/events/:eventId/interaction", async (req: Request, res: Response)
 // 1. SaaS Recurring Subscription Mandates (UPI Autopay, eNACH)
 app.post("/api/mandates/auto-debit-failure", async (req: Request, res: Response) => {
   try {
+    const customerId = req.body.customerId || req.body.mandateId || `cust_${Date.now()}`;
     const {
-      customerId,
       customerName,
       customerPhone,
       customerEmail,
@@ -1708,8 +1708,8 @@ app.post("/api/mandates/auto-debit-failure", async (req: Request, res: Response)
       failureCode = "BAD_REQUEST_PAYMENT_UPI_AUTOPAY_DECLINED",
     } = req.body;
 
-    if (!customerId || !customerPhone) {
-      return res.status(400).json({ error: "customerId and customerPhone are required" });
+    if (!customerPhone) {
+      return res.status(400).json({ error: "customerPhone is required" });
     }
 
     const mandateId = `man_${Date.now()}_${randomBytes(4).toString("hex")}`;
@@ -1927,21 +1927,21 @@ app.get("/api/checkout/restore/:token", async (req: Request, res: Response) => {
 // 3. B2B Corporate Invoices & Receivables (2/10 Net 30 Terms)
 app.post("/api/invoices/chaser/initiate", async (req: Request, res: Response) => {
   try {
+    const clientCompany = req.body.clientCompany || req.body.buyerName;
+    const contactEmail = req.body.contactEmail;
+    const invoiceNumber = req.body.invoiceNumber || `INV-${Date.now().toString(36).toUpperCase()}`;
+    const amountPaise = req.body.amountPaise || req.body.invoiceAmountPaise || 15000000;
     const {
       vendorId = "acme_corp",
-      clientCompany,
       contactPerson,
-      contactEmail,
       contactPhone,
-      amountPaise = 15000000, // ₹1,50,000
-      invoiceNumber,
       dueDateUtc,
       daysOverdue = 15,
       earlyDiscountPercent = 2.0,
     } = req.body;
 
-    if (!clientCompany || !contactEmail || !invoiceNumber) {
-      return res.status(400).json({ error: "clientCompany, contactEmail, and invoiceNumber are required" });
+    if (!clientCompany || !contactEmail) {
+      return res.status(400).json({ error: "clientCompany and contactEmail are required" });
     }
 
     const invoiceId = `inv_${Date.now()}_${randomBytes(4).toString("hex")}`;
