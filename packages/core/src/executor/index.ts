@@ -20,6 +20,7 @@ import { getProvider } from "./providers/index.js";
 export * from "./payment_intent.js";
 export * from "./payment_state_machine.js";
 export * from "./reconciliation.js";
+export * from "./gateway_optimizer.js";
 
 /* ── types ─────────────────────────────────────────────────────── */
 

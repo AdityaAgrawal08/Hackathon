@@ -44,6 +44,8 @@ import {
   runFourWayAblationBenchmark,
   getMerchantPolicy,
   upsertMerchantPolicy,
+  defaultGatewayOptimizer,
+  isCascadeEligible,
   type MerchantRecoveryPolicy,
   type SubscriptionMandate,
   type AbandonedCheckout,
@@ -606,6 +608,42 @@ app.post("/api/payments/failed", paymentLimiter, async (req: Request, res: Respo
     // Use the REAL error code from Razorpay — never overwrite with demo codes
     const failureCode = error_code || "UNKNOWN";
     const paymentId = razorpay_payment_id || `pay_client_${Date.now()}`;
+
+    // ── Tier 0: In-Flight Gateway Optimizer Cascade ──────────────────
+    const optimizerRequested = req.query.optimizer === "true" || req.body.use_optimizer === true;
+    if (optimizerRequested && isCascadeEligible(failureCode)) {
+      const cascadeResult = defaultGatewayOptimizer.executeCascade({
+        orderId: razorpay_order_id,
+        amountPaise: validatedAmount,
+        initialErrorCode: failureCode,
+        idempotencyKey: `idem_cascade_${razorpay_order_id}`,
+      });
+
+      if (cascadeResult.recoveredInFlight) {
+        await appendAuditLedger(dbClient, {
+          eventType: "IN_FLIGHT_CASCADE_RECOVERED",
+          entityId: razorpay_order_id,
+          actor: "RAZORPAY_OPTIMIZER",
+          payload: cascadeResult as any,
+        });
+
+        logger.info({
+          msg: `[Optimizer] Payment ${razorpay_order_id} recovered in-flight via ${cascadeResult.winningGateway}`,
+          latencyMs: cascadeResult.totalLatencyMs,
+          cogsSavedPaise: cascadeResult.cogsSavedPaise,
+        });
+
+        return res.json({
+          success: true,
+          inFlightRecovered: true,
+          status: "CAPTURED",
+          winningGateway: cascadeResult.winningGateway,
+          latencyMs: cascadeResult.totalLatencyMs,
+          cogsSavedPaise: cascadeResult.cogsSavedPaise,
+          reason: cascadeResult.reason,
+        });
+      }
+    }
 
     // Deduplication: check if this payment_id already has an event
     const existingEvent = await dbClient.execute({
@@ -2090,6 +2128,42 @@ app.post("/api/vendor/policies", async (req: Request, res: Response) => {
     });
 
     res.json({ success: true, policy: updated });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// ── Razorpay Optimizer Tier-0 In-Flight Gateway Cascade ──────────
+app.post("/api/optimizer/route", async (req: Request, res: Response) => {
+  try {
+    const {
+      orderId = `order_${Date.now()}`,
+      amountPaise = 499900,
+      errorCode = "GATEWAY_TIMEOUT",
+      idempotencyKey = `idem_opt_${Date.now()}`,
+      cascadeSequence,
+      mockGatewayOutcomes,
+    } = req.body;
+
+    const result = defaultGatewayOptimizer.executeCascade({
+      orderId,
+      amountPaise: Number(amountPaise),
+      initialErrorCode: errorCode,
+      idempotencyKey,
+      cascadeSequence,
+      mockGatewayOutcomes,
+    });
+
+    res.json({ success: true, result });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+app.get("/api/optimizer/metrics", (req: Request, res: Response) => {
+  try {
+    const metrics = defaultGatewayOptimizer.getMetrics();
+    res.json({ success: true, metrics });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }
