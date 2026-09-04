@@ -249,12 +249,11 @@
 
   <div class="tab-nav">
     <button class="tab-btn active" id="tab-transactions" onclick="switchTab('transactions')">🛒 Live Operations & Recovery Feed</button>
-    <!-- Hidden compatibility elements for test suite assertions -->
-    <button class="tab-btn" id="tab-behavioral-memory" style="display:none !important;" onclick="switchTab('behavioral-memory')">🧠 Behavioral Memory & Priority Queue</button>
-    <button class="tab-btn" id="tab-bank-matrix" style="display:none !important;" onclick="switchTab('bank-matrix')">🌐 Optimizer & Bank Matrix</button>
-    <button class="tab-btn" id="tab-recovery-report" style="display:none !important;" onclick="switchTab('recovery-report')">📊 Recovery Analytics & Benchmark</button>
-    <button class="tab-btn" id="tab-mandates" style="display:none !important;" onclick="switchTab('mandates')">⚡ SaaS Mandates</button>
-    <button class="tab-btn" id="tab-invoices" style="display:none !important;" onclick="switchTab('invoices')">🏢 B2B Receivables</button>
+    <button class="tab-btn" id="tab-behavioral-memory" onclick="switchTab('behavioral-memory')">🧠 Behavioral Memory & Priority Queue</button>
+    <button class="tab-btn" id="tab-mandates" onclick="switchTab('mandates')">⚡ SaaS Mandates</button>
+    <button class="tab-btn" id="tab-invoices" onclick="switchTab('invoices')">🏢 B2B Receivables</button>
+    <button class="tab-btn" id="tab-bank-matrix" onclick="switchTab('bank-matrix')">🌐 Optimizer & Bank Matrix</button>
+    <button class="tab-btn" id="tab-recovery-report" onclick="switchTab('recovery-report')">📊 Recovery Analytics & Benchmark</button>
   </div>
 
   <div class="container">
@@ -495,8 +494,8 @@
       </div>
     </div><!-- /panel-behavioral-memory -->
 
-    <!-- SaaS Recurring Mandates Cockpit (Hidden for Track 03 Streamlining) -->
-    <div class="tab-panel" id="panel-mandates" style="display:none !important;">
+    <!-- SaaS Recurring Mandates Cockpit -->
+    <div class="tab-panel" id="panel-mandates">
       <div class="hero-banner" style="border-left: 4px solid #818cf8;">
         <div class="hero-left">
           <h2>SaaS Recurring Mandates & UPI Autopay Cockpit (Track 3)</h2>
@@ -550,8 +549,8 @@
       </div>
     </div>
 
-    <!-- B2B Receivables Ledger & Aging Schedule (Hidden for Track 03 Streamlining) -->
-    <div class="tab-panel" id="panel-invoices" style="display:none !important;" data-terms="2/10 Net 30">
+    <!-- B2B Receivables Ledger & Aging Schedule -->
+    <div class="tab-panel" id="panel-invoices" data-terms="2/10 Net 30">
       <div class="hero-banner" style="border-left: 4px solid #34d399;">
         <div class="hero-left">
           <h2>B2B Invoices & Dynamic Working Capital Ledger (Track 3)</h2>
@@ -607,7 +606,7 @@
       <div class="table-card">
         <div class="table-card-header">
           <div class="table-title">Corporate Accounts Receivable Ledger</div>
-          <div style="font-size:12px;color:#64748b;">Tracked at annual cost of debt</div>
+          <div style="font-size:12px;color:#64748b;">Tracked at annual cost of debt • Razorpay Smart Collect Virtual VPAs</div>
         </div>
         <table class="data-table">
           <thead>
