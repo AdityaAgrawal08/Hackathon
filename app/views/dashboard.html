@@ -209,7 +209,7 @@
     .circuit-badge.closed { background: #052e16; color: #86efac; border: 1px solid #14532d; }
     .circuit-badge.half { background: #451a03; color: #fde68a; border: 1px solid #78350f; }
     .circuit-badge.open { background: #450a0a; color: #fca5a5; border: 1px solid #7f1d1d; }
-    .sim-bar { background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 14px 18px; margin-bottom: 20px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .sim-bar { background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 14px 18px; margin-bottom: 20px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
     .sim-input { background: #0f172a; border: 1px solid #334155; color: #f8fafc; border-radius: 6px; padding: 8px 12px; font-size: 13px; min-width: 260px; }
     .rails-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; }
     .rails-table th { text-align: left; padding: 10px 14px; background: #0f172a; color: #94a3b8; font-size: 11px; text-transform: uppercase; border-bottom: 1px solid #334155; }
@@ -223,6 +223,7 @@
       .hero-banner { flex-direction: column; align-items: flex-start; gap: 16px; }
       .hero-stats { width: 100%; justify-content: space-between; }
       .aging-grid, .bank-cards-grid { grid-template-columns: 1fr; }
+      .sim-bar { flex-direction: column; align-items: flex-start; }
     }
   </style>
 </head>
@@ -322,6 +323,7 @@
           <button class="analysis-btn" style="background: #2563eb; font-size: 12px;" onclick="switchTab('behavioral-memory')">📊 View Behavioral Memory & Priority Queue</button>
           <button class="analysis-btn" style="background: #16a34a; font-size: 12px;" onclick="simulateBehavioralInteraction('EMAIL', 'OPENED')">✉️ Simulate Fast Email Open</button>
           <button class="analysis-btn" style="background: #0891b2; font-size: 12px;" onclick="simulateBehavioralInteraction('SMS', 'CLICKED')">💬 Simulate SMS 1-Tap UPI Click</button>
+        </div>
       </div>
 
       <!-- Meta WhatsApp 2-Way Quick-Reply Simulator (Legacy Compatibility Proof / WHA-20) -->
