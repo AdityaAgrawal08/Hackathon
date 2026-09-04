@@ -604,6 +604,8 @@ export const livePaymentEvents = sqliteTable(
     index("idx_liveevt_created").on(t.createdAtUtc),
     index("idx_liveevt_vendor_notified").on(t.vendorNotified),
     index("idx_liveevt_bandit_action").on(t.banditAction),
+    index("idx_lpe_cust_created").on(t.customerProfileId, t.createdAtUtc),
+    index("idx_lpe_alerts").on(t.vendorNotified, t.vendorDecision, t.createdAtUtc),
   ],
 );
 
@@ -656,4 +658,28 @@ export const banditState = sqliteTable(
     index("idx_bandit_state_arm").on(t.armType, t.action),
   ],
 );
+
+/* ── vendor metrics summary (O(1) real-time analytics rollup) ─────── */
+/**
+ * Atomic rollup table tracking aggregate payment counts, recovered revenue,
+ * and method breakdown in integer paise. Eliminates full table scans on analytics endpoints.
+ */
+export const vendorMetricsSummary = sqliteTable(
+  "vendor_metrics_summary",
+  {
+    id: text("id").primaryKey(), // e.g. "global"
+    totalEvents: integer("total_events").notNull().default(0),
+    totalSuccesses: integer("total_successes").notNull().default(0),
+    totalFailures: integer("total_failures").notNull().default(0),
+    recoveredPaise: integer("recovered_paise").notNull().default(0),
+    atRiskPaise: integer("at_risk_paise").notNull().default(0),
+    methodCard: integer("method_card").notNull().default(0),
+    methodUpi: integer("method_upi").notNull().default(0),
+    methodNetbanking: integer("method_netbanking").notNull().default(0),
+    methodWallet: integer("method_wallet").notNull().default(0),
+    methodOther: integer("method_other").notNull().default(0),
+    updatedAtUtc: text("updated_at_utc").notNull(),
+  },
+);
+
 

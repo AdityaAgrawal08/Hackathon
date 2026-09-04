@@ -69,6 +69,10 @@ import {
   brevoEmailLimiter,
   msg91SmsLimiter,
   groqLlmLimiter,
+  applyDbPragmas,
+  getVendorMetricsSummary,
+  recordMetricsDelta,
+  getMethodDelta,
 } from "../packages/core/src/index.js";
 
 import {
@@ -143,6 +147,9 @@ const dbUrl = (dbPath === ":memory:" || dbPath === "file::memory:?cache=shared")
     ? dbPath
     : `file:${resolve(dbPath)}`);
 export const dbClient: Client = createClient({ url: dbUrl, authToken: process.env.ARBITER_DB_TOKEN });
+applyDbPragmas(dbClient).catch((err) => {
+  logger.debug({ msg: "[Database] Initial pragma execution deferred or non-fatal", err });
+});
 
 const outreachRouter = new OutreachRouter();
 const brevoProvider = new BrevoEmailProvider();
@@ -1373,9 +1380,50 @@ async function processWebhookJob(job: WebhookJob): Promise<void> {
 
 defaultWebhookQueue.setHandler(processWebhookJob);
 
-// ── Vendor Dashboard API ─────────────────────────────────────────
-app.get("/api/vendor/payments", adminLimiter, async (_req: Request, res: Response) => {
+function decodePaymentsCursor(cursor: string): { createdAtUtc: string; id: string } | null {
   try {
+    let raw = cursor;
+    if (!raw.includes("::")) {
+      try {
+        raw = Buffer.from(cursor, "base64").toString("utf8");
+      } catch {
+        raw = cursor;
+      }
+    }
+    const parts = raw.split("::");
+    if (parts.length >= 2 && parts[0] && parts[1]) {
+      return { createdAtUtc: parts[0], id: parts[1] };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function encodePaymentsCursor(createdAtUtc: string, id: string): string {
+  return Buffer.from(`${createdAtUtc}::${id}`).toString("base64");
+}
+
+app.get("/api/vendor/payments", adminLimiter, async (req: Request, res: Response) => {
+  try {
+    const rawLimit = parseInt(String(req.query.limit || "50"), 10);
+    const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 200) : 50;
+    const cursor = typeof req.query.cursor === "string" ? req.query.cursor.trim() : null;
+    const envelope = req.query.envelope === "true";
+
+    const decodedCursor = cursor ? decodePaymentsCursor(cursor) : null;
+
+    let cursorFilter = "";
+    const queryArgs: any[] = [];
+
+    if (decodedCursor) {
+      cursorFilter = "AND (lpc.created_at_utc < ? OR (lpc.created_at_utc = ? AND lpc.id < ?))";
+      queryArgs.push(decodedCursor.createdAtUtc, decodedCursor.createdAtUtc, decodedCursor.id);
+    }
+
+    const fetchLimit = limit + 1;
+    queryArgs.push(fetchLimit);
+
     // Customer-centric: show LATEST transaction per customer, not every transaction.
     // A customer who succeeded after retries appears in success list, not failed.
     const result = await dbClient.execute({
@@ -1411,11 +1459,36 @@ app.get("/api/vendor/payments", adminLimiter, async (_req: Request, res: Respons
               GROUP BY live_payment_event_id
               ORDER BY executed_at_utc DESC
             ) so_last ON so_last.live_payment_event_id = lpc.id
-            WHERE lpc.rn = 1
-            ORDER BY lpc.created_at_utc DESC LIMIT 50`,
-      args: [],
+            WHERE lpc.rn = 1 ${cursorFilter}
+            ORDER BY lpc.created_at_utc DESC, lpc.id DESC LIMIT ?`,
+      args: queryArgs,
     });
-    res.json(result.rows);
+
+    const rows = result.rows;
+    const hasMore = rows.length > limit;
+    const pageRows = hasMore ? rows.slice(0, limit) : rows;
+    let nextCursor: string | null = null;
+    if (hasMore && pageRows.length > 0) {
+      const last = pageRows[pageRows.length - 1] as any;
+      nextCursor = encodePaymentsCursor(String(last.created_at_utc), String(last.id));
+    }
+
+    res.setHeader("x-has-more", hasMore ? "true" : "false");
+    res.setHeader("x-limit", String(limit));
+    if (nextCursor) {
+      res.setHeader("x-next-cursor", nextCursor);
+    }
+
+    if (envelope) {
+      return res.json({
+        items: pageRows,
+        nextCursor,
+        hasMore,
+        limit,
+      });
+    }
+
+    return res.json(pageRows);
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }
@@ -1439,39 +1512,8 @@ app.get("/api/vendor/alerts", adminLimiter, async (_req: Request, res: Response)
 
 app.get("/api/vendor/analytics", adminLimiter, async (_req: Request, res: Response) => {
   try {
-    const stats = await dbClient.execute({
-      sql: `SELECT
-              COUNT(*) as total_events,
-              SUM(CASE WHEN status = 'captured' THEN 1 ELSE 0 END) as total_successes,
-              SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as total_failures,
-              SUM(CASE WHEN status = 'captured' THEN amount_paise ELSE 0 END) as recovered_paise,
-              SUM(CASE WHEN status = 'failed' THEN amount_paise ELSE 0 END) as at_risk_paise,
-              SUM(CASE WHEN payment_method = 'card' THEN 1 ELSE 0 END) as method_card,
-              SUM(CASE WHEN payment_method = 'upi' THEN 1 ELSE 0 END) as method_upi,
-              SUM(CASE WHEN payment_method = 'netbanking' THEN 1 ELSE 0 END) as method_netbanking,
-              SUM(CASE WHEN payment_method = 'wallet' THEN 1 ELSE 0 END) as method_wallet,
-              SUM(CASE WHEN payment_method IS NULL OR payment_method = '' THEN 1 ELSE 0 END) as method_other
-            FROM live_payment_events`,
-      args: [],
-    });
-    const row = stats.rows[0] as any;
-    const total = Number(row?.total_events || 0);
-    const successes = Number(row?.total_successes || 0);
-    res.json({
-      totalEvents: total,
-      totalSuccesses: successes,
-      totalFailures: Number(row?.total_failures || 0),
-      recoveredPaise: Number(row?.recovered_paise || 0),
-      atRiskPaise: Number(row?.at_risk_paise || 0),
-      methodCard: Number(row?.method_card || 0),
-      methodUpi: Number(row?.method_upi || 0),
-      methodNetbanking: Number(row?.method_netbanking || 0),
-      methodWallet: Number(row?.method_wallet || 0),
-      methodOther: Number(row?.method_other || 0),
-      successRate: total > 0
-        ? ((successes / total) * 100).toFixed(1) + "%"
-        : "0.0%",
-    });
+    const summary = await getVendorMetricsSummary(dbClient);
+    res.json(summary);
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }
@@ -3182,6 +3224,7 @@ app.post("/api/whatsapp/simulate-interaction", async (req: Request, res: Respons
 
 // ── Startup ──────────────────────────────────────────────────────
 export async function startServer() {
+  await applyDbPragmas(dbClient);
   await runMigrations(dbClient);
   try {
     const loadedCount = await defaultEnterpriseBandit.loadFromDb(dbClient, "enterprise");

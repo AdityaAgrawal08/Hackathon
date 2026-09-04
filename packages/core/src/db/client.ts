@@ -21,8 +21,7 @@ export async function openDb(dbPath?: string): Promise<{ client: Client; db: Db 
 
   if (raw === ":memory:" || raw === "file::memory:?cache=shared") {
     const client = createClient({ url: ":memory:" });
-    await client.executeMultiple(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=${SQLITE_BUSY_TIMEOUT_MS};`);
-    await client.executeMultiple("PRAGMA foreign_keys=ON;");
+    await applyDbPragmas(client);
     const db = drizzle(client, { schema });
     return { client, db };
   }
@@ -34,11 +33,29 @@ export async function openDb(dbPath?: string): Promise<{ client: Client; db: Db 
 
   const url = path.startsWith("file:") ? path : `file:${path}`;
   const client = createClient({ url });
-  await client.executeMultiple(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=${SQLITE_BUSY_TIMEOUT_MS};`);
-  await client.executeMultiple("PRAGMA foreign_keys=ON;");
+  await applyDbPragmas(client);
 
   const db = drizzle(client, { schema });
   return { client, db };
 }
+
+export async function applyDbPragmas(client: Client): Promise<void> {
+  const isRemote = (process.env.ARBITER_DB_PATH || "").startsWith("libsql:") ||
+                   (process.env.ARBITER_DB_PATH || "").startsWith("http:") ||
+                   (process.env.ARBITER_DB_PATH || "").startsWith("https:");
+  if (!isRemote) {
+    try {
+      await client.executeMultiple(`
+        PRAGMA journal_mode = WAL;
+        PRAGMA busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS};
+        PRAGMA synchronous = NORMAL;
+        PRAGMA foreign_keys = ON;
+      `);
+    } catch {
+      // Gracefully ignore if pragmas not supported
+    }
+  }
+}
+
 
 export { schema };

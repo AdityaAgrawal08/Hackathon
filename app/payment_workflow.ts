@@ -19,6 +19,8 @@ import {
   defaultEnterpriseBandit,
   type EnterpriseBanditAction,
   type ArmSelectionResult,
+  recordMetricsDelta,
+  getMethodDelta,
 } from "../packages/core/src/index.js";
 import { OutreachRouter, type OutreachChannel, type OutreachPayload, type ProviderDispatchResult } from "../packages/core/src/messaging/index.js";
 import { getErrorEntry, getCustomerMessage, getVendorMessage, getFailureClass as getCatalogFailureClass } from "../packages/core/src/error-catalog.js";
@@ -515,6 +517,14 @@ export async function processFailedPayment(
     }
   }
 
+  // Update vendor metrics summary atomically
+  await recordMetricsDelta(client, {
+    totalEvents: 1,
+    totalFailures: 1,
+    atRiskPaise: input.amountPaise,
+    ...getMethodDelta(input.paymentMethod),
+  });
+
   // 8. Update customer profile
   await client.execute({
     sql: `UPDATE customer_profiles SET
@@ -935,6 +945,14 @@ export async function recordSuccessfulPayment(
     });
     logger.info({ msg: `Recovery: moved event ${existingId} from failed → captured for order ${params.razorpayOrderId}`, eventId: existingId, orderId: params.razorpayOrderId });
 
+    // Update vendor metrics summary atomically (moved from failure to captured)
+    await recordMetricsDelta(client, {
+      totalFailures: -1,
+      totalSuccesses: 1,
+      atRiskPaise: -params.amountPaise,
+      recoveredPaise: params.amountPaise,
+    });
+
     // Update customer profile
     await client.execute({
       sql: `UPDATE customer_profiles SET
@@ -1018,6 +1036,14 @@ export async function recordSuccessfulPayment(
     ],
   });
 
+  // Update vendor metrics summary atomically
+  await recordMetricsDelta(client, {
+    totalEvents: 1,
+    totalSuccesses: 1,
+    recoveredPaise: params.amountPaise,
+    ...getMethodDelta(params.paymentMethod),
+  });
+
   await client.execute({
     sql: `UPDATE customer_profiles SET
       total_attempts = total_attempts + 1,
@@ -1095,13 +1121,22 @@ export async function onPaymentRecovered(
   if (targetEventId) {
     try {
       const banditRow = await client.execute({
-        sql: `SELECT bandit_action, bandit_context_json, status FROM live_payment_events WHERE id = ?`,
+        sql: `SELECT bandit_action, bandit_context_json, status, amount_paise FROM live_payment_events WHERE id = ?`,
         args: [targetEventId],
       });
       if (banditRow.rows.length > 0) {
         const bAction = banditRow.rows[0].bandit_action ? String(banditRow.rows[0].bandit_action) : null;
         const bContextJson = banditRow.rows[0].bandit_context_json ? String(banditRow.rows[0].bandit_context_json) : null;
         const prevStatus = String(banditRow.rows[0].status);
+        if (prevStatus !== "captured") {
+          const recAmount = Number(banditRow.rows[0].amount_paise || 0);
+          await recordMetricsDelta(client, {
+            totalFailures: -1,
+            totalSuccesses: 1,
+            atRiskPaise: -recAmount,
+            recoveredPaise: recAmount,
+          });
+        }
         if (bAction && bContextJson && prevStatus !== "captured") {
           const context = JSON.parse(bContextJson) as number[];
           if (Array.isArray(context)) {
