@@ -512,7 +512,7 @@
         </button>
       </div>
       <div class="domain-desc" id="domain-desc">
-        Simulates consumer checkout drop-offs, abandoned carts, and 1-tap WhatsApp UPI intent recovery.
+        Simulates consumer checkout drop-offs, abandoned carts, and 1-tap UPI intent recovery via Brevo Email and MSG91 SMS.
       </div>
     </div>
   </div>
@@ -543,7 +543,7 @@
           </div>
 
           <div class="form-row">
-            <label for="cust-phone">Mobile Phone (WhatsApp Notifications)</label>
+            <label for="cust-phone">Mobile Phone (MSG91 SMS Notifications)</label>
             <div class="phone-input-wrap">
               <span class="phone-prefix">+91</span>
               <input type="tel" id="cust-phone" value="9876543210" maxlength="10" pattern="[0-9]{10}" required>
@@ -638,7 +638,7 @@
     const DOMAIN_DATA = {
       d2c: {
         title: "Select a Plan (D2C Consumer Checkout)",
-        sub: "Simulates consumer checkout drop-offs, abandoned carts, and 1-tap WhatsApp UPI intent recovery.",
+        sub: "Simulates consumer checkout drop-offs, abandoned carts, and 1-tap UPI intent recovery via Brevo Email and MSG91 SMS.",
         badge: "Simulates consumer checkout drop-offs, abandoned carts & 1-tap recovery",
         products: [
           {
@@ -649,7 +649,7 @@
             icon: "💎",
             tag: "Best Value",
             badgeClass: "badge-blue",
-            features: ["Instant 1-Tap UPI Recovery", "0% Interest 3x Split EMI", "WhatsApp Notification Dispatch", "Zero Involuntary Drop-off"]
+            features: ["Instant 1-Tap UPI Recovery", "0% Interest 3x Split EMI", "Brevo Email + MSG91 SMS Dispatch", "Zero Involuntary Drop-off"]
           },
           {
             id: "prod_monthly_basic",
@@ -685,7 +685,7 @@
       },
       saas: {
         title: "Select a Subscription (SaaS Mandate Auto-Debit)",
-        sub: "Simulates UPI Autopay / eNACH recurring debits with 06:30 AM IST salary retries and strict RBI 24h pre-debit notice.",
+        sub: "Simulates UPI Autopay / eNACH recurring debits with 06:30 AM IST liquidity retries and strict RBI 24h pre-debit notice.",
         badge: "Simulates UPI Autopay / eNACH recurring debits with strict RBI 24h pre-debit notice",
         products: [
           {
@@ -696,7 +696,7 @@
             icon: "⚡",
             tag: "UPI Autopay",
             badgeClass: "badge-blue",
-            features: ["06:30 AM Salary Morning Scheduler", "RBI 24-Hour Advance Notice SMS", "Zero Involuntary ARR Churn"]
+            features: ["06:30 AM Morning Liquidity Scheduler", "RBI 24-Hour Advance Notice SMS", "Zero Involuntary ARR Churn"]
           },
           {
             id: "mandate_saas_annual",
@@ -733,7 +733,7 @@
             icon: "📜",
             tag: "2/10 Net 30",
             badgeClass: "badge-blue",
-            features: ["₹3,000 Early Settlement Discount", "DSO Reduced from 42d to 22d", "Automated WhatsApp AP Chaser"]
+            features: ["₹3,000 Early Settlement Discount", "DSO Reduced from 42d to 22d", "Automated SMS/Email AP Chaser"]
           },
           {
             id: "inv_infra_sla",
@@ -748,7 +748,7 @@
           {
             id: "inv_api_usage",
             name: "Monthly API Volume Invoicing",
-            description: "Corporate receivable with automated WhatsApp/Email finance chaser.",
+            description: "Corporate receivable with automated SMS/Email finance chaser.",
             pricePaise: 8500000,
             icon: "📈",
             tag: "Usage Billing",
