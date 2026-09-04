@@ -78,6 +78,7 @@ import {
   OutreachRouter,
   MSG91SmsProvider,
   BrevoEmailProvider,
+  BrevoSmsProvider,
 } from "../packages/core/src/messaging/index.js";
 import {
   PRODUCTS,
@@ -131,8 +132,10 @@ export const dbClient: Client = createClient({ url: dbUrl, authToken: process.en
 const outreachRouter = new OutreachRouter();
 const brevoProvider = new BrevoEmailProvider();
 const msg91Provider = new MSG91SmsProvider();
+const brevoSmsProvider = new BrevoSmsProvider();
 outreachRouter.registerProvider(brevoProvider);
 outreachRouter.registerProvider(msg91Provider);
+outreachRouter.registerProvider(brevoSmsProvider); // Multi-rail SMS fallback
 
 // Log provider status at startup
 const brevoKey = process.env.BREVO_API_KEY;

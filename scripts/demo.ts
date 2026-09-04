@@ -89,7 +89,7 @@ async function main(): Promise<void> {
   banner("Step 4/7: Rules-only baseline (same 100 events)  " + label());
   console.log("  7 deterministic rules (no ML, no EV):");
   console.log("    HARD_METHOD_DEAD → ALTERNATE_UPI_LINK");
-  console.log("    SOFT_RETRYABLE + near_payday → RETRY_NOW | else → RETRY_PAYDAY");
+  console.log("    SOFT_RETRYABLE → RETRY_LATER or ALTERNATE_UPI_LINK (switch account)");
   console.log("    NETWORK_TIMEOUT → RETRY_NOW · RISK_FLAGGED → HUMAN_REVIEW");
   console.log("\n  Rules baseline:  control (naive retry) vs 7-rule engine — both measured on");
   console.log("  the same MockRazorpayProvider outcomes. Full ablation via:");
