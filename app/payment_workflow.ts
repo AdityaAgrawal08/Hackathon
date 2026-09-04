@@ -747,9 +747,10 @@ export async function recordSuccessfulPayment(
       sql: `UPDATE customer_profiles SET
         total_attempts = total_attempts + 1,
         total_successes = total_successes + 1,
-        total_amount_paise = total_amount_paise + ?
+        total_amount_paise = total_amount_paise + ?,
+        total_recovered_paise = total_recovered_paise + ?
         WHERE id = ?`,
-      args: [params.amountPaise, params.customerProfileId],
+      args: [params.amountPaise, params.amountPaise, params.customerProfileId],
     });
 
     // Cancel pending outreach for this event (mark CANCELLED with audit reason)

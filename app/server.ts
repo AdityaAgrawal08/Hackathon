@@ -54,17 +54,17 @@ import {
   type AbandonedCheckout,
   type B2BInvoice,
   type CustomerInteractionEvent,
+} from "../packages/core/src/index.js";
+
+import {
+  fetchBehavioralProfile,
+  fetchMerchantDomainConfig,
   computeCustomerPriority,
-  getLowBalanceGuidance,
   recordEmailOpened,
   recordLinkClicked,
   recordDeliveryStatus,
-  recordRecoveryCompleted,
-  fetchBehavioralProfile,
-  fetchMerchantDomainConfig,
-  type CustomerBehavioralProfile,
-  type MerchantDomainConfig,
-} from "../packages/core/src/index.js";
+  getLowBalanceGuidance,
+} from "../packages/core/src/agent/behavioral_profiler.js";
 
 import {
   simulateFailureTriage,
@@ -1328,7 +1328,7 @@ app.post("/api/telemetry/customer-event", async (req: Request, res: Response) =>
       return res.status(400).json({ error: "Invalid request body" });
     }
 
-    const { profileId, event, latencyMins, channel = "EMAIL" } = req.body;
+    const { profileId, event, latencyMins, channel = "EMAIL", amountPaise, domainType } = req.body;
     if (!profileId || !event) {
       return res.status(400).json({ error: "profileId and event required" });
     }
@@ -1347,7 +1347,11 @@ app.post("/api/telemetry/customer-event", async (req: Request, res: Response) =>
     const profile = await fetchBehavioralProfile(profileId, dbClient);
     if (!profile) return res.status(404).json({ error: "Customer profile not found" });
 
-    const priority = computeCustomerPriority(profile, 199900, "D2C_ECOMMERCE");
+    const priority = computeCustomerPriority(
+      profile,
+      typeof amountPaise === "number" && !isNaN(amountPaise) ? amountPaise : 199900,
+      domainType || "D2C_ECOMMERCE"
+    );
     broadcastSSE("global", { type: "CUSTOMER_TELEMETRY_UPDATED", profileId, priorityTier: priority.priorityTier });
     res.json({ success: true, profile, priority });
   } catch (err) {
@@ -1546,6 +1550,21 @@ app.post("/api/webhooks/brevo/events", webhookLimiter, async (req: Request, res:
       event: event.event,
       email: event.email,
     });
+
+    if (event.email) {
+      const custRes = await dbClient.execute({
+        sql: `SELECT id FROM customer_profiles WHERE email = ? LIMIT 1`,
+        args: [event.email],
+      });
+      if (custRes.rows.length > 0) {
+        const profileId = String(custRes.rows[0].id);
+        if (event.event === "opened" || event.event === "unique_opened") {
+          await recordEmailOpened(profileId, 2.0, dbClient);
+        } else if (event.event === "click" || event.event === "clicked") {
+          await recordLinkClicked(profileId, "EMAIL", dbClient);
+        }
+      }
+    }
     res.json({ status: "ok", received: true });
   } catch {
     res.json({ status: "ok", received: true });
@@ -1561,6 +1580,23 @@ app.post("/api/webhooks/msg91/dlr", webhookLimiter, async (req: Request, res: Re
       status: event.status,
       mobile: event.mobile,
     });
+
+    if (event.mobile) {
+      const rawMobile = String(event.mobile).replace(/\D/g, "");
+      const custRes = await dbClient.execute({
+        sql: `SELECT id FROM customer_profiles WHERE phone LIKE ? LIMIT 1`,
+        args: [`%${rawMobile.slice(-10)}%`],
+      });
+      if (custRes.rows.length > 0) {
+        const profileId = String(custRes.rows[0].id);
+        const status = String(event.status).toUpperCase();
+        if (status.includes("DELIV")) {
+          await recordDeliveryStatus(profileId, "SMS", "DELIVERED", dbClient);
+        } else if (status.includes("FAIL") || status.includes("REJECT") || status.includes("DND")) {
+          await recordDeliveryStatus(profileId, "SMS", "FAILED", dbClient);
+        }
+      }
+    }
     res.json({ status: "ok", received: true });
   } catch {
     res.json({ status: "ok", received: true });
