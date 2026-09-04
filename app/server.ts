@@ -59,6 +59,11 @@ import {
   buildB2BEarlySettlementStrategy,
   buildHighTicketSplitPayStrategy,
   sequenceIntelligentRecoveryBatch,
+  LinUCBBandit,
+  defaultEnterpriseBandit,
+  defaultRecoveryBandit,
+  ENTERPRISE_BANDIT_ACTIONS,
+  BANDIT_ACTIONS,
 } from "../packages/core/src/index.js";
 
 import {
@@ -1561,6 +1566,175 @@ app.post("/api/decide/batch-sequence", (req: Request, res: Response) => {
     res.json({ success: true, result });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// ── LinUCB Contextual Bandit Endpoints ───────────────────────────
+app.post("/api/bandit/select-arm", (req: Request, res: Response) => {
+  try {
+    const {
+      amountPaise,
+      ticketAmountPaise,
+      dwellTimeSeconds = 0,
+      openLatencyMins = 30,
+      priorFailureCount = 0,
+      channelResponsiveness = 0.5,
+      armType = "enterprise",
+      context: rawContext,
+    } = req.body || {};
+
+    const ticket = Number(amountPaise ?? ticketAmountPaise);
+    if (!rawContext && (!ticket || ticket <= 0)) {
+      return res.status(400).json({ error: "Valid amountPaise or ticketAmountPaise is required when context is not directly provided" });
+    }
+
+    if (armType === "legacy") {
+      let context: [number, number, number, number];
+      if (Array.isArray(rawContext) && rawContext.length === 4) {
+        context = rawContext as [number, number, number, number];
+      } else {
+        context = LinUCBBandit.buildContext(
+          ticket,
+          Number(priorFailureCount),
+          Number(dwellTimeSeconds),
+          Number(channelResponsiveness)
+        );
+      }
+      const selection = defaultRecoveryBandit.selectArm(context);
+      return res.json({
+        success: true,
+        armType: "legacy",
+        dimension: 4,
+        selection,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    // Enterprise 5-arm bandit (default)
+    let context: [number, number, number, number, number];
+    if (Array.isArray(rawContext) && rawContext.length === 5) {
+      context = rawContext as [number, number, number, number, number];
+    } else {
+      context = LinUCBBandit.buildEnterpriseContext(
+        ticket,
+        Number(dwellTimeSeconds),
+        Number(openLatencyMins),
+        Number(priorFailureCount),
+        Number(channelResponsiveness)
+      );
+    }
+
+    const selection = defaultEnterpriseBandit.selectArm(context);
+    return res.json({
+      success: true,
+      armType: "enterprise",
+      dimension: 5,
+      selection,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    logger.error({ msg: "[Bandit] select-arm error", err: (err as Error).message });
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+app.post("/api/bandit/feedback", (req: Request, res: Response) => {
+  try {
+    const {
+      action,
+      reward,
+      context,
+      armType = "enterprise",
+    } = req.body || {};
+
+    if (!action || typeof action !== "string") {
+      return res.status(400).json({ error: "Valid action string is required" });
+    }
+    if (typeof reward !== "number" || isNaN(reward)) {
+      return res.status(400).json({ error: "Valid reward number in [0, 1] is required" });
+    }
+    if (!Array.isArray(context)) {
+      return res.status(400).json({ error: "Context array is required" });
+    }
+
+    if (armType === "legacy") {
+      if (context.length !== 4) {
+        return res.status(400).json({ error: "Legacy bandit requires a 4-dimensional context vector" });
+      }
+      if (!BANDIT_ACTIONS.includes(action as any)) {
+        return res.status(400).json({ error: `Action '${action}' is not a valid legacy arm: ${BANDIT_ACTIONS.join(", ")}` });
+      }
+      defaultRecoveryBandit.updateArm(action as any, context, reward);
+      const updatedState = defaultRecoveryBandit.getState()[action as any];
+      return res.json({
+        success: true,
+        armType: "legacy",
+        action,
+        reward,
+        armState: updatedState,
+      });
+    }
+
+    // Enterprise bandit (default)
+    if (context.length !== 5) {
+      return res.status(400).json({ error: "Enterprise bandit requires a 5-dimensional context vector" });
+    }
+    if (!ENTERPRISE_BANDIT_ACTIONS.includes(action as any)) {
+      return res.status(400).json({ error: `Action '${action}' is not a valid enterprise arm: ${ENTERPRISE_BANDIT_ACTIONS.join(", ")}` });
+    }
+
+    defaultEnterpriseBandit.updateArm(action as any, context, reward);
+    const updatedState = defaultEnterpriseBandit.getState()[action as any];
+    return res.json({
+      success: true,
+      armType: "enterprise",
+      action,
+      reward,
+      armState: updatedState,
+    });
+  } catch (err) {
+    logger.error({ msg: "[Bandit] feedback error", err: (err as Error).message });
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+app.get("/api/bandit/arms-state", (req: Request, res: Response) => {
+  try {
+    const armType = (req.query.armType as string) || "enterprise";
+    if (armType === "legacy") {
+      const state = defaultRecoveryBandit.getState();
+      const summary = Object.entries(state).map(([arm, s]) => ({
+        arm,
+        pullCount: s.pullCount,
+        totalReward: s.totalReward,
+        meanReward: s.pullCount > 0 ? Number((s.totalReward / s.pullCount).toFixed(4)) : 0,
+      }));
+      return res.json({
+        success: true,
+        armType: "legacy",
+        dimension: 4,
+        arms: state,
+        summary,
+      });
+    }
+
+    const state = defaultEnterpriseBandit.getState();
+    const summary = Object.entries(state).map(([arm, s]) => ({
+      arm,
+      pullCount: s.pullCount,
+      totalReward: s.totalReward,
+      meanReward: s.pullCount > 0 ? Number((s.totalReward / s.pullCount).toFixed(4)) : 0,
+    }));
+    return res.json({
+      success: true,
+      armType: "enterprise",
+      dimension: 5,
+      arms: state,
+      summary,
+    });
+  } catch (err) {
+    logger.error({ msg: "[Bandit] arms-state error", err: (err as Error).message });
+    return res.status(500).json({ error: (err as Error).message });
   }
 });
 

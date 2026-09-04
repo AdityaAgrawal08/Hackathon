@@ -34,6 +34,12 @@ export interface DecideInput {
   /** Overall payment-rail health (0..1). When < threshold, rail-dependent
    *  actions are deferred to the next healthy window (§4.5). Opt-in. */
   railHealthScore?: number;
+  /** Calculate MDR fee arbitrage (e.g. 200 bps when switching card -> UPI). Opt-in. */
+  includeMdrArbitrage?: boolean;
+  mdrArbitrageBp?: number;
+  /** Annual cost of capital for working capital acceleration (default 0.14) */
+  annualCostOfCapital?: number;
+  dsoDaysSaved?: number;
 }
 
 /**
@@ -56,6 +62,9 @@ export interface RankedAction {
   adjustedProbabilityBp: number;
   multiplierUsed: number;
   scheduledForMs: number | null;
+  mdrSavingsPaise?: number;
+  workingCapitalSavingsPaise?: number;
+  netMarginEvPaise?: number;
 }
 
 export interface RefusalRecord {
@@ -127,12 +136,36 @@ function evaluateAction(
   const violations = evaluateConstraints(input.policy, ctx);
 
   const gross = Math.round(percentBp(amount, pBp) * ltvWeight(input.ltvPaise, input.churnRiskBp));
+  const baseEv = gross - CONTACT_COST_PAISE[action];
+
+  // Dynamic MDR fee arbitrage (UPI links save 200 bps vs cards under zero-MDR regulations)
+  let mdrSavingsPaise = 0;
+  if (input.includeMdrArbitrage || typeof input.mdrArbitrageBp === "number") {
+    const mdrBp = input.mdrArbitrageBp ?? 200;
+    if (action === "ALTERNATE_UPI_LINK" || action === "PARTIAL_COLLECT" || action === "RECOVER_VIA_RAIL") {
+      mdrSavingsPaise = Math.round((input.amountPaise * mdrBp) / 10_000);
+    }
+  }
+
+  // Dynamic working capital acceleration savings
+  let workingCapitalSavingsPaise = 0;
+  if (typeof input.annualCostOfCapital === "number" && typeof input.dsoDaysSaved === "number") {
+    workingCapitalSavingsPaise = Math.round(
+      (input.amountPaise * input.annualCostOfCapital * input.dsoDaysSaved) / 365
+    );
+  }
+
+  const netMarginEvPaise = baseEv + mdrSavingsPaise + workingCapitalSavingsPaise;
+
   const ev: RankedAction = {
     action,
-    evPaise: gross - CONTACT_COST_PAISE[action],
+    evPaise: baseEv,
     adjustedProbabilityBp: pBp,
     multiplierUsed: mult,
     scheduledForMs: violations.length === 0 ? scheduleWithRailHealth(action, input) : null,
+    mdrSavingsPaise,
+    workingCapitalSavingsPaise,
+    netMarginEvPaise,
   };
   return { ev, violations };
 }
