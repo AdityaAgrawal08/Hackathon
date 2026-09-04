@@ -111,9 +111,11 @@ if (isProduction && _startUrl.includes("localhost")) {
 }
 
 const dbPath = process.env.ARBITER_DB_PATH || "data/arbiter.sqlite";
-const dbUrl = (dbPath.startsWith("libsql:") || dbPath.startsWith("http:") || dbPath.startsWith("https:") || dbPath.startsWith("file:"))
-  ? dbPath
-  : `file:${resolve(dbPath)}`;
+const dbUrl = (dbPath === ":memory:" || dbPath === "file::memory:?cache=shared")
+  ? ":memory:"
+  : ((dbPath.startsWith("libsql:") || dbPath.startsWith("http:") || dbPath.startsWith("https:") || dbPath.startsWith("file:"))
+    ? dbPath
+    : `file:${resolve(dbPath)}`);
 export const dbClient: Client = createClient({ url: dbUrl, authToken: process.env.ARBITER_DB_TOKEN });
 
 const outreachRouter = new OutreachRouter();

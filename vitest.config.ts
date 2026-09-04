@@ -9,9 +9,9 @@ export default defineConfig({
     poolOptions: { forks: { singleFork: true } },
     testTimeout: 30000,
     hookTimeout: 30000,
-    // Isolate tests from production DB — use in-memory SQLite
+    // Isolate tests from production DB — use test database in data/
     env: {
-      ARBITER_DB_PATH: ":memory:",
+      ARBITER_DB_PATH: "data/arbiter_test.sqlite",
       ARBITER_DB_TOKEN: "",
     },
   },

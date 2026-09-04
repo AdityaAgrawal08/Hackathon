@@ -1,8 +1,3 @@
-/**
- * Migration runner — applies drizzle-kit generated SQL in order, tracked in
- * a local table. Bug P1-B5 prevention: migrations are generated artifacts,
- * never hand-edited; runner is idempotent.
- */
 import { createClient, type Client } from "@libsql/client";
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -57,7 +52,6 @@ export async function runMigrations(
     if (applied.rows.length > 0) continue;
     let sqlText = readFileSync(join(migrationsDir, f), "utf8");
     if (isRemote) {
-      // Strip out PRAGMA lines because Turso/libSQL does not support them and will throw HTTP 400
       sqlText = sqlText
         .split("\n")
         .filter((line) => !line.trim().toUpperCase().startsWith("PRAGMA"))
@@ -98,7 +92,6 @@ async function main() {
   }
 }
 
-// CLI entry — skipped when imported by tests
 if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) {
   main().catch((err) => {
     logger.error({ msg: "migrate failed", err });
