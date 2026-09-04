@@ -88,6 +88,9 @@ export const DEFAULT_MERCHANT_DOMAIN_CONFIG: MerchantDomainConfig = {
  * Computes Exponential Moving Average (EMA) with decay factor alpha.
  */
 export function updateEma(currentEma: number | null, newValue: number, alpha = 0.3): number {
+  if (typeof newValue !== "number" || isNaN(newValue) || newValue < 0) {
+    return currentEma ?? 0;
+  }
   if (currentEma === null || isNaN(currentEma)) {
     return Math.round(newValue * 100) / 100;
   }
@@ -104,6 +107,7 @@ export function computeCustomerPriority(
   domainType: DomainType = "D2C_ECOMMERCE",
   churnRiskBp = 1000
 ): PriorityScoreOutput {
+  const safeAmount = typeof amountPaise === "number" && !isNaN(amountPaise) && amountPaise > 0 ? amountPaise : 0;
   // 1. Guard against opted-out customers
   if (profile.optedOut) {
     return {

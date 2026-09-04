@@ -1278,7 +1278,13 @@ app.post("/api/vendor/domain-config", async (req: Request, res: Response) => {
       cartReservationMins = 15,
       maxDiscountConcessionBp = 500,
       softLockGraceDays = 3,
-    } = req.body;
+    } = req.body || {};
+
+    const ALLOWED_DOMAINS = ["D2C_ECOMMERCE", "SAAS_MANDATES", "B2B_INVOICES", "HIGH_TICKET"] as const;
+    if (domainType && !ALLOWED_DOMAINS.includes(domainType)) {
+      return res.status(400).json({ error: `Invalid domainType. Allowed: ${ALLOWED_DOMAINS.join(", ")}` });
+    }
+
     const nowUtc = isoUtc(Date.now());
 
     await dbClient.execute({
@@ -1296,9 +1302,9 @@ app.post("/api/vendor/domain-config", async (req: Request, res: Response) => {
       args: [
         tenantId,
         domainType,
-        Number(cartReservationMins),
-        Number(maxDiscountConcessionBp),
-        Number(softLockGraceDays),
+        Math.max(0, Number(cartReservationMins) || 15),
+        Math.max(0, Math.min(5000, Number(maxDiscountConcessionBp) || 500)),
+        Math.max(0, Number(softLockGraceDays) || 3),
         nowUtc,
         nowUtc,
       ],
@@ -1315,15 +1321,24 @@ app.post("/api/vendor/domain-config", async (req: Request, res: Response) => {
 // ── Customer Behavioral Telemetry & Intelligence Endpoints ───────
 app.post("/api/telemetry/customer-event", async (req: Request, res: Response) => {
   try {
+    if (!req.body || typeof req.body !== "object") {
+      return res.status(400).json({ error: "Invalid request body" });
+    }
+
     const { profileId, event, latencyMins, channel = "EMAIL" } = req.body;
     if (!profileId || !event) {
       return res.status(400).json({ error: "profileId and event required" });
     }
 
+    const ALLOWED_EVENTS = ["opened", "email_opened", "clicked", "link_clicked"] as const;
+    if (!ALLOWED_EVENTS.includes(event)) {
+      return res.status(400).json({ error: `Invalid event. Allowed: ${ALLOWED_EVENTS.join(", ")}` });
+    }
+
     if (event === "opened" || event === "email_opened") {
       await recordEmailOpened(profileId, Number(latencyMins) || 1.0, dbClient);
     } else if (event === "clicked" || event === "link_clicked") {
-      await recordLinkClicked(profileId, channel, dbClient);
+      await recordLinkClicked(profileId, channel === "SMS" ? "SMS" : "EMAIL", dbClient);
     }
 
     const profile = await fetchBehavioralProfile(profileId, dbClient);
