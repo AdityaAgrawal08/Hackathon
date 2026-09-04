@@ -512,10 +512,51 @@ export const customerProfiles = sqliteTable(
     vendorDecision: text("vendor_decision", { enum: ["approved", "rejected"] }),
     riskScoreBp: integer("risk_score_bp").notNull().default(0),
     totalAmountPaise: integer("total_amount_paise").notNull().default(0),
+    optedOut: integer("opted_out", { mode: "boolean" }).notNull().default(false),
+    // Longitudinal Behavioral Intelligence columns (Migration 0022)
+    preferredChannel: text("preferred_channel", { enum: ["EMAIL", "SMS", "AUTO"] }).default("AUTO"),
+    emailOpenLatencyMins: real("email_open_latency_mins"),
+    historicalOpenRate: real("historical_open_rate").notNull().default(0.0),
+    historicalClickRate: real("historical_click_rate").notNull().default(0.0),
+    paymentMethodAffinity: text("payment_method_affinity").default("upi"),
+    ticketSensitivityScore: real("ticket_sensitivity_score").notNull().default(0.0),
+    alternateAccountConverted: integer("alternate_account_converted", { mode: "boolean" }).notNull().default(false),
+    avgRecoveryLatencyHours: real("avg_recovery_latency_hours"),
+    totalRecoveredPaise: integer("total_recovered_paise").notNull().default(0),
+    patienceScore: real("patience_score").notNull().default(0.5),
+    lastEngagedChannel: text("last_engaged_channel"),
+    lastEngagedAtUtc: text("last_engaged_at_utc"),
   },
   (t) => [
     index("idx_custprofile_phone").on(t.phone),
     index("idx_custprofile_suspicious").on(t.flaggedAsSuspicious),
+    index("idx_custprofile_channel").on(t.preferredChannel),
+    index("idx_custprofile_velocity").on(t.emailOpenLatencyMins),
+  ],
+);
+
+/* ── merchant domain configuration (business context engine) ────── */
+export const DOMAIN_TYPES = [
+  "D2C_ECOMMERCE",
+  "SAAS_MANDATES",
+  "B2B_INVOICES",
+  "HIGH_TICKET",
+] as const;
+export type DomainType = (typeof DOMAIN_TYPES)[number];
+
+export const merchantDomainConfigs = sqliteTable(
+  "merchant_domain_configs",
+  {
+    tenantId: text("tenant_id").primaryKey(),
+    domainType: text("domain_type", { enum: DOMAIN_TYPES }).notNull().default("D2C_ECOMMERCE"),
+    cartReservationMins: integer("cart_reservation_mins").notNull().default(15),
+    maxDiscountConcessionBp: integer("max_discount_concession_bp").notNull().default(500),
+    softLockGraceDays: integer("soft_lock_grace_days").notNull().default(3),
+    createdAtUtc: text("created_at_utc").notNull(),
+    updatedAtUtc: text("updated_at_utc").notNull(),
+  },
+  (t) => [
+    index("idx_domain_type").on(t.domainType),
   ],
 );
 

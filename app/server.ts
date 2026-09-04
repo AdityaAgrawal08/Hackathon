@@ -54,6 +54,16 @@ import {
   type AbandonedCheckout,
   type B2BInvoice,
   type CustomerInteractionEvent,
+  computeCustomerPriority,
+  getLowBalanceGuidance,
+  recordEmailOpened,
+  recordLinkClicked,
+  recordDeliveryStatus,
+  recordRecoveryCompleted,
+  fetchBehavioralProfile,
+  fetchMerchantDomainConfig,
+  type CustomerBehavioralProfile,
+  type MerchantDomainConfig,
 } from "../packages/core/src/index.js";
 
 import {
@@ -1244,6 +1254,119 @@ app.post("/api/vendor/decision", adminLimiter, requireAdminKey, async (req: Requ
 
     broadcastSSE("global", { type: "VENDOR_DECISION", eventId, decision });
     res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// ── Merchant Domain Configuration (Business Context Engine) ──────
+app.get("/api/vendor/domain-config", async (req: Request, res: Response) => {
+  try {
+    const tenantId = (req.query.tenantId as string) || "demo";
+    const config = await fetchMerchantDomainConfig(tenantId, dbClient);
+    res.json({ success: true, config });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+app.post("/api/vendor/domain-config", async (req: Request, res: Response) => {
+  try {
+    const {
+      tenantId = "demo",
+      domainType = "D2C_ECOMMERCE",
+      cartReservationMins = 15,
+      maxDiscountConcessionBp = 500,
+      softLockGraceDays = 3,
+    } = req.body;
+    const nowUtc = isoUtc(Date.now());
+
+    await dbClient.execute({
+      sql: `
+        INSERT INTO merchant_domain_configs (
+          tenant_id, domain_type, cart_reservation_mins, max_discount_concession_bp, soft_lock_grace_days, created_at_utc, updated_at_utc
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(tenant_id) DO UPDATE SET
+          domain_type = excluded.domain_type,
+          cart_reservation_mins = excluded.cart_reservation_mins,
+          max_discount_concession_bp = excluded.max_discount_concession_bp,
+          soft_lock_grace_days = excluded.soft_lock_grace_days,
+          updated_at_utc = excluded.updated_at_utc
+      `,
+      args: [
+        tenantId,
+        domainType,
+        Number(cartReservationMins),
+        Number(maxDiscountConcessionBp),
+        Number(softLockGraceDays),
+        nowUtc,
+        nowUtc,
+      ],
+    });
+
+    const updated = await fetchMerchantDomainConfig(tenantId, dbClient);
+    broadcastSSE("global", { type: "DOMAIN_CONFIG_UPDATED", config: updated });
+    res.json({ success: true, config: updated });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// ── Customer Behavioral Telemetry & Intelligence Endpoints ───────
+app.post("/api/telemetry/customer-event", async (req: Request, res: Response) => {
+  try {
+    const { profileId, event, latencyMins, channel = "EMAIL" } = req.body;
+    if (!profileId || !event) {
+      return res.status(400).json({ error: "profileId and event required" });
+    }
+
+    if (event === "opened" || event === "email_opened") {
+      await recordEmailOpened(profileId, Number(latencyMins) || 1.0, dbClient);
+    } else if (event === "clicked" || event === "link_clicked") {
+      await recordLinkClicked(profileId, channel, dbClient);
+    }
+
+    const profile = await fetchBehavioralProfile(profileId, dbClient);
+    if (!profile) return res.status(404).json({ error: "Customer profile not found" });
+
+    const priority = computeCustomerPriority(profile, 199900, "D2C_ECOMMERCE");
+    broadcastSSE("global", { type: "CUSTOMER_TELEMETRY_UPDATED", profileId, priorityTier: priority.priorityTier });
+    res.json({ success: true, profile, priority });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+app.get("/api/behavioral/profile/:id", async (req: Request, res: Response) => {
+  try {
+    const profile = await fetchBehavioralProfile(req.params.id, dbClient);
+    if (!profile) return res.status(404).json({ error: "Customer profile not found" });
+
+    const tenantId = (req.query.tenantId as string) || "demo";
+    const config = await fetchMerchantDomainConfig(tenantId, dbClient);
+    const amountPaise = Number(req.query.amountPaise) || 199900;
+    const priority = computeCustomerPriority(profile, amountPaise, config.domainType);
+
+    res.json({ success: true, profile, priority, domainConfig: config });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+app.get("/api/behavioral/low-balance-guidance", async (req: Request, res: Response) => {
+  try {
+    const customerName = (req.query.name as string) || "Customer";
+    const amountPaise = Number(req.query.amountPaise) || 199900;
+    const recoveryUrl = (req.query.url as string) || `${getPublicBaseUrl()}/store`;
+    const profileId = req.query.profileId as string | undefined;
+
+    let profile: CustomerBehavioralProfile | null = null;
+    if (profileId) {
+      profile = await fetchBehavioralProfile(profileId, dbClient);
+    }
+
+    const guidance = getLowBalanceGuidance(customerName, amountPaise, recoveryUrl, profile);
+    res.json({ success: true, guidance });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }
