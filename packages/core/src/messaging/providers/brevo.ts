@@ -172,8 +172,10 @@ export class BrevoEmailProvider implements OutreachProvider {
         body: JSON.stringify({
           sender: { name: this.config.senderName, email: this.config.senderEmail },
           to: [{ email: payload.recipient.email, name: payload.recipient.name || payload.recipient.customerName || "" }],
+          replyTo: { name: this.config.senderName, email: this.config.senderEmail },
           subject,
           htmlContent,
+          textContent: `Hi ${customerName},\n\nYour payment of ${formattedAmount} needs attention.\n\nTo complete your payment securely, click the link below:\n${recoveryUrl}\n\nTransaction ID: ${payload.proposalId}\nThis is a secure transactional message from ${this.config.senderName || 'ARBITER'}.`,
           headers: {
             "X-Idempotency-Key": payload.idempotencyKey,
             "X-Proposal-Id": payload.proposalId,

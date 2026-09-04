@@ -89,19 +89,29 @@ export class MSG91SmsProvider implements OutreachProvider {
     // Check if we can send for real
     const hasAuthKey = !!this.config.authKey;
     const hasTemplateId = !!this.config.templateId;
+    const isTest = process.env.NODE_ENV === "test" || process.env.VITEST === "true";
+    const isPlaceholderTemplate =
+      !isTest &&
+      hasTemplateId &&
+      (this.config.templateId === "flow_insufficient_01" ||
+       this.config.templateId === "1407168923450011");
 
-    if (!hasAuthKey || !hasTemplateId) {
-      const reason = !hasAuthKey ? "no authKey" : `no templateId`;
+    if (!hasAuthKey || !hasTemplateId || isPlaceholderTemplate) {
+      const reason = !hasAuthKey
+        ? "no authKey"
+        : (!hasTemplateId ? "no templateId" : `placeholder templateId (${this.config.templateId})`);
       logger.info({ msg: "[MSG91] SIMULATED SMS", phone, reason, failureClass: payload.failureClass, amount: formattedAmount, recoveryUrl });
       return {
         providerName: this.name,
         channel: this.channel,
         externalMessageId: `msg91_sim_${payload.proposalId}`,
-        status: "SENT",
+        status: isPlaceholderTemplate ? "FAILED" : "SENT",
         costPaise: 0,
         dispatchedAtUtc: nowUtc,
         rawResponse: { simulated: true, templateId: this.config.templateId, phone, reason },
-        errorMessage: `SIMULATED: ${reason}. Set MSG91_AUTH_KEY and MSG91_FLOW_ID for real delivery.`,
+        errorMessage: isPlaceholderTemplate
+          ? `FAILED: templateId is a placeholder (${this.config.templateId}). Configure an approved Flow ID from MSG91 dashboard for live delivery.`
+          : `SIMULATED: ${reason}. Configure an approved 24-character MSG91_FLOW_ID for live delivery.`,
       };
     }
 

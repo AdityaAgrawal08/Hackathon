@@ -817,8 +817,11 @@ app.post("/api/payments/failed", paymentLimiter, async (req: Request, res: Respo
       bankCode,
     });
 
+    const recoveryUrl = `/recover/${result.eventId}?productName=${encodeURIComponent(productName || '')}&code=${encodeURIComponent(failureCode)}`;
     res.json({
+      success: true,
       eventId: result.eventId,
+      recoveryUrl,
       failureClass: result.failureClass,
       action: result.action,
       failureCode,
