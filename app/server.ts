@@ -54,6 +54,11 @@ import {
   type AbandonedCheckout,
   type B2BInvoice,
   type CustomerInteractionEvent,
+  buildD2CRecoveryStrategy,
+  buildSaaSGracePeriodStrategy,
+  buildB2BEarlySettlementStrategy,
+  buildHighTicketSplitPayStrategy,
+  sequenceIntelligentRecoveryBatch,
 } from "../packages/core/src/index.js";
 
 import {
@@ -1389,6 +1394,171 @@ app.get("/api/behavioral/low-balance-guidance", async (req: Request, res: Respon
 
     const guidance = getLowBalanceGuidance(customerName, amountPaise, recoveryUrl, profile);
     res.json({ success: true, guidance });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// ── Merchant Domain Context Engine Endpoints (Phase 3) ───────────
+
+app.post("/api/domain/d2c/upi-intent", async (req: Request, res: Response) => {
+  try {
+    const {
+      merchantVpa = "merchant.payments@razorpay",
+      merchantName = "ARBITER Store",
+      transactionRef = `txn_${Date.now()}`,
+      amountPaise,
+      cartReservationMins,
+      concessionDiscountBp,
+      productName,
+      recoveryUrl,
+      tenantId = "demo",
+    } = req.body || {};
+
+    if (!amountPaise || typeof amountPaise !== "number" || amountPaise <= 0) {
+      return res.status(400).json({ error: "Valid amountPaise is required" });
+    }
+
+    const tenantConfig = await fetchMerchantDomainConfig(tenantId, dbClient).catch(() => null);
+    const effectiveMins = cartReservationMins ?? tenantConfig?.cartReservationMins ?? 15;
+    const effectiveBp = concessionDiscountBp ?? Math.min(500, tenantConfig?.maxDiscountConcessionBp ?? 500);
+
+    const strategy = buildD2CRecoveryStrategy({
+      merchantVpa,
+      merchantName,
+      transactionRef,
+      amountPaise,
+      cartReservationMins: effectiveMins,
+      concessionDiscountBp: effectiveBp,
+      productName,
+      recoveryUrl: recoveryUrl || `${getPublicBaseUrl()}/checkout`,
+    });
+
+    res.json({ success: true, strategy });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+app.post("/api/domain/saas/grace-period", async (req: Request, res: Response) => {
+  try {
+    const {
+      mandateId,
+      planName = "Pro Subscription",
+      amountPaise,
+      customerEmail,
+      customerPhone,
+      retryCount = 0,
+      maxRetries = 3,
+      softLockGraceDays,
+      tenantId = "demo",
+    } = req.body || {};
+
+    if (!mandateId || !amountPaise) {
+      return res.status(400).json({ error: "mandateId and amountPaise are required" });
+    }
+
+    const tenantConfig = await fetchMerchantDomainConfig(tenantId, dbClient).catch(() => null);
+    const effectiveGraceDays = softLockGraceDays ?? tenantConfig?.softLockGraceDays ?? 3;
+
+    const strategy = buildSaaSGracePeriodStrategy({
+      mandateId,
+      planName,
+      amountPaise,
+      customerEmail,
+      customerPhone,
+      retryCount,
+      maxRetries,
+      softLockGraceDays: effectiveGraceDays,
+    });
+
+    res.json({ success: true, strategy });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+app.post("/api/domain/b2b/early-settlement", (req: Request, res: Response) => {
+  try {
+    const {
+      invoiceId = `inv_${Date.now()}`,
+      invoiceNumber = `INV-${Date.now()}`,
+      clientCompany,
+      contactPerson = "Finance Manager",
+      contactEmail,
+      amountPaise,
+      dueDateUtc,
+      vendorVpaPrefix,
+      discountPercent,
+      annualCostOfCapital,
+      dsoDaysSaved,
+    } = req.body || {};
+
+    if (!amountPaise || !clientCompany) {
+      return res.status(400).json({ error: "amountPaise and clientCompany are required" });
+    }
+
+    const strategy = buildB2BEarlySettlementStrategy({
+      invoiceId,
+      invoiceNumber,
+      clientCompany,
+      contactPerson,
+      contactEmail: contactEmail || "finance@example.com",
+      amountPaise,
+      dueDateUtc: dueDateUtc || new Date(Date.now() + 30 * 86400000).toISOString(),
+      vendorVpaPrefix,
+      discountPercent,
+      annualCostOfCapital,
+      dsoDaysSaved,
+    });
+
+    res.json({ success: true, strategy });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+app.post("/api/domain/edtech/split-pay", (req: Request, res: Response) => {
+  try {
+    const {
+      totalAmountPaise,
+      customerName = "Learner",
+      productName = "Advanced Program",
+      installmentCount = 3,
+    } = req.body || {};
+
+    if (!totalAmountPaise || typeof totalAmountPaise !== "number" || totalAmountPaise <= 0) {
+      return res.status(400).json({ error: "Valid totalAmountPaise is required" });
+    }
+
+    const strategy = buildHighTicketSplitPayStrategy({
+      totalAmountPaise,
+      customerName,
+      productName,
+      installmentCount,
+    });
+
+    res.json({ success: true, strategy });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+app.post("/api/decide/batch-sequence", (req: Request, res: Response) => {
+  try {
+    const { candidates, config, nowMs } = req.body || {};
+
+    if (!Array.isArray(candidates)) {
+      return res.status(400).json({ error: "candidates array is required" });
+    }
+
+    const result = sequenceIntelligentRecoveryBatch(
+      candidates,
+      config || {},
+      typeof nowMs === "number" ? nowMs : Date.now()
+    );
+
+    res.json({ success: true, result });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }
