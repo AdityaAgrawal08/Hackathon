@@ -29,6 +29,7 @@ export interface MSG91Config {
   webhookSecret?: string;
   dltTemplateId?: string;
   templateId?: string;
+  flowId?: string;
 }
 
 // DLT template IDs for reference (kept for backward compatibility)
@@ -57,14 +58,24 @@ export class MSG91SmsProvider implements OutreachProvider {
   readonly channel = "SMS" as const;
 
   constructor(private config: MSG91Config = {}) {
-    const rawKey = config.authKey || process.env.MSG91_AUTH_KEY;
     const isTest = process.env.NODE_ENV === "test" || process.env.VITEST === "true";
-    this.config.authKey = (rawKey && !rawKey.includes("xxxxxx") && !isTest) ? rawKey : undefined;
+    const rawKey = config.authKey || (!isTest ? process.env.MSG91_AUTH_KEY : undefined);
+    this.config.authKey = (rawKey && !rawKey.includes("xxxxxx")) ? rawKey : undefined;
     this.config.senderId = config.senderId || process.env.MSG91_SENDER_ID || "ARBITR";
-    // template_id: use MSG91_TEMPLATE_ID env, fallback to MSG91_DLT_TEMPLATE_ID
-    this.config.templateId = config.templateId || process.env.MSG91_TEMPLATE_ID || process.env.MSG91_DLT_TEMPLATE_ID;
+    // template_id: support MSG91_FLOW_ID, MSG91_TEMPLATE_ID, or MSG91_DLT_TEMPLATE_ID
+    this.config.templateId =
+      config.flowId ||
+      config.templateId ||
+      process.env.MSG91_FLOW_ID ||
+      process.env.MSG91_TEMPLATE_ID ||
+      process.env.MSG91_DLT_TEMPLATE_ID;
 
-    logger.info({ msg: "[MSG91] Constructor — config loaded", authKey: this.config.authKey ? 'SET (' + this.config.authKey.slice(0, 8) + '...)' : 'MISSING', templateId: this.config.templateId || 'MISSING' });
+    logger.info({
+      msg: "[MSG91] Constructor — config loaded",
+      authKey: this.config.authKey ? "SET (" + this.config.authKey.slice(0, 8) + "...)" : "MISSING",
+      templateId: this.config.templateId || "MISSING",
+      sender: this.config.senderId,
+    });
   }
 
   async send(payload: OutreachPayload): Promise<ProviderDispatchResult> {
@@ -90,12 +101,11 @@ export class MSG91SmsProvider implements OutreachProvider {
         costPaise: 0,
         dispatchedAtUtc: nowUtc,
         rawResponse: { simulated: true, templateId: this.config.templateId, phone, reason },
-        errorMessage: `SIMULATED: ${reason}. Set MSG91_AUTH_KEY and MSG91_TEMPLATE_ID for real delivery.`,
+        errorMessage: `SIMULATED: ${reason}. Set MSG91_AUTH_KEY and MSG91_FLOW_ID for real delivery.`,
       };
     }
 
-    // Build MSG91 Flow API v5 request
-    // Variables MUST match what's configured in the MSG91 flow template (case-sensitive)
+    // Build MSG91 Flow API v5 request with dual semantic + positional dictionaries
     const recipientObj: Record<string, string> = {
       mobiles: phone,
       name: customerName,
@@ -109,15 +119,29 @@ export class MSG91SmsProvider implements OutreachProvider {
       network: payload.network || "",
       vpa: payload.vpa || "",
       bank: payload.bank || "",
+      // Positional token fallbacks for DLT Flow templates
+      VAR1: customerName,
+      VAR2: formattedAmount,
+      VAR3: recoveryUrl,
+      VAR4: "ARBITER Store",
+      var1: customerName,
+      var2: formattedAmount,
+      var3: recoveryUrl,
+      var4: "ARBITER Store",
+      "1": customerName,
+      "2": formattedAmount,
+      "3": recoveryUrl,
+      "4": "ARBITER Store",
     };
 
     const flowBody = {
       template_id: this.config.templateId,
-      short_url: "1",
+      sender: this.config.senderId || "ARBITR",
+      short_url: "0",
       recipients: [recipientObj],
     };
 
-    logger.info({ msg: "[MSG91] SENDING SMS", phone, templateId: this.config.templateId, body: flowBody });
+    logger.info({ msg: "[MSG91] SENDING SMS", phone, templateId: this.config.templateId, sender: this.config.senderId, body: flowBody });
 
     try {
       const res = await fetch("https://control.msg91.com/api/v5/flow", {
@@ -138,7 +162,11 @@ export class MSG91SmsProvider implements OutreachProvider {
         const text = await res.text();
         data = { message: text.slice(0, 200), raw: text };
       }
-      const isSuccess = data.type === "success" || res.ok;
+
+      // Hardened check: HTTP 200 with {"type":"error"} must be marked FAILED
+      const hasErrorType = data.type === "error" || data.status === "error";
+      const hasErrorsList = Array.isArray(data.errors) && data.errors.length > 0;
+      const isSuccess = res.ok && !hasErrorType && !hasErrorsList;
 
       if (!isSuccess) {
         logger.error({ msg: "[MSG91] FAILED", phone, httpStatus: res.status, response: data });

@@ -38,7 +38,7 @@ export const SCENARIOS: Scenario[] = [
     failureClass: "SOFT_RETRYABLE",
     action: "RECOVER_WHATSAPP",
     pattern: "single",
-    summary: "Provider declines (insufficient funds); no debit; user told we retry on payday.",
+    summary: "Provider declines (insufficient funds); no debit; user prompted to switch to alternate bank account or try again later.",
   },
   {
     id: "no_internet",

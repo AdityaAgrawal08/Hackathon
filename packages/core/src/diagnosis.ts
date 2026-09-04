@@ -92,7 +92,7 @@ const INTERVENTION_BY_ROOT_CAUSE: Record<RootCause, InterventionFamily> = {
 
 const EXPLANATION_BY_ROOT_CAUSE: Record<RootCause, string> = {
   INSUFFICIENT_FUNDS:
-    "Customer balance was insufficient at debit time; retry aligned to predicted payday",
+    "Customer balance was insufficient at debit time; recommend switching to an alternate bank account or UPI app, or try again later",
   METHOD_EXPIRED:
     "Card or mandate token expired/revoked; an alternate collection method is required",
   NETWORK_GATEWAY: "Transient gateway/issuer timeout; an immediate retry is safe",

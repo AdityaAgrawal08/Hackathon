@@ -54,7 +54,27 @@ import {
   type AbandonedCheckout,
   type B2BInvoice,
   type CustomerInteractionEvent,
+  buildD2CRecoveryStrategy,
+  buildSaaSGracePeriodStrategy,
+  buildB2BEarlySettlementStrategy,
+  buildHighTicketSplitPayStrategy,
+  sequenceIntelligentRecoveryBatch,
+  LinUCBBandit,
+  defaultEnterpriseBandit,
+  defaultRecoveryBandit,
+  ENTERPRISE_BANDIT_ACTIONS,
+  BANDIT_ACTIONS,
 } from "../packages/core/src/index.js";
+
+import {
+  fetchBehavioralProfile,
+  fetchMerchantDomainConfig,
+  computeCustomerPriority,
+  recordEmailOpened,
+  recordLinkClicked,
+  recordDeliveryStatus,
+  getLowBalanceGuidance,
+} from "../packages/core/src/agent/behavioral_profiler.js";
 
 import {
   simulateFailureTriage,
@@ -68,6 +88,7 @@ import {
   OutreachRouter,
   MSG91SmsProvider,
   BrevoEmailProvider,
+  BrevoSmsProvider,
 } from "../packages/core/src/messaging/index.js";
 import {
   PRODUCTS,
@@ -111,16 +132,20 @@ if (isProduction && _startUrl.includes("localhost")) {
 }
 
 const dbPath = process.env.ARBITER_DB_PATH || "data/arbiter.sqlite";
-const dbUrl = (dbPath.startsWith("libsql:") || dbPath.startsWith("http:") || dbPath.startsWith("https:") || dbPath.startsWith("file:"))
-  ? dbPath
-  : `file:${resolve(dbPath)}`;
+const dbUrl = (dbPath === ":memory:" || dbPath === "file::memory:?cache=shared")
+  ? ":memory:"
+  : ((dbPath.startsWith("libsql:") || dbPath.startsWith("http:") || dbPath.startsWith("https:") || dbPath.startsWith("file:"))
+    ? dbPath
+    : `file:${resolve(dbPath)}`);
 export const dbClient: Client = createClient({ url: dbUrl, authToken: process.env.ARBITER_DB_TOKEN });
 
 const outreachRouter = new OutreachRouter();
 const brevoProvider = new BrevoEmailProvider();
 const msg91Provider = new MSG91SmsProvider();
+const brevoSmsProvider = new BrevoSmsProvider();
 outreachRouter.registerProvider(brevoProvider);
 outreachRouter.registerProvider(msg91Provider);
+outreachRouter.registerProvider(brevoSmsProvider); // Multi-rail SMS fallback
 
 // Log provider status at startup
 const brevoKey = process.env.BREVO_API_KEY;
@@ -199,7 +224,7 @@ app.get("/api/products", (_req, res) => {
 });
 
 // ── Create Razorpay Order + Upsert Customer ─────────────────────
-app.post("/api/orders/create", checkoutLimiter, async (req: Request, res: Response) => {
+const createOrderHandler = async (req: Request, res: Response) => {
   try {
     const { productId, customerName, customerPhone, customerEmail } = req.body;
     if (!productId || !customerName || !customerPhone || !customerEmail) {
@@ -238,9 +263,14 @@ app.post("/api/orders/create", checkoutLimiter, async (req: Request, res: Respon
     if (RZP_KEY_ID && RZP_KEY_SECRET && !RZP_KEY_ID.includes("xxxxxx")) {
       try {
         const auth = Buffer.from(`${RZP_KEY_ID}:${RZP_KEY_SECRET}`).toString("base64");
+        const idempotencyKey = `idemp_ord_${customerId}_${productId}_${Math.floor(nowMs / 60000)}`;
         const rzpRes = await fetch("https://api.razorpay.com/v1/orders", {
           method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Basic ${auth}` },
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Basic ${auth}`,
+            "X-Razorpay-Idempotency-Key": idempotencyKey,
+          },
           body: JSON.stringify({
             amount: product.pricePaise,
             currency: "INR",
@@ -268,7 +298,10 @@ app.post("/api/orders/create", checkoutLimiter, async (req: Request, res: Respon
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }
-});
+};
+
+app.post("/api/orders/create", checkoutLimiter, createOrderHandler);
+app.post("/api/checkout/order", checkoutLimiter, createOrderHandler);
 
 // ── Verify Payment (called by frontend after Checkout.js success) ─
 const verifyPaymentHandler = async (req: Request, res: Response) => {
@@ -513,9 +546,14 @@ app.post("/api/recovery/downsell", recoveryLimiter, async (req: Request, res: Re
     if (RZP_KEY_ID && RZP_KEY_SECRET && !RZP_KEY_ID.includes("xxxxxx")) {
       try {
         const auth = Buffer.from(`${RZP_KEY_ID}:${RZP_KEY_SECRET}`).toString("base64");
+        const idempotencyKey = `idemp_dwn_${eventId}_${downsellType}`;
         const rzpRes = await fetch("https://api.razorpay.com/v1/orders", {
           method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Basic ${auth}` },
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Basic ${auth}`,
+            "X-Razorpay-Idempotency-Key": idempotencyKey,
+          },
           body: JSON.stringify({
             amount: downsellAmountPaise,
             currency: "INR",
@@ -814,15 +852,48 @@ app.post("/api/webhooks/razorpay", webhookLimiter, async (req: Request, res: Res
   const bodyForSig = Buffer.isBuffer(rawBody) ? rawBody : Buffer.from(JSON.stringify(rawBody));
   const signature = req.headers["x-razorpay-signature"] as string;
 
-  // Webhook signature verification — always ACK (Razorpay retries on non-200)
-  // Log verification failures but never block the response
-  if (WEBHOOK_SECRET && WEBHOOK_SECRET !== DEFAULT_LOCAL_WEBHOOK_SECRET && signature) {
-    const expectedSig = createHmac("sha256", WEBHOOK_SECRET).update(bodyForSig).digest("hex");
-    const sigBuf = Buffer.from(signature, "hex");
-    const expBuf = Buffer.from(expectedSig, "hex");
-    if (sigBuf.length !== expBuf.length || !timingSafeEqual(sigBuf, expBuf)) {
-      logger.error({ msg: "[Webhook] Signature verification failed — ACKing anyway per Razorpay best practice" });
+  // Fail-Closed Webhook Signature Verification (Phase 5)
+  // Enforce HTTP 401 on missing or invalid HMAC in production, strict mode, or when secret is configured
+  const isStrictWebhookSecurity =
+    isProduction ||
+    process.env.STRICT_WEBHOOK_SECURITY === "true" ||
+    req.headers["x-strict-webhook-security"] === "true" ||
+    Boolean(WEBHOOK_SECRET && WEBHOOK_SECRET !== DEFAULT_LOCAL_WEBHOOK_SECRET);
+
+  if (isStrictWebhookSecurity) {
+    if (!signature) {
+      logger.error({ msg: "[Webhook] Rejected: Missing x-razorpay-signature header" });
+      return res.status(401).json({ error: "Missing x-razorpay-signature header" });
     }
+
+    const secret = WEBHOOK_SECRET || DEFAULT_LOCAL_WEBHOOK_SECRET;
+    const expectedSig = createHmac("sha256", secret).update(bodyForSig).digest("hex");
+    let isValid = false;
+
+    try {
+      const sigBuf = Buffer.from(signature, "hex");
+      const expBuf = Buffer.from(expectedSig, "hex");
+      if (sigBuf.length === expBuf.length && timingSafeEqual(sigBuf, expBuf)) {
+        isValid = true;
+      }
+    } catch {
+      isValid = false;
+    }
+
+    if (!isValid) {
+      logger.error({ msg: "[Webhook] Rejected: Invalid x-razorpay-signature header" });
+      return res.status(401).json({ error: "Invalid webhook signature" });
+    }
+  } else if (signature && WEBHOOK_SECRET) {
+    // Non-strict test/local mode: soft verify for diagnostic logging
+    try {
+      const expectedSig = createHmac("sha256", WEBHOOK_SECRET).update(bodyForSig).digest("hex");
+      const sigBuf = Buffer.from(signature, "hex");
+      const expBuf = Buffer.from(expectedSig, "hex");
+      if (sigBuf.length !== expBuf.length || !timingSafeEqual(sigBuf, expBuf)) {
+        logger.warn({ msg: "[Webhook] Signature verification mismatch in test mode (allowed)" });
+      }
+    } catch {}
   }
 
   try {
@@ -832,24 +903,30 @@ app.post("/api/webhooks/razorpay", webhookLimiter, async (req: Request, res: Res
     const eventType = event.event as string;
     const payment = event.payload?.payment?.entity;
     const paymentId = payment?.id as string | undefined;
+    const dedupeId =
+      paymentId ||
+      event.payload?.order?.entity?.id ||
+      event.payload?.subscription?.entity?.id ||
+      event.payload?.invoice?.entity?.id ||
+      (event.id ? String(event.id) : undefined);
 
-    // Webhook deduplication — swallow duplicate deliveries
-    if (paymentId) {
+    // Webhook deduplication — swallow duplicate deliveries across all entity types
+    if (dedupeId) {
       try {
         const existing = await dbClient.execute({
           sql: "SELECT provider_event_id FROM webhook_dedupe WHERE provider_event_id = ?",
-          args: [paymentId],
+          args: [dedupeId],
         });
         if (existing.rows.length > 0) {
           await dbClient.execute({
             sql: "UPDATE webhook_dedupe SET swallow_count = swallow_count + 1 WHERE provider_event_id = ?",
-            args: [paymentId],
+            args: [dedupeId],
           });
           return res.json({ received: true, deduped: true });
         }
         await dbClient.execute({
           sql: "INSERT INTO webhook_dedupe (provider_event_id, first_seen_utc, swallow_count) VALUES (?, ?, 0)",
-          args: [paymentId, isoUtc(Date.now())],
+          args: [dedupeId, isoUtc(Date.now())],
         });
       } catch {}
     }
@@ -1025,6 +1102,204 @@ app.post("/api/webhooks/razorpay", webhookLimiter, async (req: Request, res: Res
           } catch (err) {
             logger.error({ msg: "Failed to process failed payment", err: err });
           }
+        }
+      }
+    }
+
+    // ── Phase 5 Extended Webhook Handlers ─────────────────────────
+    if (eventType === "order.paid") {
+      const order = event.payload?.order?.entity;
+      const paymentEntity = event.payload?.payment?.entity;
+      const orderId = order?.id;
+      if (orderId) {
+        const amountPaise = Number(order.amount_paid || order.amount || paymentEntity?.amount || 0);
+        let customerProfileId = order.notes?.customer_profile_id || "";
+        let productName = order.notes?.product_name || "Store Item";
+
+        if (!customerProfileId) {
+          try {
+            const ev = await dbClient.execute({
+              sql: "SELECT customer_profile_id, product_name FROM live_payment_events WHERE razorpay_order_id = ? ORDER BY created_at_utc DESC LIMIT 1",
+              args: [orderId],
+            });
+            if (ev.rows.length > 0) {
+              customerProfileId = String(ev.rows[0].customer_profile_id);
+              if (ev.rows[0].product_name) productName = String(ev.rows[0].product_name);
+            }
+          } catch {}
+        }
+
+        if (customerProfileId) {
+          try {
+            await recordSuccessfulPayment(dbClient, {
+              razorpayPaymentId: paymentEntity?.id || `pay_ord_${orderId.slice(-8)}`,
+              razorpayOrderId: orderId,
+              customerProfileId,
+              amountPaise,
+              productName,
+              nowMs: Date.now(),
+            });
+
+            await appendAuditLedger(dbClient, {
+              eventType: "ORDER_PAID",
+              entityId: orderId,
+              customerId: customerProfileId,
+              payload: {
+                orderId,
+                amountPaise,
+                productName,
+                receipt: order.receipt,
+                paymentId: paymentEntity?.id,
+              },
+              nowMs: Date.now(),
+            });
+
+            broadcastSSE("global", {
+              type: "ORDER_PAID",
+              orderId,
+              customerProfileId,
+              amountPaise,
+              productName,
+            });
+          } catch (err) {
+            logger.error({ msg: "Failed to process order.paid", err: (err as Error).message });
+          }
+        }
+      }
+    }
+
+    if (eventType === "subscription.charged") {
+      const subscription = event.payload?.subscription?.entity;
+      const paymentEntity = event.payload?.payment?.entity;
+      const subId = subscription?.id;
+
+      if (subId) {
+        const amountPaise = Number(paymentEntity?.amount || subscription.plan_amount || 0);
+        const customerProfileId = subscription.notes?.customer_profile_id || subscription.customer_id || "cust_sub";
+
+        try {
+          await appendAuditLedger(dbClient, {
+            eventType: "SUBSCRIPTION_CHARGED",
+            entityId: subId,
+            customerId: customerProfileId,
+            payload: {
+              subscriptionId: subId,
+              planId: subscription.plan_id,
+              currentStart: subscription.current_start,
+              currentEnd: subscription.current_end,
+              chargeAt: subscription.charge_at,
+              amountPaise,
+              paymentId: paymentEntity?.id,
+              status: subscription.status,
+            },
+            nowMs: Date.now(),
+          });
+
+          broadcastSSE("global", {
+            type: "SUBSCRIPTION_CHARGED",
+            subscriptionId: subId,
+            customerProfileId,
+            amountPaise,
+            status: subscription.status,
+          });
+        } catch (err) {
+          logger.error({ msg: "Failed to process subscription.charged", err: (err as Error).message });
+        }
+      }
+    }
+
+    if (eventType === "subscription.halted") {
+      const subscription = event.payload?.subscription?.entity;
+      const subId = subscription?.id;
+
+      if (subId) {
+        const amountPaise = Number(subscription.plan_amount || subscription.notes?.amount_paise || 299900);
+        const customerProfileId = subscription.notes?.customer_profile_id || subscription.customer_id || "cust_halted";
+        const customerName = subscription.notes?.customer_name || "Subscriber";
+        const planName = subscription.notes?.plan_name || "Subscription Plan";
+
+        // Autonomously build SaaS Soft-lock Grace Period Strategy
+        const graceStrategy = buildSaaSGracePeriodStrategy({
+          mandateId: subId,
+          planName,
+          amountPaise,
+          softLockGraceDays: 5,
+          retryCount: 3,
+          maxRetries: 3,
+          rbiAdvanceNoticeHours: 24,
+        });
+
+        try {
+          await appendAuditLedger(dbClient, {
+            eventType: "SUBSCRIPTION_HALTED",
+            entityId: subId,
+            customerId: customerProfileId,
+            payload: {
+              subscriptionId: subId,
+              status: "halted",
+              gracePeriodDays: graceStrategy.softLockGraceDays,
+              softLockExpiresAtUtc: graceStrategy.softLockExpiresAtUtc,
+              customerMessage: graceStrategy.customerMessage,
+              actionUrl: graceStrategy.actionUrl,
+            },
+            nowMs: Date.now(),
+          });
+
+          broadcastSSE("global", {
+            type: "SUBSCRIPTION_HALTED",
+            subscriptionId: subId,
+            customerProfileId,
+            graceStrategy,
+          });
+        } catch (err) {
+          logger.error({ msg: "Failed to process subscription.halted", err: (err as Error).message });
+        }
+      }
+    }
+
+    if (eventType === "invoice.paid") {
+      const invoice = event.payload?.invoice?.entity;
+      const paymentEntity = event.payload?.payment?.entity;
+      const invoiceId = invoice?.id;
+
+      if (invoiceId) {
+        const amountPaidPaise = Number(invoice.amount_paid || invoice.amount || paymentEntity?.amount || 0);
+        const customerProfileId = invoice.customer_id || invoice.customer_details?.id || "cust_b2b";
+        const clientCompany = invoice.customer_details?.name || "Corporate Client";
+        const invoiceNumber = invoice.invoice_number || invoiceId;
+
+        // Calculate early settlement DSO interest savings if settlement discount occurred
+        const dsoDaysSaved = Number(invoice.notes?.dso_days_saved || 20);
+        const annualCapitalRate = Number(invoice.notes?.annual_cost_of_capital || 0.14);
+        const capitalSavingsPaise = Math.round(amountPaidPaise * (annualCapitalRate / 365) * dsoDaysSaved);
+
+        try {
+          await appendAuditLedger(dbClient, {
+            eventType: "INVOICE_PAID",
+            entityId: invoiceId,
+            customerId: customerProfileId,
+            payload: {
+              invoiceId,
+              invoiceNumber,
+              clientCompany,
+              amountPaidPaise,
+              dsoDaysSaved,
+              capitalSavingsPaise,
+              status: "paid",
+            },
+            nowMs: Date.now(),
+          });
+
+          broadcastSSE("global", {
+            type: "INVOICE_PAID",
+            invoiceId,
+            invoiceNumber,
+            clientCompany,
+            amountPaidPaise,
+            capitalSavingsPaise,
+          });
+        } catch (err) {
+          logger.error({ msg: "Failed to process invoice.paid", err: (err as Error).message });
         }
       }
     }
@@ -1247,6 +1522,472 @@ app.post("/api/vendor/decision", adminLimiter, requireAdminKey, async (req: Requ
   }
 });
 
+// ── Merchant Domain Configuration (Business Context Engine) ──────
+app.get("/api/vendor/domain-config", async (req: Request, res: Response) => {
+  try {
+    const tenantId = (req.query.tenantId as string) || "demo";
+    const config = await fetchMerchantDomainConfig(tenantId, dbClient);
+    res.json({ success: true, config });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+app.post("/api/vendor/domain-config", async (req: Request, res: Response) => {
+  try {
+    const {
+      tenantId = "demo",
+      domainType = "D2C_ECOMMERCE",
+      cartReservationMins = 15,
+      maxDiscountConcessionBp = 500,
+      softLockGraceDays = 3,
+    } = req.body || {};
+
+    const ALLOWED_DOMAINS = ["D2C_ECOMMERCE", "SAAS_MANDATES", "B2B_INVOICES", "HIGH_TICKET"] as const;
+    if (domainType && !ALLOWED_DOMAINS.includes(domainType)) {
+      return res.status(400).json({ error: `Invalid domainType. Allowed: ${ALLOWED_DOMAINS.join(", ")}` });
+    }
+
+    const nowUtc = isoUtc(Date.now());
+
+    await dbClient.execute({
+      sql: `
+        INSERT INTO merchant_domain_configs (
+          tenant_id, domain_type, cart_reservation_mins, max_discount_concession_bp, soft_lock_grace_days, created_at_utc, updated_at_utc
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(tenant_id) DO UPDATE SET
+          domain_type = excluded.domain_type,
+          cart_reservation_mins = excluded.cart_reservation_mins,
+          max_discount_concession_bp = excluded.max_discount_concession_bp,
+          soft_lock_grace_days = excluded.soft_lock_grace_days,
+          updated_at_utc = excluded.updated_at_utc
+      `,
+      args: [
+        tenantId,
+        domainType,
+        Math.max(0, Number(cartReservationMins) || 15),
+        Math.max(0, Math.min(5000, Number(maxDiscountConcessionBp) || 500)),
+        Math.max(0, Number(softLockGraceDays) || 3),
+        nowUtc,
+        nowUtc,
+      ],
+    });
+
+    const updated = await fetchMerchantDomainConfig(tenantId, dbClient);
+    broadcastSSE("global", { type: "DOMAIN_CONFIG_UPDATED", config: updated });
+    res.json({ success: true, config: updated });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// ── Customer Behavioral Telemetry & Intelligence Endpoints ───────
+app.post("/api/telemetry/customer-event", async (req: Request, res: Response) => {
+  try {
+    if (!req.body || typeof req.body !== "object") {
+      return res.status(400).json({ error: "Invalid request body" });
+    }
+
+    const { profileId, event, latencyMins, channel = "EMAIL", amountPaise, domainType } = req.body;
+    if (!profileId || !event) {
+      return res.status(400).json({ error: "profileId and event required" });
+    }
+
+    const ALLOWED_EVENTS = ["opened", "email_opened", "clicked", "link_clicked"] as const;
+    if (!ALLOWED_EVENTS.includes(event)) {
+      return res.status(400).json({ error: `Invalid event. Allowed: ${ALLOWED_EVENTS.join(", ")}` });
+    }
+
+    if (event === "opened" || event === "email_opened") {
+      await recordEmailOpened(profileId, Number(latencyMins) || 1.0, dbClient);
+    } else if (event === "clicked" || event === "link_clicked") {
+      await recordLinkClicked(profileId, channel === "SMS" ? "SMS" : "EMAIL", dbClient);
+    }
+
+    const profile = await fetchBehavioralProfile(profileId, dbClient);
+    if (!profile) return res.status(404).json({ error: "Customer profile not found" });
+
+    const priority = computeCustomerPriority(
+      profile,
+      typeof amountPaise === "number" && !isNaN(amountPaise) ? amountPaise : 199900,
+      domainType || "D2C_ECOMMERCE"
+    );
+    broadcastSSE("global", { type: "CUSTOMER_TELEMETRY_UPDATED", profileId, priorityTier: priority.priorityTier });
+    res.json({ success: true, profile, priority });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+app.get("/api/behavioral/profile/:id", async (req: Request, res: Response) => {
+  try {
+    const profile = await fetchBehavioralProfile(req.params.id, dbClient);
+    if (!profile) return res.status(404).json({ error: "Customer profile not found" });
+
+    const tenantId = (req.query.tenantId as string) || "demo";
+    const config = await fetchMerchantDomainConfig(tenantId, dbClient);
+    const amountPaise = Number(req.query.amountPaise) || 199900;
+    const priority = computeCustomerPriority(profile, amountPaise, config.domainType);
+
+    res.json({ success: true, profile, priority, domainConfig: config });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+app.get("/api/behavioral/low-balance-guidance", async (req: Request, res: Response) => {
+  try {
+    const customerName = (req.query.name as string) || "Customer";
+    const amountPaise = Number(req.query.amountPaise) || 199900;
+    const recoveryUrl = (req.query.url as string) || `${getPublicBaseUrl()}/store`;
+    const profileId = req.query.profileId as string | undefined;
+
+    let profile: CustomerBehavioralProfile | null = null;
+    if (profileId) {
+      profile = await fetchBehavioralProfile(profileId, dbClient);
+    }
+
+    const guidance = getLowBalanceGuidance(customerName, amountPaise, recoveryUrl, profile);
+    res.json({ success: true, guidance });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// ── Merchant Domain Context Engine Endpoints (Phase 3) ───────────
+
+app.post("/api/domain/d2c/upi-intent", async (req: Request, res: Response) => {
+  try {
+    const {
+      merchantVpa = "merchant.payments@razorpay",
+      merchantName = "ARBITER Store",
+      transactionRef = `txn_${Date.now()}`,
+      amountPaise,
+      cartReservationMins,
+      concessionDiscountBp,
+      productName,
+      recoveryUrl,
+      tenantId = "demo",
+    } = req.body || {};
+
+    if (!amountPaise || typeof amountPaise !== "number" || amountPaise <= 0) {
+      return res.status(400).json({ error: "Valid amountPaise is required" });
+    }
+
+    const tenantConfig = await fetchMerchantDomainConfig(tenantId, dbClient).catch(() => null);
+    const effectiveMins = cartReservationMins ?? tenantConfig?.cartReservationMins ?? 15;
+    const effectiveBp = concessionDiscountBp ?? Math.min(500, tenantConfig?.maxDiscountConcessionBp ?? 500);
+
+    const strategy = buildD2CRecoveryStrategy({
+      merchantVpa,
+      merchantName,
+      transactionRef,
+      amountPaise,
+      cartReservationMins: effectiveMins,
+      concessionDiscountBp: effectiveBp,
+      productName,
+      recoveryUrl: recoveryUrl || `${getPublicBaseUrl()}/checkout`,
+    });
+
+    res.json({ success: true, strategy });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+app.post("/api/domain/saas/grace-period", async (req: Request, res: Response) => {
+  try {
+    const {
+      mandateId,
+      planName = "Pro Subscription",
+      amountPaise,
+      customerEmail,
+      customerPhone,
+      retryCount = 0,
+      maxRetries = 3,
+      softLockGraceDays,
+      tenantId = "demo",
+    } = req.body || {};
+
+    if (!mandateId || !amountPaise) {
+      return res.status(400).json({ error: "mandateId and amountPaise are required" });
+    }
+
+    const tenantConfig = await fetchMerchantDomainConfig(tenantId, dbClient).catch(() => null);
+    const effectiveGraceDays = softLockGraceDays ?? tenantConfig?.softLockGraceDays ?? 3;
+
+    const strategy = buildSaaSGracePeriodStrategy({
+      mandateId,
+      planName,
+      amountPaise,
+      customerEmail,
+      customerPhone,
+      retryCount,
+      maxRetries,
+      softLockGraceDays: effectiveGraceDays,
+    });
+
+    res.json({ success: true, strategy });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+app.post("/api/domain/b2b/early-settlement", (req: Request, res: Response) => {
+  try {
+    const {
+      invoiceId = `inv_${Date.now()}`,
+      invoiceNumber = `INV-${Date.now()}`,
+      clientCompany,
+      contactPerson = "Finance Manager",
+      contactEmail,
+      amountPaise,
+      dueDateUtc,
+      vendorVpaPrefix,
+      discountPercent,
+      annualCostOfCapital,
+      dsoDaysSaved,
+    } = req.body || {};
+
+    if (!amountPaise || !clientCompany) {
+      return res.status(400).json({ error: "amountPaise and clientCompany are required" });
+    }
+
+    const strategy = buildB2BEarlySettlementStrategy({
+      invoiceId,
+      invoiceNumber,
+      clientCompany,
+      contactPerson,
+      contactEmail: contactEmail || "finance@example.com",
+      amountPaise,
+      dueDateUtc: dueDateUtc || new Date(Date.now() + 30 * 86400000).toISOString(),
+      vendorVpaPrefix,
+      discountPercent,
+      annualCostOfCapital,
+      dsoDaysSaved,
+    });
+
+    res.json({ success: true, strategy });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+app.post("/api/domain/edtech/split-pay", (req: Request, res: Response) => {
+  try {
+    const {
+      totalAmountPaise,
+      customerName = "Learner",
+      productName = "Advanced Program",
+      installmentCount = 3,
+    } = req.body || {};
+
+    if (!totalAmountPaise || typeof totalAmountPaise !== "number" || totalAmountPaise <= 0) {
+      return res.status(400).json({ error: "Valid totalAmountPaise is required" });
+    }
+
+    const strategy = buildHighTicketSplitPayStrategy({
+      totalAmountPaise,
+      customerName,
+      productName,
+      installmentCount,
+    });
+
+    res.json({ success: true, strategy });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+app.post("/api/decide/batch-sequence", (req: Request, res: Response) => {
+  try {
+    const { candidates, config, nowMs } = req.body || {};
+
+    if (!Array.isArray(candidates)) {
+      return res.status(400).json({ error: "candidates array is required" });
+    }
+
+    const result = sequenceIntelligentRecoveryBatch(
+      candidates,
+      config || {},
+      typeof nowMs === "number" ? nowMs : Date.now()
+    );
+
+    res.json({ success: true, result });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// ── LinUCB Contextual Bandit Endpoints ───────────────────────────
+app.post("/api/bandit/select-arm", (req: Request, res: Response) => {
+  try {
+    const {
+      amountPaise,
+      ticketAmountPaise,
+      dwellTimeSeconds = 0,
+      openLatencyMins = 30,
+      priorFailureCount = 0,
+      channelResponsiveness = 0.5,
+      armType = "enterprise",
+      context: rawContext,
+    } = req.body || {};
+
+    const ticket = Number(amountPaise ?? ticketAmountPaise);
+    if (!rawContext && (!ticket || ticket <= 0)) {
+      return res.status(400).json({ error: "Valid amountPaise or ticketAmountPaise is required when context is not directly provided" });
+    }
+
+    if (armType === "legacy") {
+      let context: [number, number, number, number];
+      if (Array.isArray(rawContext) && rawContext.length === 4) {
+        context = rawContext as [number, number, number, number];
+      } else {
+        context = LinUCBBandit.buildContext(
+          ticket,
+          Number(priorFailureCount),
+          Number(dwellTimeSeconds),
+          Number(channelResponsiveness)
+        );
+      }
+      const selection = defaultRecoveryBandit.selectArm(context);
+      return res.json({
+        success: true,
+        armType: "legacy",
+        dimension: 4,
+        selection,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    // Enterprise 5-arm bandit (default)
+    let context: [number, number, number, number, number];
+    if (Array.isArray(rawContext) && rawContext.length === 5) {
+      context = rawContext as [number, number, number, number, number];
+    } else {
+      context = LinUCBBandit.buildEnterpriseContext(
+        ticket,
+        Number(dwellTimeSeconds),
+        Number(openLatencyMins),
+        Number(priorFailureCount),
+        Number(channelResponsiveness)
+      );
+    }
+
+    const selection = defaultEnterpriseBandit.selectArm(context);
+    return res.json({
+      success: true,
+      armType: "enterprise",
+      dimension: 5,
+      selection,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    logger.error({ msg: "[Bandit] select-arm error", err: (err as Error).message });
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+app.post("/api/bandit/feedback", (req: Request, res: Response) => {
+  try {
+    const {
+      action,
+      reward,
+      context,
+      armType = "enterprise",
+    } = req.body || {};
+
+    if (!action || typeof action !== "string") {
+      return res.status(400).json({ error: "Valid action string is required" });
+    }
+    if (typeof reward !== "number" || isNaN(reward)) {
+      return res.status(400).json({ error: "Valid reward number in [0, 1] is required" });
+    }
+    if (!Array.isArray(context)) {
+      return res.status(400).json({ error: "Context array is required" });
+    }
+
+    if (armType === "legacy") {
+      if (context.length !== 4) {
+        return res.status(400).json({ error: "Legacy bandit requires a 4-dimensional context vector" });
+      }
+      if (!BANDIT_ACTIONS.includes(action as any)) {
+        return res.status(400).json({ error: `Action '${action}' is not a valid legacy arm: ${BANDIT_ACTIONS.join(", ")}` });
+      }
+      defaultRecoveryBandit.updateArm(action as any, context, reward);
+      const updatedState = defaultRecoveryBandit.getState()[action as any];
+      return res.json({
+        success: true,
+        armType: "legacy",
+        action,
+        reward,
+        armState: updatedState,
+      });
+    }
+
+    // Enterprise bandit (default)
+    if (context.length !== 5) {
+      return res.status(400).json({ error: "Enterprise bandit requires a 5-dimensional context vector" });
+    }
+    if (!ENTERPRISE_BANDIT_ACTIONS.includes(action as any)) {
+      return res.status(400).json({ error: `Action '${action}' is not a valid enterprise arm: ${ENTERPRISE_BANDIT_ACTIONS.join(", ")}` });
+    }
+
+    defaultEnterpriseBandit.updateArm(action as any, context, reward);
+    const updatedState = defaultEnterpriseBandit.getState()[action as any];
+    return res.json({
+      success: true,
+      armType: "enterprise",
+      action,
+      reward,
+      armState: updatedState,
+    });
+  } catch (err) {
+    logger.error({ msg: "[Bandit] feedback error", err: (err as Error).message });
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+app.get("/api/bandit/arms-state", (req: Request, res: Response) => {
+  try {
+    const armType = (req.query.armType as string) || "enterprise";
+    if (armType === "legacy") {
+      const state = defaultRecoveryBandit.getState();
+      const summary = Object.entries(state).map(([arm, s]) => ({
+        arm,
+        pullCount: s.pullCount,
+        totalReward: s.totalReward,
+        meanReward: s.pullCount > 0 ? Number((s.totalReward / s.pullCount).toFixed(4)) : 0,
+      }));
+      return res.json({
+        success: true,
+        armType: "legacy",
+        dimension: 4,
+        arms: state,
+        summary,
+      });
+    }
+
+    const state = defaultEnterpriseBandit.getState();
+    const summary = Object.entries(state).map(([arm, s]) => ({
+      arm,
+      pullCount: s.pullCount,
+      totalReward: s.totalReward,
+      meanReward: s.pullCount > 0 ? Number((s.totalReward / s.pullCount).toFixed(4)) : 0,
+    }));
+    return res.json({
+      success: true,
+      armType: "enterprise",
+      dimension: 5,
+      arms: state,
+      summary,
+    });
+  } catch (err) {
+    logger.error({ msg: "[Bandit] arms-state error", err: (err as Error).message });
+    return res.status(500).json({ error: (err as Error).message });
+  }
+});
+
 // ── SSE Endpoints ────────────────────────────────────────────────
 app.get("/api/events/stream", (req: Request, res: Response) => {
   res.setHeader("Content-Type", "text/event-stream");
@@ -1403,6 +2144,21 @@ app.post("/api/webhooks/brevo/events", webhookLimiter, async (req: Request, res:
       event: event.event,
       email: event.email,
     });
+
+    if (event.email) {
+      const custRes = await dbClient.execute({
+        sql: `SELECT id FROM customer_profiles WHERE email = ? LIMIT 1`,
+        args: [event.email],
+      });
+      if (custRes.rows.length > 0) {
+        const profileId = String(custRes.rows[0].id);
+        if (event.event === "opened" || event.event === "unique_opened") {
+          await recordEmailOpened(profileId, 2.0, dbClient);
+        } else if (event.event === "click" || event.event === "clicked") {
+          await recordLinkClicked(profileId, "EMAIL", dbClient);
+        }
+      }
+    }
     res.json({ status: "ok", received: true });
   } catch {
     res.json({ status: "ok", received: true });
@@ -1418,6 +2174,23 @@ app.post("/api/webhooks/msg91/dlr", webhookLimiter, async (req: Request, res: Re
       status: event.status,
       mobile: event.mobile,
     });
+
+    if (event.mobile) {
+      const rawMobile = String(event.mobile).replace(/\D/g, "");
+      const custRes = await dbClient.execute({
+        sql: `SELECT id FROM customer_profiles WHERE phone LIKE ? LIMIT 1`,
+        args: [`%${rawMobile.slice(-10)}%`],
+      });
+      if (custRes.rows.length > 0) {
+        const profileId = String(custRes.rows[0].id);
+        const status = String(event.status).toUpperCase();
+        if (status.includes("DELIV")) {
+          await recordDeliveryStatus(profileId, "SMS", "DELIVERED", dbClient);
+        } else if (status.includes("FAIL") || status.includes("REJECT") || status.includes("DND")) {
+          await recordDeliveryStatus(profileId, "SMS", "FAILED", dbClient);
+        }
+      }
+    }
     res.json({ status: "ok", received: true });
   } catch {
     res.json({ status: "ok", received: true });
@@ -2081,14 +2854,105 @@ app.get("/api/recovery/batch-report", async (_req: Request, res: Response) => {
   }
 });
 
-// ── 4-Way Comparative Baseline Ablation Benchmark (Task 6.3 / BEN-15) ──
+// ── 4-Way Comparative Baseline Ablation Benchmark (Task 6.3 / BEN-15 / Phase 6) ──
 app.get("/api/benchmark/four-way", (req: Request, res: Response) => {
   try {
     const size = parseInt(req.query.size as string, 10) || 1000;
     const seed = parseInt(req.query.seed as string, 16) || 0x5eed;
-    const report = runFourWayAblationBenchmark(size, seed);
+    const domain = (req.query.domain as string) || "d2c";
+    const minTicketInr = req.query.minTicket ? parseInt(req.query.minTicket as string, 10) : undefined;
+    const maxTicketInr = req.query.maxTicket ? parseInt(req.query.maxTicket as string, 10) : undefined;
+    const report = runFourWayAblationBenchmark({
+      batchSize: size,
+      seed,
+      domain: domain as any,
+      minTicketInr,
+      maxTicketInr,
+    });
     res.json(report);
   } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+app.post("/api/benchmark/four-way/run", (req: Request, res: Response) => {
+  try {
+    const options = req.body || {};
+    const report = runFourWayAblationBenchmark(options);
+    res.json({ success: true, report });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// ── Customer Behavioral Intelligence Profiles (Phase 1 / Phase 6) ──
+app.get("/api/customers/profiles", async (req: Request, res: Response) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit as string, 10) || 50, 200);
+    const offset = Math.max(parseInt(req.query.offset as string, 10) || 0, 0);
+
+    const result = await dbClient.execute({
+      sql: `
+        SELECT 
+          id, name, phone, email, preferred_channel, 
+          email_open_latency_mins, historical_open_rate, historical_click_rate,
+          payment_method_affinity, ticket_sensitivity_score, alternate_account_converted,
+          total_recovered_paise, patience_score, last_engaged_channel, last_engaged_at_utc,
+          created_at_utc
+        FROM customer_profiles
+        ORDER BY total_recovered_paise DESC, created_at_utc DESC
+        LIMIT ? OFFSET ?
+      `,
+      args: [limit, offset],
+    });
+
+    res.json({
+      success: true,
+      count: result.rows.length,
+      profiles: result.rows,
+    });
+  } catch (err) {
+    logger.error({ msg: "[CustomerProfiles] Error", err: (err as Error).message });
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// ── Intelligent Priority Queue Live Telemetry (Phase 3 / Phase 6) ──
+app.get("/api/decide/priority-queue", async (_req: Request, res: Response) => {
+  try {
+    const result = await dbClient.execute({
+      sql: `
+        SELECT 
+          lpe.id, lpe.customer_profile_id, lpe.razorpay_order_id, lpe.amount_paise,
+          lpe.failure_reason, lpe.failure_code, lpe.created_at_utc,
+          cp.name as customer_name, cp.email as customer_email, cp.phone as customer_phone,
+          cp.preferred_channel, cp.email_open_latency_mins, cp.historical_open_rate,
+          cp.historical_click_rate, cp.alternate_account_converted, cp.ticket_sensitivity_score
+        FROM live_payment_events lpe
+        LEFT JOIN customer_profiles cp ON cp.id = lpe.customer_profile_id
+        WHERE lpe.status = 'failed'
+        ORDER BY lpe.created_at_utc DESC
+        LIMIT 50
+      `,
+      args: [],
+    });
+
+    const candidates = result.rows.map((r: any) => {
+      const openLatency = r.email_open_latency_mins ?? 45;
+      return {
+        id: String(r.id),
+        amountPaise: Number(r.amount_paise || 100000),
+        preferredChannel: (r.preferred_channel as any) || "AUTO",
+        emailOpenLatencyMins: openLatency,
+        historicalOpenRate: Number(r.historical_open_rate || 0.5),
+        domainType: "D2C_ECOMMERCE" as const,
+      };
+    });
+
+    const sequenced = sequenceIntelligentRecoveryBatch(candidates, {}, Date.now());
+    res.json({ success: true, queue: sequenced });
+  } catch (err) {
+    logger.error({ msg: "[PriorityQueue] Error", err: (err as Error).message });
     res.status(500).json({ error: (err as Error).message });
   }
 });

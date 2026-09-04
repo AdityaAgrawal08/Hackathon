@@ -752,6 +752,14 @@ export async function recordSuccessfulPayment(
       args: [params.amountPaise, params.customerProfileId],
     });
 
+    // Increment total_recovered_paise if column exists (migration 0022)
+    try {
+      await client.execute({
+        sql: `UPDATE customer_profiles SET total_recovered_paise = total_recovered_paise + ? WHERE id = ?`,
+        args: [params.amountPaise, params.customerProfileId],
+      });
+    } catch {}
+
     // Cancel pending outreach for this event (mark CANCELLED with audit reason)
     await client.execute({
       sql: `UPDATE scheduled_outreach SET executed = 1, status = 'CANCELLED', cancelled_reason = 'PAYMENT_COMPLETED',

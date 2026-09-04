@@ -904,7 +904,14 @@ export async function runBatchBenchmark(dbClient?: Client, requestedBatchSize = 
     }
 
     if (cls === "SOFT_RETRYABLE") {
-      if (actionId === "RETRY_PAYDAY" || actionId === "PROMISE_TO_PAY" || actionId === "PARTIAL_COLLECT" || actionId === "RECOVER_VOICE_HI") {
+      if (
+        actionId === "RETRY_PAYDAY" ||
+        actionId === "PROMISE_TO_PAY" ||
+        actionId === "PARTIAL_COLLECT" ||
+        actionId === "RECOVER_VOICE_HI" ||
+        actionId === "ALTERNATE_UPI_LINK" ||
+        actionId === "SWITCH_ACCOUNT_OR_RETRY"
+      ) {
         return "successful_payment";
       }
       const istDate = new Date(nowMs + 5.5 * 3600000);
@@ -1387,11 +1394,13 @@ export async function initiateRecoveryOrder(
   if (keyId && keySecret && !keyId.includes("xxxxxx") && !keySecret.includes("xxxxxx")) {
     try {
       const auth = Buffer.from(`${keyId}:${keySecret}`).toString("base64");
+      const idempotencyKey = `idemp_rec_${session.id}_${preferredMethod}`;
       const rzpRes = await fetch("https://api.razorpay.com/v1/orders", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Basic ${auth}`,
+          "X-Razorpay-Idempotency-Key": idempotencyKey,
         },
         body: JSON.stringify({
           amount: session.amountPaise,
@@ -1489,7 +1498,7 @@ export async function recordPromiseToPay(
 
   const session = recoverySessions.get(proposalId);
   const nowMs = Date.now();
-  const scheduledReminderUtc = isoUtc(nowMs + 86400000 * 2); // Scheduled for upcoming payday morning
+  const scheduledReminderUtc = isoUtc(nowMs + 86400000 * 2); // Scheduled for customer chosen retry-later window
 
 
   if (dbClient) {

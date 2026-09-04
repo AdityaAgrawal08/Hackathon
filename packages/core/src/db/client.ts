@@ -7,16 +7,9 @@ import { DEFAULT_DB_PATH, SQLITE_BUSY_TIMEOUT_MS } from "../constants.js";
 
 export type Db = ReturnType<typeof drizzle<typeof schema>>;
 
-/**
- * Open the ARBITER database.
- * Invariant I-6/I-5 live in column conventions; here we enforce connection-level
- * safety: WAL for concurrent readers (P1-B6), busy timeout, FK enforcement ON
- * so orphan rows are impossible rather than "unlikely".
- */
 export async function openDb(dbPath?: string): Promise<{ client: Client; db: Db }> {
   const raw = dbPath ?? process.env.ARBITER_DB_PATH ?? DEFAULT_DB_PATH;
 
-  // Remote libSQL / Turso databases
   if (raw.startsWith("libsql:") || raw.startsWith("http:") || raw.startsWith("https:")) {
     const client = createClient({
       url: raw,
@@ -26,7 +19,6 @@ export async function openDb(dbPath?: string): Promise<{ client: Client; db: Db 
     return { client, db };
   }
 
-  // In-memory must be detected BEFORE path resolution
   if (raw === ":memory:" || raw === "file::memory:?cache=shared") {
     const client = createClient({ url: ":memory:" });
     await client.executeMultiple(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=${SQLITE_BUSY_TIMEOUT_MS};`);
@@ -34,13 +26,13 @@ export async function openDb(dbPath?: string): Promise<{ client: Client; db: Db 
     const db = drizzle(client, { schema });
     return { client, db };
   }
+
   const path = resolve(raw);
   if (!path.startsWith("file:") && !path.startsWith("libsql:") && !path.startsWith("http:") && !path.startsWith("https:")) {
     mkdirSync(dirname(path), { recursive: true });
   }
 
   const url = path.startsWith("file:") ? path : `file:${path}`;
-
   const client = createClient({ url });
   await client.executeMultiple(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=${SQLITE_BUSY_TIMEOUT_MS};`);
   await client.executeMultiple("PRAGMA foreign_keys=ON;");

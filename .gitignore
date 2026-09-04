@@ -2,19 +2,19 @@
 node_modules/
 .pnpm-store/
 
-# Secrets — never commit real keys (P0-B4)
+# Secrets & Environment
 .env
 .env.*
 !.env.example
 
-# Build artifacts
+# Build & TypeScript artifacts
 dist/
 build/
 .next/
 out/
 *.tsbuildinfo
 
-# Databases — demo state, never history
+# SQLite Databases & Storage
 *.sqlite
 *.sqlite3
 *.sqlite-journal
@@ -27,32 +27,18 @@ out/
 :memory:*
 data/
 
-# Logs & OS noise
+# Logs & OS
 logs/
 *.log
 npm-debug.log*
 .DS_Store
 Thumbs.db
 
-# Test/coverage
+# Test & Coverage
 coverage/
 .vitest-cache/
 
-# Databases (default sqlite + stray in-memory file artifact)
-data/
-arbiter.sqlite
-arbiter.sqlite-wal
-arbiter.sqlite-shm
-:memory:
-*.sqlite
-*.sqlite-wal
-*.sqlite-shm
-
-# Editor
+# Editor & IDE
 .idea/
 .vscode/*
 !.vscode/extensions.json
-:memory:-shm
-:memory:-wal
-:memory:-shm
-:memory:-wal

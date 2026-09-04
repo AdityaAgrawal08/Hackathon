@@ -61,16 +61,22 @@ export class OutreachRouter {
 
     // Dispatch through primary provider with automatic failover to secondary
     let lastError: Error | null = null;
+    let lastFailedResult: ProviderDispatchResult | null = null;
     for (const provider of providerList) {
       try {
         const result = await provider.send(payload);
         if (result.status === "SENT" || result.status === "DELIVERED" || result.status === "QUEUED") {
           return result;
         }
+        lastFailedResult = result;
       } catch (err) {
         lastError = err as Error;
         // Continue to fallback provider
       }
+    }
+
+    if (lastFailedResult) {
+      return lastFailedResult;
     }
 
     return {
@@ -82,5 +88,32 @@ export class OutreachRouter {
       dispatchedAtUtc: nowUtc,
       errorMessage: lastError ? lastError.message : "All providers for channel failed",
     };
+  }
+
+  /**
+   * Multi-rail cascade:
+   * If primary channel is SMS, tries registered SMS providers (MSG91 -> Brevo SMS).
+   * If SMS is suppressed by DND or all SMS providers fail, automatically cascades to EMAIL (Brevo Email).
+   */
+  async dispatchWithCascade(
+    preferredChannel: OutreachChannel,
+    payload: OutreachPayload,
+    nowMs: number = Date.now(),
+  ): Promise<ProviderDispatchResult & { cascadedFrom?: OutreachChannel }> {
+    const primaryResult = await this.dispatch(preferredChannel, payload, nowMs);
+    if (primaryResult.status === "SENT" || primaryResult.status === "DELIVERED" || primaryResult.status === "QUEUED") {
+      return primaryResult;
+    }
+
+    // If preferred was SMS and failed or was suppressed by DND, cascade to EMAIL
+    if (preferredChannel === "SMS" && this.providers.has("EMAIL")) {
+      const emailResult = await this.dispatch("EMAIL", payload, nowMs);
+      return {
+        ...emailResult,
+        cascadedFrom: "SMS",
+      };
+    }
+
+    return primaryResult;
   }
 }

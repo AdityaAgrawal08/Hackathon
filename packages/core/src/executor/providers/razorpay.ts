@@ -7,7 +7,7 @@
  *
  * Action → Razorpay mapping:
  *   RETRY_NOW       → Payment Link (card/UPI) for immediate retry
- *   RETRY_PAYDAY    → UPI Autopay retry scheduled at payday window
+ *   RETRY_PAYDAY    → UPI Autopay retry scheduled at retry-later window
  *   ALTERNATE_UPI_LINK → UPI Intent/Collect link for alternative method
  *   PARTIAL_COLLECT → Razorpay Smart Collect UPI (B2B partial first-installment, §4.8)
  *   REMINDER_LINK   → Payment Link with custom message
@@ -77,7 +77,7 @@ function buildUpiAutopayRetryPayload(ctx: ProviderContext) {
       action: ctx.actionId,
       failure_class: ctx.failureClass,
       idempotency_key: ctx.idempotencyKey,
-      scheduled_for: "payday_window",
+      scheduled_for: "retry_later_window",
     },
   };
 }
@@ -275,11 +275,13 @@ export const razorpayProvider: ActionProvider = {
       // B-006: Real Razorpay test-mode API call
       try {
         const auth = Buffer.from(`${keyId}:${keySecret}`).toString("base64");
+        const idempotencyKey = `idemp_pl_${ctx.proposalId}_${ctx.actionId}`;
         const response = await fetch("https://api.razorpay.com/v1/payment_links", {
           method: "POST",
           headers: {
             "Authorization": `Basic ${auth}`,
             "Content-Type": "application/json",
+            "X-Razorpay-Idempotency-Key": idempotencyKey,
           },
           body: JSON.stringify({
             amount: ctx.amountPaise,

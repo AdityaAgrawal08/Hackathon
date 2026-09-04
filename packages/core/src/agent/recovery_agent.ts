@@ -30,10 +30,16 @@ export interface CustomerInteractionEvent {
   nowMs?: number;
 }
 
+export interface RePlanOptions {
+  enableWhatsApp?: boolean; // When false, strictly cascades between SMS <-> Email (default: true for legacy compatibility)
+}
+
 export interface AgentRePlanResult {
   action:
     | "NO_ACTION"
     | "SWITCH_TO_WHATSAPP"
+    | "SWITCH_TO_EMAIL"
+    | "SWITCH_TO_SMS"
     | "TRIGGER_DOWNSELL_SPLIT"
     | "SWITCH_TO_1TAP_UPI"
     | "TERMINATE_STOP_RULE"
@@ -42,7 +48,7 @@ export interface AgentRePlanResult {
   concessionType?: "SPLIT_PAY" | "INSTANT_DISCOUNT_5PCT";
   concessionPaise?: number;
   scheduledAtUtc?: string;
-  banditSelection?: ArmSelectionResult;
+  banditSelection?: ArmSelectionResult<any>;
 }
 
 /**
@@ -52,7 +58,8 @@ export interface AgentRePlanResult {
 export function rePlanRecoveryAction(
   event: CustomerInteractionEvent,
   stoppingCtx: StoppingRuleContext,
-  bandit: LinUCBBandit = defaultRecoveryBandit,
+  bandit: LinUCBBandit<any> = defaultRecoveryBandit,
+  options?: RePlanOptions,
 ): AgentRePlanResult {
   const nowMs = event.nowMs || Date.now();
 
@@ -75,13 +82,22 @@ export function rePlanRecoveryAction(
   }
 
   const amountPaise = event.cartAmountPaise || 499900;
-  const context = LinUCBBandit.buildContext(
-    amountPaise,
-    stoppingCtx.touchCount,
-    event.dwellTimeSeconds || 0,
-    0.6,
-  );
-  const banditSelection = bandit.selectArm(context);
+  const isEnterprise = (bandit as any)?.dimension === 5;
+  const context = isEnterprise
+    ? LinUCBBandit.buildEnterpriseContext(
+        amountPaise,
+        event.dwellTimeSeconds || 0,
+        event.timeSinceFailureMinutes || 30,
+        stoppingCtx.touchCount,
+        0.6
+      )
+    : LinUCBBandit.buildContext(
+        amountPaise,
+        stoppingCtx.touchCount,
+        event.dwellTimeSeconds || 0,
+        0.6
+      );
+  const banditSelection = bandit.selectArm(context as any);
 
   // 3. Scenario A: Portal Exited without Pay after viewing (> 20s dwell)
   // High friction / sticker shock -> Autonomous Downsell / Split-Pay Concession
@@ -124,6 +140,22 @@ export function rePlanRecoveryAction(
     (event.interactionType === "SMS_DELIVERED" || event.interactionType === "EMAIL_DELIVERED") &&
     event.timeSinceFailureMinutes >= 120
   ) {
+    if (options?.enableWhatsApp === false) {
+      if (event.interactionType === "SMS_DELIVERED") {
+        return {
+          action: "SWITCH_TO_EMAIL",
+          reason: "Primary SMS unopened after 2h. Cross-channel failover to transactional Email notification.",
+          banditSelection,
+        };
+      } else {
+        return {
+          action: "SWITCH_TO_SMS",
+          reason: "Primary Email unopened after 2h. Cross-channel failover to urgent SMS notification.",
+          banditSelection,
+        };
+      }
+    }
+
     return {
       action: "SWITCH_TO_WHATSAPP",
       reason: "Primary notification unopened after 2h. Channel-switching to high-open WhatsApp utility notification.",
