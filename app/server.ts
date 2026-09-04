@@ -2894,22 +2894,40 @@ app.get("/api/customers/profiles", async (req: Request, res: Response) => {
     const result = await dbClient.execute({
       sql: `
         SELECT 
-          id, name, phone, email, preferred_channel, 
-          email_open_latency_mins, historical_open_rate, historical_click_rate,
-          payment_method_affinity, ticket_sensitivity_score, alternate_account_converted,
-          total_recovered_paise, patience_score, last_engaged_channel, last_engaged_at_utc,
-          created_at_utc
-        FROM customer_profiles
-        ORDER BY total_recovered_paise DESC, created_at_utc DESC
+          cp.id, cp.name, cp.phone, cp.email, cp.preferred_channel, 
+          cp.email_open_latency_mins, cp.historical_open_rate, cp.historical_click_rate,
+          cp.payment_method_affinity, cp.ticket_sensitivity_score,
+          MAX(COALESCE(cp.alternate_account_converted, 0), CASE WHEN lpe.id IS NOT NULL THEN 1 ELSE 0 END) as alternate_account_converted,
+          MAX(COALESCE(cp.total_recovered_paise, 0), COALESCE(lpe.recovered_sum, 0)) as total_recovered_paise,
+          cp.patience_score, cp.last_engaged_channel, cp.last_engaged_at_utc,
+          cp.created_at_utc
+        FROM customer_profiles cp
+        LEFT JOIN (
+          SELECT customer_profile_id, MAX(id) as id, SUM(amount_paise) as recovered_sum
+          FROM live_payment_events
+          WHERE status = 'captured'
+          GROUP BY customer_profile_id
+        ) lpe ON lpe.customer_profile_id = cp.id
+        GROUP BY cp.id
+        ORDER BY total_recovered_paise DESC, cp.created_at_utc DESC
         LIMIT ? OFFSET ?
       `,
       args: [limit, offset],
     });
 
+    const convertedCount = result.rows.filter((r: any) => Number(r.alternate_account_converted) === 1).length;
+    const totalCount = result.rows.length;
+    const altConversionRate = totalCount > 0 ? ((convertedCount / totalCount) * 100).toFixed(1) + "%" : "0.0%";
+
     res.json({
       success: true,
       count: result.rows.length,
       profiles: result.rows,
+      stats: {
+        totalProfiles: totalCount,
+        convertedProfiles: convertedCount,
+        altConversionRate,
+      },
     });
   } catch (err) {
     logger.error({ msg: "[CustomerProfiles] Error", err: (err as Error).message });

@@ -617,13 +617,20 @@ export async function processFailedPayment(
       logger.info({ msg: "SKIPPED SMS: no phone number on customer profile" });
     }
 
-    // Schedule follow-ups
-    const followUpChannels = [
-      { channel: "SMS", delayMs: 2 * 60 * 60 * 1000 }, // +2 hours
-      { channel: "EMAIL", delayMs: 24 * 60 * 60 * 1000 }, // +24 hours
-      { channel: "SMS", delayMs: 48 * 60 * 60 * 1000 }, // +48 hours
-      { channel: "EMAIL", delayMs: 72 * 60 * 60 * 1000 }, // +72 hours
-    ];
+    // Schedule follow-ups dynamically based on user engagement history
+    const openLatency = customer?.email_open_latency_mins ?? null;
+    const isRapidResponder = openLatency !== null && openLatency <= 30;
+    const followUpChannels = isRapidResponder
+      ? [
+          { channel: "EMAIL", delayMs: 30 * 60 * 1000 },       // +30m rapid follow-up
+          { channel: "SMS", delayMs: 2 * 60 * 60 * 1000 },      // +2 hours
+          { channel: "EMAIL", delayMs: 24 * 60 * 60 * 1000 },   // +24 hours
+        ]
+      : [
+          { channel: "SMS", delayMs: 2 * 60 * 60 * 1000 },      // +2 hours
+          { channel: "EMAIL", delayMs: 24 * 60 * 60 * 1000 },   // +24 hours
+          { channel: "SMS", delayMs: 48 * 60 * 60 * 1000 },     // +48 hours
+        ];
 
     // Only schedule follow-ups if customer has contact info
     const hasContact = !!(outreachPayload.recipient.phone || outreachPayload.recipient.email);
@@ -707,14 +714,13 @@ export async function recordSuccessfulPayment(
   });
   const customer = custResult.rows[0] as any;
 
-  // Step 7: If customer had a failed payment for this product, UPDATE it to 'captured'
+  // Step 7: If customer had a failed payment for this product or order, UPDATE it to 'captured'
   // (moves entry from failed view to successful view — no duplicate row)
-  // Dedup key: customer + product (not order_id, since retry creates new orders)
   const existingFailed = await client.execute({
     sql: `SELECT id FROM live_payment_events
-          WHERE customer_profile_id = ? AND product_name = ? AND status = 'failed'
+          WHERE (customer_profile_id = ? OR razorpay_order_id = ?) AND status = 'failed'
           ORDER BY created_at_utc DESC LIMIT 1`,
-    args: [params.customerProfileId, params.productName],
+    args: [params.customerProfileId, params.razorpayOrderId],
   });
 
   if (existingFailed.rows.length > 0) {
@@ -752,13 +758,20 @@ export async function recordSuccessfulPayment(
       args: [params.amountPaise, params.customerProfileId],
     });
 
-    // Increment total_recovered_paise if column exists (migration 0022)
+    // Increment total_recovered_paise and alternate_account_converted if columns exist (migration 0022)
     try {
       await client.execute({
-        sql: `UPDATE customer_profiles SET total_recovered_paise = total_recovered_paise + ? WHERE id = ?`,
+        sql: `UPDATE customer_profiles SET total_recovered_paise = total_recovered_paise + ?, alternate_account_converted = 1 WHERE id = ?`,
         args: [params.amountPaise, params.customerProfileId],
       });
-    } catch {}
+    } catch {
+      try {
+        await client.execute({
+          sql: `UPDATE customer_profiles SET alternate_account_converted = 1 WHERE id = ?`,
+          args: [params.customerProfileId],
+        });
+      } catch {}
+    }
 
     // Cancel pending outreach for this event (mark CANCELLED with audit reason)
     await client.execute({

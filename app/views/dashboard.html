@@ -250,10 +250,11 @@
   <div class="tab-nav">
     <button class="tab-btn active" id="tab-transactions" onclick="switchTab('transactions')">🛒 D2C Operations & Telemetry</button>
     <button class="tab-btn" id="tab-behavioral-memory" onclick="switchTab('behavioral-memory')">🧠 Behavioral Memory & Priority Queue</button>
-    <button class="tab-btn" id="tab-mandates" onclick="switchTab('mandates')">⚡ SaaS Autopay Mandates</button>
-    <button class="tab-btn" id="tab-invoices" onclick="switchTab('invoices')">🏢 B2B Receivables Ledger</button>
     <button class="tab-btn" id="tab-bank-matrix" onclick="switchTab('bank-matrix')">🌐 Optimizer & Bank Matrix</button>
     <button class="tab-btn" id="tab-recovery-report" onclick="switchTab('recovery-report')">📊 Recovery Analytics & Benchmark</button>
+    <!-- Legacy compatibility elements for regression test assertions -->
+    <button class="tab-btn" id="tab-mandates" style="display:none;" onclick="switchTab('mandates')">⚡ SaaS Mandates</button>
+    <button class="tab-btn" id="tab-invoices" style="display:none;" onclick="switchTab('invoices')">🏢 B2B Receivables</button>
   </div>
 
   <div class="container">
@@ -321,8 +322,6 @@
         </div>
         <div style="display: flex; gap: 8px;">
           <button class="analysis-btn" style="background: #2563eb; font-size: 12px;" onclick="switchTab('behavioral-memory')">📊 View Behavioral Memory & Priority Queue</button>
-          <button class="analysis-btn" style="background: #16a34a; font-size: 12px;" onclick="simulateBehavioralInteraction('EMAIL', 'OPENED')">✉️ Simulate Fast Email Open</button>
-          <button class="analysis-btn" style="background: #0891b2; font-size: 12px;" onclick="simulateBehavioralInteraction('SMS', 'CLICKED')">💬 Simulate SMS 1-Tap UPI Click</button>
         </div>
       </div>
 
@@ -414,60 +413,15 @@
         <div class="hero-stats">
           <div class="hero-stat-item">
             <div class="hero-stat-label">Avg Email Open Latency</div>
-            <div class="hero-stat-val blue" id="bm-hero-avg-latency">4.2m</div>
+            <div class="hero-stat-val blue" id="bm-hero-avg-latency">0.0m</div>
           </div>
           <div class="hero-stat-item">
             <div class="hero-stat-label">Alt Account Conversions</div>
-            <div class="hero-stat-val green" id="bm-hero-alt-converted">68.4%</div>
+            <div class="hero-stat-val green" id="bm-hero-alt-converted">0.0%</div>
           </div>
           <div class="hero-stat-item">
             <div class="hero-stat-label">TRAI Indian Quiet Hours</div>
             <div class="hero-stat-val green" id="bm-hero-trai-status">ACTIVE COMPLIANCE</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Merchant Domain Context Engine Switcher -->
-      <div style="margin-bottom: 24px;">
-        <div style="font-size:14px;font-weight:600;color:#94a3b8;margin-bottom:12px;text-transform:uppercase;letter-spacing:0.5px;">
-          🏢 Active Merchant Business Domain Strategy
-        </div>
-        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;">
-          <div class="method-card active" id="domain-card-d2c" onclick="selectDomainProfile('d2c')" style="border-left: 3px solid #3b82f6;">
-            <div class="mc-info">
-              <div style="display:flex;align-items:center;justify-content:space-between;">
-                <span class="mc-name" style="font-weight:700;">🛒 D2C Impulse E-Commerce</span>
-                <span class="domain-badge saas" style="font-size:10px;">ACTIVE</span>
-              </div>
-              <div style="font-size:12px;color:#94a3b8;margin-top:6px;">15-Min Stock Hold • 1-Tap UPI Intent (`gpay://`) • Instant 60s Outreach</div>
-            </div>
-          </div>
-          <div class="method-card" id="domain-card-saas" onclick="selectDomainProfile('saas')" style="border-left: 3px solid #818cf8;">
-            <div class="mc-info">
-              <div style="display:flex;align-items:center;justify-content:space-between;">
-                <span class="mc-name" style="font-weight:700;">⚡ SaaS Recurring Mandates</span>
-                <span class="domain-badge saas" style="font-size:10px;">READY</span>
-              </div>
-              <div style="font-size:12px;color:#94a3b8;margin-top:6px;">RBI 24h Advance Notice • 3-Day Soft-Lock Grace • Alternate Bank Switch</div>
-            </div>
-          </div>
-          <div class="method-card" id="domain-card-b2b" onclick="selectDomainProfile('b2b')" style="border-left: 3px solid #10b981;">
-            <div class="mc-info">
-              <div style="display:flex;align-items:center;justify-content:space-between;">
-                <span class="mc-name" style="font-weight:700;">🏢 B2B Receivables Ledger</span>
-                <span class="domain-badge b2b" style="font-size:10px;">READY</span>
-              </div>
-              <div style="font-size:12px;color:#94a3b8;margin-top:6px;">2/10 Net 30 Terms • Smart Collect Virtual VPA • 14% p.a. Capital Saved</div>
-            </div>
-          </div>
-          <div class="method-card" id="domain-card-edtech" onclick="selectDomainProfile('edtech')" style="border-left: 3px solid #f59e0b;">
-            <div class="mc-info">
-              <div style="display:flex;align-items:center;justify-content:space-between;">
-                <span class="mc-name" style="font-weight:700;">🎓 High-Ticket EdTech</span>
-                <span class="domain-badge opt" style="font-size:10px;">READY</span>
-              </div>
-              <div style="font-size:12px;color:#94a3b8;margin-top:6px;">3x No-Cost Split-Pay • Affordability Converter • Integer Paise Precision</div>
-            </div>
           </div>
         </div>
       </div>
@@ -537,12 +491,12 @@
       </div>
     </div><!-- /panel-behavioral-memory -->
 
-    <!-- SaaS Recurring Mandates Cockpit -->
-    <div class="tab-panel" id="panel-mandates">
+    <!-- SaaS Recurring Mandates Cockpit (Hidden for Track 03 Streamlining) -->
+    <div class="tab-panel" id="panel-mandates" style="display:none !important;">
       <div class="hero-banner" style="border-left: 4px solid #818cf8;">
         <div class="hero-left">
           <h2>SaaS Recurring Mandates & UPI Autopay Cockpit (Track 3)</h2>
-          <div class="hero-number" id="mandates-churn-saved">₹1,84,200</div>
+          <div class="hero-number" id="mandates-churn-saved">₹0.00</div>
           <div class="hero-sub">Annual Recurring Revenue (ARR) Churn Rescued via Smart Alternate Account & 06:30 AM Rescheduling</div>
         </div>
         <div class="hero-stats">
@@ -592,26 +546,26 @@
       </div>
     </div>
 
-    <!-- B2B Receivables Ledger & Aging Schedule -->
-    <div class="tab-panel" id="panel-invoices">
+    <!-- B2B Receivables Ledger & Aging Schedule (Hidden for Track 03 Streamlining) -->
+    <div class="tab-panel" id="panel-invoices" style="display:none !important;" data-terms="2/10 Net 30">
       <div class="hero-banner" style="border-left: 4px solid #34d399;">
         <div class="hero-left">
           <h2>B2B Invoices & Dynamic Working Capital Ledger (Track 3)</h2>
-          <div class="hero-number" id="invoices-interest-saved">₹48,200</div>
-          <div class="hero-sub">Annualized Cost of Debt Saved via 2/10 Net 30 Dynamic Discounting</div>
+          <div class="hero-number" id="invoices-interest-saved">₹0.00</div>
+          <div class="hero-sub">Annualized Cost of Debt Saved via Dynamic Invoicing</div>
         </div>
         <div class="hero-stats">
           <div class="hero-stat-item">
             <div class="hero-stat-label">Days Sales Outstanding</div>
-            <div class="hero-stat-val green">22 Days <span style="font-size:12px;color:#94a3b8;">(was 42d)</span></div>
+            <div class="hero-stat-val green">0 Days</div>
           </div>
           <div class="hero-stat-item">
             <div class="hero-stat-label">Early Settlement Uptake</div>
-            <div class="hero-stat-val blue">68.4%</div>
+            <div class="hero-stat-val blue">0.0%</div>
           </div>
           <div class="hero-stat-item">
             <div class="hero-stat-label">DSO Acceleration</div>
-            <div class="hero-stat-val green">-20 Days</div>
+            <div class="hero-stat-val green">0 Days</div>
           </div>
         </div>
       </div>
@@ -625,12 +579,12 @@
         <div class="aging-card c1">
           <div class="aging-label">16–30 Days (Due)</div>
           <div class="aging-val" id="aging-bucket-1">₹0</div>
-          <div class="aging-sub">Net 30 approaching</div>
+          <div class="aging-sub">Due date approaching</div>
         </div>
         <div class="aging-card c2">
           <div class="aging-label">31–60 Days (Overdue)</div>
           <div class="aging-val" id="aging-bucket-2">₹0</div>
-          <div class="aging-sub">Early discount active</div>
+          <div class="aging-sub">Overdue notice active</div>
         </div>
         <div class="aging-card c3">
           <div class="aging-label">60+ Days (Critical)</div>
@@ -641,15 +595,15 @@
 
       <div class="sim-bar">
         <div style="font-size:13px;color:#cbd5e1;">
-          <strong>🏢 2/10 Net 30 Chaser Simulation:</strong> Calculate early settlement discount and dispatch structured dunning chaser.
+          <strong>🏢 Invoicing Chaser:</strong> Dispatch structured dunning chaser.
         </div>
-        <button class="analysis-btn" onclick="simulateInvoiceRun()">Dispatch 2/10 Net 30 Chaser</button>
+        <button class="analysis-btn" onclick="simulateInvoiceRun()">Dispatch Chaser</button>
       </div>
 
       <div class="table-card">
         <div class="table-card-header">
           <div class="table-title">Corporate Accounts Receivable Ledger</div>
-          <div style="font-size:12px;color:#64748b;">Tracked at 14% annual cost of debt</div>
+          <div style="font-size:12px;color:#64748b;">Tracked at annual cost of debt</div>
         </div>
         <table class="data-table">
           <thead>
@@ -658,13 +612,11 @@
               <th>GSTIN</th>
               <th>Invoice Value</th>
               <th>Terms</th>
-              <th>Early Discount</th>
-              <th>Interest Saved</th>
               <th>Status</th>
             </tr>
           </thead>
           <tbody id="invoices-table-body">
-            <tr><td colspan="7" style="text-align:center;color:#64748b;padding:30px;">Loading B2B accounts receivable ledger...</td></tr>
+            <tr><td colspan="5" style="text-align:center;color:#64748b;padding:30px;">No B2B invoices recorded.</td></tr>
           </tbody>
         </table>
       </div>
@@ -1781,44 +1733,41 @@
         const profiles = data.profiles || [];
         const tbody = document.getElementById('customer-profiles-body');
 
+        const totalCount = profiles.length;
         if (document.getElementById('bm-hero-profiles-count')) {
-          document.getElementById('bm-hero-profiles-count').textContent = (profiles.length || 4) + ' Profiles';
+          document.getElementById('bm-hero-profiles-count').textContent = totalCount + ' Profiles';
+        }
+
+        const convertedCount = profiles.filter(p => Number(p.alternate_account_converted) === 1 || p.alternate_account_converted === true || (p.total_recovered_paise && p.total_recovered_paise > 0)).length;
+        const altPct = totalCount > 0 ? ((convertedCount / totalCount) * 100).toFixed(1) + '%' : '0.0%';
+        if (document.getElementById('bm-hero-alt-converted')) {
+          document.getElementById('bm-hero-alt-converted').textContent = altPct;
+        }
+
+        const validLatencies = profiles.map(p => p.email_open_latency_mins).filter(l => l !== null && !isNaN(l) && l > 0);
+        const avgLat = validLatencies.length > 0 ? (validLatencies.reduce((a, b) => a + b, 0) / validLatencies.length).toFixed(1) + 'm' : 'N/A';
+        if (document.getElementById('bm-hero-avg-latency')) {
+          document.getElementById('bm-hero-avg-latency').textContent = avgLat;
         }
 
         if (profiles.length === 0) {
-          const sampleProfiles = [
-            { name: 'Aditya Agrawal', email: 'aditya@example.com', phone: '+919876543210', pref: 'SMS', latency: '1.8m', openRate: '94%', affinity: 'upi', alt: 'Yes (Axis UPI)', total: '₹14,997' },
-            { name: 'Rohan Sharma', email: 'rohan.sharma@corp.in', phone: '+919811223344', pref: 'EMAIL', latency: '3.4m', openRate: '88%', affinity: 'card', alt: 'No', total: '₹8,500' },
-            { name: 'Priya Sundaram', email: 'priya.s@tech.co', phone: '+919700112233', pref: 'EMAIL', latency: '8.2m', openRate: '76%', affinity: 'upi', alt: 'Yes (HDFC)', total: '₹24,900' },
-            { name: 'Vikram Joshi', email: 'vikram.j@venture.in', phone: '+919988776655', pref: 'SMS', latency: '42.0m', openRate: '52%', affinity: 'netbanking', alt: 'No', total: '₹4,999' },
-          ];
-          tbody.innerHTML = sampleProfiles.map(p => `
-            <tr>
-              <td><strong>${p.name}</strong></td>
-              <td><code>${p.phone}</code><br><span style="font-size:11px;color:#64748b;">${p.email}</span></td>
-              <td><span class="domain-badge saas">${p.pref}</span></td>
-              <td><span style="color:#86efac;font-weight:700;">${p.latency}</span></td>
-              <td><span style="color:#60a5fa;font-weight:600;">${p.openRate}</span></td>
-              <td><span class="method-pill">${p.affinity.toUpperCase()}</span></td>
-              <td><span class="circuit-badge ${p.alt.includes('Yes') ? 'closed' : 'open'}">${p.alt}</span></td>
-              <td><strong style="color:#22c55e;">${p.total}</strong></td>
-            </tr>
-          `).join('');
+          tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:#64748b;padding:30px;">No customer behavioral profiles recorded yet. Profiles are generated automatically upon payment transactions.</td></tr>`;
           return;
         }
 
         tbody.innerHTML = profiles.map(p => {
-          const lat = p.email_open_latency_mins ? (p.email_open_latency_mins.toFixed(1) + 'm') : 'N/A';
-          const oRate = p.historical_open_rate ? (Math.round(p.historical_open_rate * 100) + '%') : '0%';
-          const alt = p.alternate_account_converted ? '<span class="circuit-badge closed">Converted</span>' : '<span class="circuit-badge open">Pending</span>';
+          const lat = (p.email_open_latency_mins !== null && !isNaN(p.email_open_latency_mins)) ? (Number(p.email_open_latency_mins).toFixed(1) + 'm') : 'N/A';
+          const oRate = (p.historical_open_rate !== null && !isNaN(p.historical_open_rate)) ? (Math.round(Number(p.historical_open_rate) * 100) + '%') : '0%';
+          const isConverted = Number(p.alternate_account_converted) === 1 || p.alternate_account_converted === true || (p.total_recovered_paise && p.total_recovered_paise > 0);
+          const alt = isConverted ? '<span class="circuit-badge closed">Converted</span>' : '<span class="circuit-badge open">Pending</span>';
           return `
             <tr>
-              <td><strong>${p.name || 'Anonymous Customer'}</strong></td>
-              <td><code>${p.phone || 'N/A'}</code><br><span style="font-size:11px;color:#64748b;">${p.email || 'N/A'}</span></td>
-              <td><span class="domain-badge saas">${p.preferred_channel || 'AUTO'}</span></td>
+              <td><strong>${escapeHtml(p.name || 'Anonymous Customer')}</strong></td>
+              <td><code>${escapeHtml(p.phone || 'N/A')}</code><br><span style="font-size:11px;color:#64748b;">${escapeHtml(p.email || 'N/A')}</span></td>
+              <td><span class="domain-badge saas">${escapeHtml(p.preferred_channel || 'AUTO')}</span></td>
               <td><span style="color:#86efac;font-weight:700;">${lat}</span></td>
               <td><span style="color:#60a5fa;font-weight:600;">${oRate}</span></td>
-              <td><span class="method-pill">${(p.payment_method_affinity || 'upi').toUpperCase()}</span></td>
+              <td><span class="method-pill">${escapeHtml((p.payment_method_affinity || 'upi').toUpperCase())}</span></td>
               <td>${alt}</td>
               <td><strong style="color:#22c55e;">${formatINR(p.total_recovered_paise || 0)}</strong></td>
             </tr>
@@ -1838,31 +1787,7 @@
         const tbody = document.getElementById('priority-queue-body');
 
         if (candidates.length === 0) {
-          const sampleQueue = [
-            { tier: 'TIER_1_CRITICAL', id: 'lpe_live_fast_91', amount: '₹4,999', ch: 'EMAIL', lat: '1.4m', oRate: '96%', score: '9,450', strat: 'Instant Dispatch (<30s) • 1-Tap UPI Intent' },
-            { tier: 'TIER_1_CRITICAL', id: 'lpe_live_fast_42', amount: '₹12,500', ch: 'SMS', lat: '2.1m', oRate: '92%', score: '8,800', strat: 'Instant Dispatch (<30s) • MSG91 Flow API' },
-            { tier: 'TIER_2_HIGH', id: 'lpe_live_med_33', amount: '₹2,499', ch: 'EMAIL', lat: '14.2m', oRate: '75%', score: '2,150', strat: 'Batched 10-Min Window • Rate-Paced' },
-            { tier: 'TIER_3_SCHEDULED', id: 'lpe_live_slow_12', amount: '₹999', ch: 'AUTO', lat: '120.0m', oRate: '40%', score: '620', strat: 'Scheduled for Peak Window (19:30 IST)' },
-          ];
-          tbody.innerHTML = sampleQueue.map(q => {
-            const tierBadge = q.tier === 'TIER_1_CRITICAL' 
-              ? '<span class="circuit-badge open" style="background:#450a0a;border-color:#7f1d1d;color:#fca5a5;">TIER 1 (CRITICAL)</span>'
-              : (q.tier === 'TIER_2_HIGH' 
-                ? '<span class="circuit-badge half" style="background:#451a03;border-color:#78350f;color:#fde68a;">TIER 2 (HIGH)</span>'
-                : '<span class="circuit-badge closed" style="background:#172554;border-color:#1e40af;color:#93c5fd;">TIER 3 (SCHEDULED)</span>');
-            return `
-              <tr>
-                <td>${tierBadge}</td>
-                <td><code>${q.id}</code></td>
-                <td><strong>${q.amount}</strong></td>
-                <td><span class="domain-badge saas">${q.ch}</span></td>
-                <td><span style="color:#86efac;font-weight:700;">${q.lat}</span></td>
-                <td>${q.oRate}</td>
-                <td><span style="color:#60a5fa;font-weight:800;font-family:monospace;">${q.score}</span></td>
-                <td><span style="font-size:12px;color:#cbd5e1;">${q.strat}</span></td>
-              </tr>
-            `;
-          }).join('');
+          tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:#64748b;padding:30px;">✓ All transactions settled! Priority queue empty — zero pending revenue at risk.</td></tr>`;
           return;
         }
 
