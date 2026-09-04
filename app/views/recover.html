@@ -413,11 +413,118 @@
         btn.disabled = false;
         btn.textContent = 'Retry with Card / Netbanking (Razorpay Checkout)';
         showAlert('Payment attempt failed: ' + (resp.error?.description || 'Declined by bank'), 'error');
+        sendInteractionBeacon('PAYMENT_ATTEMPTED_FAILED', { failedPaymentMethod: 'card' });
       });
       rzp.open();
     }
 
+    // Telemetry & Dynamic Bandit Re-Planning Beacons (Phase 4)
+    const portalOpenTime = Date.now();
+    let isPaymentSettled = false;
+    let hasSentExitBeacon = false;
+    let dwell20sFired = false;
+
+    function sendInteractionBeacon(interactionType, extraData = {}) {
+      if (isPaymentSettled && interactionType !== 'PORTAL_OPENED') return;
+      const dwellTimeSeconds = Math.round((Date.now() - portalOpenTime) / 1000);
+      const payload = {
+        interactionType,
+        dwellTimeSeconds,
+        failedPaymentMethod: eventData?.paymentMethod || undefined,
+        ...extraData,
+      };
+
+      const url = '/api/events/' + eventId + '/interaction';
+
+      if (extraData._isUnload && navigator.sendBeacon) {
+        try {
+          const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+          navigator.sendBeacon(url, blob);
+          return;
+        } catch (e) {}
+      }
+
+      fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      }).then(res => res.json()).then(data => {
+        if (data?.rePlanResult) {
+          handleRePlanResult(data.rePlanResult);
+        }
+      }).catch(() => {});
+    }
+
+    function handleRePlanResult(rePlan) {
+      if (!rePlan || rePlan.action === 'NO_ACTION') return;
+
+      if (rePlan.action === 'TRIGGER_DOWNSELL_SPLIT') {
+        const downsellCard = document.getElementById('downsell-action-card');
+        if (downsellCard) {
+          downsellCard.style.display = 'block';
+          downsellCard.classList.add('highlight');
+          const desc = document.getElementById('downsell-desc');
+          if (desc && rePlan.concessionType === 'SPLIT_PAY') {
+            desc.textContent = 'Special Option: Split into 3 interest-free monthly payments of ₹' + (Math.round(rePlan.concessionPaise / 100)).toLocaleString('en-IN') + '/mo to complete your order!';
+          } else if (desc && rePlan.concessionType === 'INSTANT_DISCOUNT_5PCT') {
+            desc.textContent = 'Special Concession: 5% instant checkout discount applied!';
+          }
+          downsellCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      } else if (rePlan.action === 'SWITCH_TO_1TAP_UPI') {
+        const upiCard = document.getElementById('upi-action-card');
+        if (upiCard) {
+          upiCard.classList.add('highlight');
+          upiCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }
+    }
+
+    function attachOptionHoverTelemetry() {
+      const optionsToTrack = [
+        { id: 'upi-action-card', name: 'UPI_INTENT' },
+        { id: 'downsell-action-card', name: 'DOWNSELL_SPLIT' },
+        { id: 'primary-retry-btn', name: 'CARD_RETRY' },
+      ];
+
+      optionsToTrack.forEach(opt => {
+        const el = document.getElementById(opt.id);
+        if (!el) return;
+        let hoverTimer = null;
+        el.addEventListener('mouseenter', () => {
+          hoverTimer = setTimeout(() => {
+            sendInteractionBeacon('OPTION_HOVERED', { hoveredOption: opt.name });
+          }, 1500);
+        });
+        el.addEventListener('mouseleave', () => {
+          if (hoverTimer) clearTimeout(hoverTimer);
+        });
+      });
+    }
+
+    setTimeout(() => {
+      if (!isPaymentSettled && !dwell20sFired) {
+        dwell20sFired = true;
+        sendInteractionBeacon('DWELL_THRESHOLD_MET', { dwellTimeSeconds: 20 });
+      }
+    }, 20000);
+
+    function onPortalExit() {
+      if (hasSentExitBeacon || isPaymentSettled) return;
+      const dwell = Math.round((Date.now() - portalOpenTime) / 1000);
+      if (dwell >= 20) {
+        hasSentExitBeacon = true;
+        sendInteractionBeacon('PORTAL_EXITED_NO_PAY', { dwellTimeSeconds: dwell, _isUnload: true });
+      }
+    }
+
+    window.addEventListener('pagehide', onPortalExit);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') onPortalExit();
+    });
+
     function showSuccessPanel(details) {
+      isPaymentSettled = true;
       document.getElementById('active-recovery-view').style.display = 'none';
       document.getElementById('success-panel').style.display = 'block';
 
@@ -434,6 +541,8 @@
     }
 
     loadPortalData();
+    sendInteractionBeacon('PORTAL_OPENED');
+    attachOptionHoverTelemetry();
 
     window.addEventListener("offline", function() {
       document.getElementById('banner-offline').style.display = 'block';

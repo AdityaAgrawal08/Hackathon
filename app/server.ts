@@ -59,6 +59,8 @@ import {
   buildB2BEarlySettlementStrategy,
   buildHighTicketSplitPayStrategy,
   sequenceIntelligentRecoveryBatch,
+  type IntelligentBatchCandidate,
+  type IntelligentSequencedResult,
   LinUCBBandit,
   defaultEnterpriseBandit,
   defaultRecoveryBandit,
@@ -2897,21 +2899,96 @@ app.get("/api/invoices", async (_req: Request, res: Response) => {
   }
 });
 
-// ── Scheduled Outreach Sweeper ───────────────────────────────────
-async function sweepScheduledOutreach() {
+// ── Scheduled Outreach Sweeper (Phase 4: Dynamic EV Priority Queue & TRAI Quiet Hours) ─
+export async function sweepScheduledOutreach(
+  nowMs: number = Date.now(),
+  client: Client = dbClient,
+): Promise<{
+  sweptCount: number;
+  dispatchedCount: number;
+  suppressedCount: number;
+  deferredCount: number;
+  sequenced: IntelligentSequencedResult | null;
+}> {
+  const currentMs = typeof nowMs === "number" && !isNaN(nowMs) ? nowMs : Date.now();
+  const nowUtc = isoUtc(currentMs);
+
   try {
-    const nowUtc = isoUtc(Date.now());
-    const due = await dbClient.execute({
-      sql: `SELECT so.*, cp.name, cp.phone, cp.email, lpe.failure_class, lpe.failure_code, lpe.amount_paise
+    const due = await client.execute({
+      sql: `SELECT so.*, cp.name, cp.phone, cp.email, cp.opted_out, cp.total_attempts,
+                   cp.preferred_channel, cp.risk_score_bp, cp.email_open_latency_mins,
+                   COALESCE(mdc.domain_type, 'D2C_ECOMMERCE') AS domain_type,
+                   lpe.failure_class, lpe.failure_code, lpe.amount_paise, lpe.ml_probability
             FROM scheduled_outreach so
             JOIN customer_profiles cp ON cp.id = so.customer_profile_id
             JOIN live_payment_events lpe ON lpe.id = so.live_payment_event_id
+            LEFT JOIN merchant_domain_configs mdc ON mdc.tenant_id = 'default'
             WHERE so.executed = 0 AND so.scheduled_at_utc <= ?`,
       args: [nowUtc],
     });
 
-    for (const row of due.rows) {
-      const r = row as any;
+    if (due.rows.length === 0) {
+      return { sweptCount: 0, dispatchedCount: 0, suppressedCount: 0, deferredCount: 0, sequenced: null };
+    }
+
+    const rowMap = new Map<string, any>();
+    const candidates: IntelligentBatchCandidate[] = due.rows.map((r: any) => {
+      rowMap.set(String(r.id), r);
+      return {
+        id: String(r.id),
+        amountPaise: Number(r.amount_paise || 0),
+        pRecovery: Number(r.ml_probability ?? 0.5),
+        costPaise: r.channel === "SMS" ? 150 : 25,
+        domainType: (r.domain_type as any) || "D2C_ECOMMERCE",
+        emailOpenLatencyMins: r.email_open_latency_mins != null ? Number(r.email_open_latency_mins) : null,
+        optedOut: Boolean(r.opted_out),
+        attemptsSoFar: Number(r.total_attempts || 0),
+        maxAttempts: 3,
+        churnRiskBp: Number(r.risk_score_bp || 1000),
+        preferredChannel: r.channel,
+      };
+    });
+
+    const sequenced = sequenceIntelligentRecoveryBatch(
+      candidates,
+      { respectQuietHours: true, maxDispatchesPerBatch: 20 },
+      currentMs,
+    );
+
+    let dispatchedCount = 0;
+    let suppressedCount = 0;
+    let deferredCount = 0;
+
+    for (const candidate of sequenced.candidates) {
+      const r = rowMap.get(candidate.id);
+      if (!r) continue;
+
+      if (candidate.suppressed) {
+        if (candidate.suppressionReason === "TRAI_QUIET_HOURS" && candidate.deferredUntilMs) {
+          // Defer outreach to 09:00:01 IST the following morning
+          const nextRunUtc = isoUtc(candidate.deferredUntilMs);
+          await client.execute({
+            sql: "UPDATE scheduled_outreach SET scheduled_at_utc = ? WHERE id = ?",
+            args: [nextRunUtc, r.id],
+          });
+          deferredCount++;
+          logger.info({
+            msg: `[Outreach Sweeper] Deferring outreach ${r.id} past TRAI quiet hours until ${nextRunUtc}`,
+            outreachId: r.id,
+            deferredUntil: nextRunUtc,
+          });
+        } else {
+          // Permanent suppression (Opted out or Max attempts exceeded)
+          await client.execute({
+            sql: "UPDATE scheduled_outreach SET executed = 1, status = 'SUPPRESSED', error_message = ? WHERE id = ?",
+            args: [candidate.suppressionReason || "SUPPRESSED_BY_POLICY", r.id],
+          });
+          suppressedCount++;
+        }
+        continue;
+      }
+
+      // Candidate is eligible: dispatch in descending EV priority sequence
       const payload = {
         proposalId: r.live_payment_event_id,
         failureClass: r.failure_class || "UNKNOWN",
@@ -2933,17 +3010,27 @@ async function sweepScheduledOutreach() {
           await outreachRouter.dispatch("SMS", payload);
         }
         status = "SENT";
+        dispatchedCount++;
       } catch (err) {
         errorMsg = (err as Error).message || "Dispatch failed";
       }
 
-      await dbClient.execute({
+      await client.execute({
         sql: "UPDATE scheduled_outreach SET executed = 1, executed_at_utc = ?, status = ?, error_message = ? WHERE id = ?",
         args: [isoUtc(Date.now()), status, errorMsg || null, r.id],
       });
     }
+
+    return {
+      sweptCount: due.rows.length,
+      dispatchedCount,
+      suppressedCount,
+      deferredCount,
+      sequenced,
+    };
   } catch (err) {
     logger.error({ msg: "[Outreach Sweeper] Error", err: (err as Error).message });
+    return { sweptCount: 0, dispatchedCount: 0, suppressedCount: 0, deferredCount: 0, sequenced: null };
   }
 }
 
