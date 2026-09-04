@@ -13,3 +13,4 @@ export * from "./baseline_rules.js";
 export * from "./evaluate.js";
 export * from "./sensitivity.js";
 export * from "./drift.js";
+export * from "./self_trainer.js";

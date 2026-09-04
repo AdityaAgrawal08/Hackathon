@@ -1380,18 +1380,9 @@ app.get("/api/vendor/alerts", adminLimiter, async (_req: Request, res: Response)
 
 app.get("/api/vendor/analytics", adminLimiter, async (_req: Request, res: Response) => {
   try {
-    // Customer-centric analytics: count latest status per customer
     const stats = await dbClient.execute({
-      sql: `WITH latest_per_customer AS (
-              SELECT lpe.*,
-                ROW_NUMBER() OVER (
-                  PARTITION BY lpe.customer_profile_id
-                  ORDER BY lpe.created_at_utc DESC
-                ) as rn
-              FROM live_payment_events lpe
-            )
-            SELECT
-              COUNT(*) as total_customers,
+      sql: `SELECT
+              COUNT(*) as total_events,
               SUM(CASE WHEN status = 'captured' THEN 1 ELSE 0 END) as total_successes,
               SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as total_failures,
               SUM(CASE WHEN status = 'captured' THEN amount_paise ELSE 0 END) as recovered_paise,
@@ -1401,13 +1392,15 @@ app.get("/api/vendor/analytics", adminLimiter, async (_req: Request, res: Respon
               SUM(CASE WHEN payment_method = 'netbanking' THEN 1 ELSE 0 END) as method_netbanking,
               SUM(CASE WHEN payment_method = 'wallet' THEN 1 ELSE 0 END) as method_wallet,
               SUM(CASE WHEN payment_method IS NULL OR payment_method = '' THEN 1 ELSE 0 END) as method_other
-            FROM latest_per_customer WHERE rn = 1`,
+            FROM live_payment_events`,
       args: [],
     });
     const row = stats.rows[0] as any;
+    const total = Number(row?.total_events || 0);
+    const successes = Number(row?.total_successes || 0);
     res.json({
-      totalEvents: Number(row?.total_customers || 0),
-      totalSuccesses: Number(row?.total_successes || 0),
+      totalEvents: total,
+      totalSuccesses: successes,
       totalFailures: Number(row?.total_failures || 0),
       recoveredPaise: Number(row?.recovered_paise || 0),
       atRiskPaise: Number(row?.at_risk_paise || 0),
@@ -1416,8 +1409,8 @@ app.get("/api/vendor/analytics", adminLimiter, async (_req: Request, res: Respon
       methodNetbanking: Number(row?.method_netbanking || 0),
       methodWallet: Number(row?.method_wallet || 0),
       methodOther: Number(row?.method_other || 0),
-      successRate: row?.total_customers > 0
-        ? ((Number(row.total_successes) / Number(row.total_customers)) * 100).toFixed(1) + "%"
+      successRate: total > 0
+        ? ((successes / total) * 100).toFixed(1) + "%"
         : "0.0%",
     });
   } catch (err) {

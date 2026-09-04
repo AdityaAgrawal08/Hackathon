@@ -25,6 +25,7 @@
     "start": "tsx app/server.ts",
     "dev": "tsx app/server.ts",
     "clean:db": "rm -f data/arbiter.sqlite* && pnpm db:migrate",
+    "db:clean": "tsx scripts/truncate_db.ts",
     "db:migrate": "tsx packages/core/src/db/migrate.ts"
   },
 
