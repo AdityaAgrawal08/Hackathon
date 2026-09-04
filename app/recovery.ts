@@ -1394,11 +1394,13 @@ export async function initiateRecoveryOrder(
   if (keyId && keySecret && !keyId.includes("xxxxxx") && !keySecret.includes("xxxxxx")) {
     try {
       const auth = Buffer.from(`${keyId}:${keySecret}`).toString("base64");
+      const idempotencyKey = `idemp_rec_${session.id}_${preferredMethod}`;
       const rzpRes = await fetch("https://api.razorpay.com/v1/orders", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Basic ${auth}`,
+          "X-Razorpay-Idempotency-Key": idempotencyKey,
         },
         body: JSON.stringify({
           amount: session.amountPaise,

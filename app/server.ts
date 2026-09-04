@@ -224,7 +224,7 @@ app.get("/api/products", (_req, res) => {
 });
 
 // ── Create Razorpay Order + Upsert Customer ─────────────────────
-app.post("/api/orders/create", checkoutLimiter, async (req: Request, res: Response) => {
+const createOrderHandler = async (req: Request, res: Response) => {
   try {
     const { productId, customerName, customerPhone, customerEmail } = req.body;
     if (!productId || !customerName || !customerPhone || !customerEmail) {
@@ -263,9 +263,14 @@ app.post("/api/orders/create", checkoutLimiter, async (req: Request, res: Respon
     if (RZP_KEY_ID && RZP_KEY_SECRET && !RZP_KEY_ID.includes("xxxxxx")) {
       try {
         const auth = Buffer.from(`${RZP_KEY_ID}:${RZP_KEY_SECRET}`).toString("base64");
+        const idempotencyKey = `idemp_ord_${customerId}_${productId}_${Math.floor(nowMs / 60000)}`;
         const rzpRes = await fetch("https://api.razorpay.com/v1/orders", {
           method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Basic ${auth}` },
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Basic ${auth}`,
+            "X-Razorpay-Idempotency-Key": idempotencyKey,
+          },
           body: JSON.stringify({
             amount: product.pricePaise,
             currency: "INR",
@@ -293,7 +298,10 @@ app.post("/api/orders/create", checkoutLimiter, async (req: Request, res: Respon
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }
-});
+};
+
+app.post("/api/orders/create", checkoutLimiter, createOrderHandler);
+app.post("/api/checkout/order", checkoutLimiter, createOrderHandler);
 
 // ── Verify Payment (called by frontend after Checkout.js success) ─
 const verifyPaymentHandler = async (req: Request, res: Response) => {
@@ -538,9 +546,14 @@ app.post("/api/recovery/downsell", recoveryLimiter, async (req: Request, res: Re
     if (RZP_KEY_ID && RZP_KEY_SECRET && !RZP_KEY_ID.includes("xxxxxx")) {
       try {
         const auth = Buffer.from(`${RZP_KEY_ID}:${RZP_KEY_SECRET}`).toString("base64");
+        const idempotencyKey = `idemp_dwn_${eventId}_${downsellType}`;
         const rzpRes = await fetch("https://api.razorpay.com/v1/orders", {
           method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Basic ${auth}` },
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Basic ${auth}`,
+            "X-Razorpay-Idempotency-Key": idempotencyKey,
+          },
           body: JSON.stringify({
             amount: downsellAmountPaise,
             currency: "INR",
@@ -839,15 +852,48 @@ app.post("/api/webhooks/razorpay", webhookLimiter, async (req: Request, res: Res
   const bodyForSig = Buffer.isBuffer(rawBody) ? rawBody : Buffer.from(JSON.stringify(rawBody));
   const signature = req.headers["x-razorpay-signature"] as string;
 
-  // Webhook signature verification — always ACK (Razorpay retries on non-200)
-  // Log verification failures but never block the response
-  if (WEBHOOK_SECRET && WEBHOOK_SECRET !== DEFAULT_LOCAL_WEBHOOK_SECRET && signature) {
-    const expectedSig = createHmac("sha256", WEBHOOK_SECRET).update(bodyForSig).digest("hex");
-    const sigBuf = Buffer.from(signature, "hex");
-    const expBuf = Buffer.from(expectedSig, "hex");
-    if (sigBuf.length !== expBuf.length || !timingSafeEqual(sigBuf, expBuf)) {
-      logger.error({ msg: "[Webhook] Signature verification failed — ACKing anyway per Razorpay best practice" });
+  // Fail-Closed Webhook Signature Verification (Phase 5)
+  // Enforce HTTP 401 on missing or invalid HMAC in production, strict mode, or when secret is configured
+  const isStrictWebhookSecurity =
+    isProduction ||
+    process.env.STRICT_WEBHOOK_SECURITY === "true" ||
+    req.headers["x-strict-webhook-security"] === "true" ||
+    Boolean(WEBHOOK_SECRET && WEBHOOK_SECRET !== DEFAULT_LOCAL_WEBHOOK_SECRET);
+
+  if (isStrictWebhookSecurity) {
+    if (!signature) {
+      logger.error({ msg: "[Webhook] Rejected: Missing x-razorpay-signature header" });
+      return res.status(401).json({ error: "Missing x-razorpay-signature header" });
     }
+
+    const secret = WEBHOOK_SECRET || DEFAULT_LOCAL_WEBHOOK_SECRET;
+    const expectedSig = createHmac("sha256", secret).update(bodyForSig).digest("hex");
+    let isValid = false;
+
+    try {
+      const sigBuf = Buffer.from(signature, "hex");
+      const expBuf = Buffer.from(expectedSig, "hex");
+      if (sigBuf.length === expBuf.length && timingSafeEqual(sigBuf, expBuf)) {
+        isValid = true;
+      }
+    } catch {
+      isValid = false;
+    }
+
+    if (!isValid) {
+      logger.error({ msg: "[Webhook] Rejected: Invalid x-razorpay-signature header" });
+      return res.status(401).json({ error: "Invalid webhook signature" });
+    }
+  } else if (signature && WEBHOOK_SECRET) {
+    // Non-strict test/local mode: soft verify for diagnostic logging
+    try {
+      const expectedSig = createHmac("sha256", WEBHOOK_SECRET).update(bodyForSig).digest("hex");
+      const sigBuf = Buffer.from(signature, "hex");
+      const expBuf = Buffer.from(expectedSig, "hex");
+      if (sigBuf.length !== expBuf.length || !timingSafeEqual(sigBuf, expBuf)) {
+        logger.warn({ msg: "[Webhook] Signature verification mismatch in test mode (allowed)" });
+      }
+    } catch {}
   }
 
   try {
@@ -857,24 +903,30 @@ app.post("/api/webhooks/razorpay", webhookLimiter, async (req: Request, res: Res
     const eventType = event.event as string;
     const payment = event.payload?.payment?.entity;
     const paymentId = payment?.id as string | undefined;
+    const dedupeId =
+      paymentId ||
+      event.payload?.order?.entity?.id ||
+      event.payload?.subscription?.entity?.id ||
+      event.payload?.invoice?.entity?.id ||
+      (event.id ? String(event.id) : undefined);
 
-    // Webhook deduplication — swallow duplicate deliveries
-    if (paymentId) {
+    // Webhook deduplication — swallow duplicate deliveries across all entity types
+    if (dedupeId) {
       try {
         const existing = await dbClient.execute({
           sql: "SELECT provider_event_id FROM webhook_dedupe WHERE provider_event_id = ?",
-          args: [paymentId],
+          args: [dedupeId],
         });
         if (existing.rows.length > 0) {
           await dbClient.execute({
             sql: "UPDATE webhook_dedupe SET swallow_count = swallow_count + 1 WHERE provider_event_id = ?",
-            args: [paymentId],
+            args: [dedupeId],
           });
           return res.json({ received: true, deduped: true });
         }
         await dbClient.execute({
           sql: "INSERT INTO webhook_dedupe (provider_event_id, first_seen_utc, swallow_count) VALUES (?, ?, 0)",
-          args: [paymentId, isoUtc(Date.now())],
+          args: [dedupeId, isoUtc(Date.now())],
         });
       } catch {}
     }
@@ -1050,6 +1102,204 @@ app.post("/api/webhooks/razorpay", webhookLimiter, async (req: Request, res: Res
           } catch (err) {
             logger.error({ msg: "Failed to process failed payment", err: err });
           }
+        }
+      }
+    }
+
+    // ── Phase 5 Extended Webhook Handlers ─────────────────────────
+    if (eventType === "order.paid") {
+      const order = event.payload?.order?.entity;
+      const paymentEntity = event.payload?.payment?.entity;
+      const orderId = order?.id;
+      if (orderId) {
+        const amountPaise = Number(order.amount_paid || order.amount || paymentEntity?.amount || 0);
+        let customerProfileId = order.notes?.customer_profile_id || "";
+        let productName = order.notes?.product_name || "Store Item";
+
+        if (!customerProfileId) {
+          try {
+            const ev = await dbClient.execute({
+              sql: "SELECT customer_profile_id, product_name FROM live_payment_events WHERE razorpay_order_id = ? ORDER BY created_at_utc DESC LIMIT 1",
+              args: [orderId],
+            });
+            if (ev.rows.length > 0) {
+              customerProfileId = String(ev.rows[0].customer_profile_id);
+              if (ev.rows[0].product_name) productName = String(ev.rows[0].product_name);
+            }
+          } catch {}
+        }
+
+        if (customerProfileId) {
+          try {
+            await recordSuccessfulPayment(dbClient, {
+              razorpayPaymentId: paymentEntity?.id || `pay_ord_${orderId.slice(-8)}`,
+              razorpayOrderId: orderId,
+              customerProfileId,
+              amountPaise,
+              productName,
+              nowMs: Date.now(),
+            });
+
+            await appendAuditLedger(dbClient, {
+              eventType: "ORDER_PAID",
+              entityId: orderId,
+              customerId: customerProfileId,
+              payload: {
+                orderId,
+                amountPaise,
+                productName,
+                receipt: order.receipt,
+                paymentId: paymentEntity?.id,
+              },
+              nowMs: Date.now(),
+            });
+
+            broadcastSSE("global", {
+              type: "ORDER_PAID",
+              orderId,
+              customerProfileId,
+              amountPaise,
+              productName,
+            });
+          } catch (err) {
+            logger.error({ msg: "Failed to process order.paid", err: (err as Error).message });
+          }
+        }
+      }
+    }
+
+    if (eventType === "subscription.charged") {
+      const subscription = event.payload?.subscription?.entity;
+      const paymentEntity = event.payload?.payment?.entity;
+      const subId = subscription?.id;
+
+      if (subId) {
+        const amountPaise = Number(paymentEntity?.amount || subscription.plan_amount || 0);
+        const customerProfileId = subscription.notes?.customer_profile_id || subscription.customer_id || "cust_sub";
+
+        try {
+          await appendAuditLedger(dbClient, {
+            eventType: "SUBSCRIPTION_CHARGED",
+            entityId: subId,
+            customerId: customerProfileId,
+            payload: {
+              subscriptionId: subId,
+              planId: subscription.plan_id,
+              currentStart: subscription.current_start,
+              currentEnd: subscription.current_end,
+              chargeAt: subscription.charge_at,
+              amountPaise,
+              paymentId: paymentEntity?.id,
+              status: subscription.status,
+            },
+            nowMs: Date.now(),
+          });
+
+          broadcastSSE("global", {
+            type: "SUBSCRIPTION_CHARGED",
+            subscriptionId: subId,
+            customerProfileId,
+            amountPaise,
+            status: subscription.status,
+          });
+        } catch (err) {
+          logger.error({ msg: "Failed to process subscription.charged", err: (err as Error).message });
+        }
+      }
+    }
+
+    if (eventType === "subscription.halted") {
+      const subscription = event.payload?.subscription?.entity;
+      const subId = subscription?.id;
+
+      if (subId) {
+        const amountPaise = Number(subscription.plan_amount || subscription.notes?.amount_paise || 299900);
+        const customerProfileId = subscription.notes?.customer_profile_id || subscription.customer_id || "cust_halted";
+        const customerName = subscription.notes?.customer_name || "Subscriber";
+        const planName = subscription.notes?.plan_name || "Subscription Plan";
+
+        // Autonomously build SaaS Soft-lock Grace Period Strategy
+        const graceStrategy = buildSaaSGracePeriodStrategy({
+          mandateId: subId,
+          planName,
+          amountPaise,
+          softLockGraceDays: 5,
+          retryCount: 3,
+          maxRetries: 3,
+          rbiAdvanceNoticeHours: 24,
+        });
+
+        try {
+          await appendAuditLedger(dbClient, {
+            eventType: "SUBSCRIPTION_HALTED",
+            entityId: subId,
+            customerId: customerProfileId,
+            payload: {
+              subscriptionId: subId,
+              status: "halted",
+              gracePeriodDays: graceStrategy.softLockGraceDays,
+              softLockExpiresAtUtc: graceStrategy.softLockExpiresAtUtc,
+              customerMessage: graceStrategy.customerMessage,
+              actionUrl: graceStrategy.actionUrl,
+            },
+            nowMs: Date.now(),
+          });
+
+          broadcastSSE("global", {
+            type: "SUBSCRIPTION_HALTED",
+            subscriptionId: subId,
+            customerProfileId,
+            graceStrategy,
+          });
+        } catch (err) {
+          logger.error({ msg: "Failed to process subscription.halted", err: (err as Error).message });
+        }
+      }
+    }
+
+    if (eventType === "invoice.paid") {
+      const invoice = event.payload?.invoice?.entity;
+      const paymentEntity = event.payload?.payment?.entity;
+      const invoiceId = invoice?.id;
+
+      if (invoiceId) {
+        const amountPaidPaise = Number(invoice.amount_paid || invoice.amount || paymentEntity?.amount || 0);
+        const customerProfileId = invoice.customer_id || invoice.customer_details?.id || "cust_b2b";
+        const clientCompany = invoice.customer_details?.name || "Corporate Client";
+        const invoiceNumber = invoice.invoice_number || invoiceId;
+
+        // Calculate early settlement DSO interest savings if settlement discount occurred
+        const dsoDaysSaved = Number(invoice.notes?.dso_days_saved || 20);
+        const annualCapitalRate = Number(invoice.notes?.annual_cost_of_capital || 0.14);
+        const capitalSavingsPaise = Math.round(amountPaidPaise * (annualCapitalRate / 365) * dsoDaysSaved);
+
+        try {
+          await appendAuditLedger(dbClient, {
+            eventType: "INVOICE_PAID",
+            entityId: invoiceId,
+            customerId: customerProfileId,
+            payload: {
+              invoiceId,
+              invoiceNumber,
+              clientCompany,
+              amountPaidPaise,
+              dsoDaysSaved,
+              capitalSavingsPaise,
+              status: "paid",
+            },
+            nowMs: Date.now(),
+          });
+
+          broadcastSSE("global", {
+            type: "INVOICE_PAID",
+            invoiceId,
+            invoiceNumber,
+            clientCompany,
+            amountPaidPaise,
+            capitalSavingsPaise,
+          });
+        } catch (err) {
+          logger.error({ msg: "Failed to process invoice.paid", err: (err as Error).message });
         }
       }
     }

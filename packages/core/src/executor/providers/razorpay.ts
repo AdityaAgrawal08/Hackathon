@@ -275,11 +275,13 @@ export const razorpayProvider: ActionProvider = {
       // B-006: Real Razorpay test-mode API call
       try {
         const auth = Buffer.from(`${keyId}:${keySecret}`).toString("base64");
+        const idempotencyKey = `idemp_pl_${ctx.proposalId}_${ctx.actionId}`;
         const response = await fetch("https://api.razorpay.com/v1/payment_links", {
           method: "POST",
           headers: {
             "Authorization": `Basic ${auth}`,
             "Content-Type": "application/json",
+            "X-Razorpay-Idempotency-Key": idempotencyKey,
           },
           body: JSON.stringify({
             amount: ctx.amountPaise,
