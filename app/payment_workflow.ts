@@ -8,7 +8,18 @@ import type { Client } from "@libsql/client";
 import { createHash } from "node:crypto";
 import { isoUtc, paise, formatINR, logger } from "../packages/shared/src/index.js";
 import { classifyByCode, computeFeatures, scoreWithArtifact, DEFAULT_16D_MODEL, assessCredibility } from "../packages/ml/src/index.js";
-import { decide, defaultPolicy, type DecideOutput, type FailureClassId, appendAuditLedger, diagnosePaymentFailure } from "../packages/core/src/index.js";
+import {
+  decide,
+  defaultPolicy,
+  type DecideOutput,
+  type FailureClassId,
+  appendAuditLedger,
+  diagnosePaymentFailure,
+  LinUCBBandit,
+  defaultEnterpriseBandit,
+  type EnterpriseBanditAction,
+  type ArmSelectionResult,
+} from "../packages/core/src/index.js";
 import { OutreachRouter, type OutreachChannel, type OutreachPayload, type ProviderDispatchResult } from "../packages/core/src/messaging/index.js";
 import { getErrorEntry, getCustomerMessage, getVendorMessage, getFailureClass as getCatalogFailureClass } from "../packages/core/src/error-catalog.js";
 import { getGroqCustomerMessage } from "../packages/core/src/messaging/groq_customer_message.js";
@@ -105,9 +116,12 @@ export interface ProcessResult {
   action: string;
   isSuspicious: boolean;
   suspicionReasons: string[];
+  credibilityScore?: number;
+  riskLevel?: string;
   outreachDispatched: boolean;
   dispatchResults: ProviderDispatchResult[];
   scheduledOutreach: Array<{ channel: string; scheduledAtUtc: string }>;
+  banditSelection?: ArmSelectionResult<EnterpriseBanditAction>;
 }
 
 export async function processFailedPayment(
@@ -257,6 +271,23 @@ export async function processFailedPayment(
   const suspicionReasons = credResult.reasons;
   const isSuspicious = credResult.isSuspicious;
 
+  // 6b. LinUCB Enterprise Bandit Context & Dynamic Arm Selection
+  const dwellTimeSeconds = 0;
+  const openLatencyMins = Number((customer as any)?.email_open_latency_mins ?? 30);
+  const priorFailureCount = Number(customer?.total_failures ?? 0);
+  const channelResp = (customer?.total_attempts ?? 0) > 0
+    ? Number((customer?.total_successes ?? 0) / customer!.total_attempts)
+    : Number((customer as any)?.channel_responsiveness ?? 0.5);
+
+  const banditContext = LinUCBBandit.buildEnterpriseContext(
+    input.amountPaise,
+    dwellTimeSeconds,
+    openLatencyMins,
+    priorFailureCount,
+    channelResp
+  );
+  const banditSelection = defaultEnterpriseBandit.selectArm(banditContext);
+
   // 7. Log to live_payment_events with ALL Razorpay webhook fields
   // Dedup: same customer + same product = UPDATE existing row (retry), not INSERT new row
   // (order_id changes on every retry since recover.html creates new orders)
@@ -286,26 +317,55 @@ export async function processFailedPayment(
       const existingRetryCount = Number(existingRow.rows[0].retry_count || 0);
       const newRetryCount = isSameEventDifferentSource ? 0 : existingRetryCount + 1;
 
-      await client.execute({
-        sql: `UPDATE live_payment_events SET
-          razorpay_payment_id = ?, razorpay_order_id = ?,
-          failure_code = ?, failure_description = ?, failure_step = ?, failure_source = ?, failure_reason = ?,
-          failure_class = ?, ml_probability = ?, ml_action = ?,
-          payment_method = ?, card_last4 = ?, card_network = ?, card_issuer = ?, card_type = ?,
-          vpa = ?, bank_code = ?,
-          retry_count = ?,
-          created_at_utc = ?
-          WHERE id = ?`,
-        args: [
-          input.razorpayPaymentId, input.razorpayOrderId,
-          input.failureCode, input.failureDescription, input.failureStep, input.failureSource, input.failureReason,
-          failureClass, probability, decideOutput.chosen.action,
-          input.paymentMethod || "unknown", input.cardLast4 || null, input.cardNetwork || null,
-          input.cardIssuer || null, input.cardType || null,
-          input.vpa || null, input.bankCode || null,
-          newRetryCount, nowUtc, existingId,
-        ],
-      });
+      try {
+        await client.execute({
+          sql: `UPDATE live_payment_events SET
+            razorpay_payment_id = ?, razorpay_order_id = ?,
+            failure_code = ?, failure_description = ?, failure_step = ?, failure_source = ?, failure_reason = ?,
+            failure_class = ?, ml_probability = ?, ml_action = ?,
+            bandit_action = ?, bandit_context_json = ?, bandit_ucb_score = ?,
+            payment_method = ?, card_last4 = ?, card_network = ?, card_issuer = ?, card_type = ?,
+            vpa = ?, bank_code = ?,
+            retry_count = ?,
+            created_at_utc = ?
+            WHERE id = ?`,
+          args: [
+            input.razorpayPaymentId, input.razorpayOrderId,
+            input.failureCode, input.failureDescription, input.failureStep, input.failureSource, input.failureReason,
+            failureClass, probability, decideOutput.chosen.action,
+            banditSelection.action, JSON.stringify(banditSelection.context), banditSelection.ucbScore,
+            input.paymentMethod || "unknown", input.cardLast4 || null, input.cardNetwork || null,
+            input.cardIssuer || null, input.cardType || null,
+            input.vpa || null, input.bankCode || null,
+            newRetryCount, nowUtc, existingId,
+          ],
+        });
+      } catch (err: any) {
+        if (err?.message?.includes("bandit_action")) {
+          await client.execute({
+            sql: `UPDATE live_payment_events SET
+              razorpay_payment_id = ?, razorpay_order_id = ?,
+              failure_code = ?, failure_description = ?, failure_step = ?, failure_source = ?, failure_reason = ?,
+              failure_class = ?, ml_probability = ?, ml_action = ?,
+              payment_method = ?, card_last4 = ?, card_network = ?, card_issuer = ?, card_type = ?,
+              vpa = ?, bank_code = ?,
+              retry_count = ?,
+              created_at_utc = ?
+              WHERE id = ?`,
+            args: [
+              input.razorpayPaymentId, input.razorpayOrderId,
+              input.failureCode, input.failureDescription, input.failureStep, input.failureSource, input.failureReason,
+              failureClass, probability, decideOutput.chosen.action,
+              input.paymentMethod || "unknown", input.cardLast4 || null, input.cardNetwork || null,
+              input.cardIssuer || null, input.cardType || null,
+              input.vpa || null, input.bankCode || null,
+              newRetryCount, nowUtc, existingId,
+            ],
+          });
+        } else {
+          throw err;
+        }
+      }
       logger.info({ msg: `${isSameEventDifferentSource ? 'Webhook fill-in' : 'Update'}: event ${existingId} (retry #${newRetryCount})`, event: existingId, retryCount: newRetryCount });
 
       await client.execute({
@@ -323,6 +383,7 @@ export async function processFailedPayment(
         outreachDispatched: false,
         dispatchResults: [],
         scheduledOutreach: [],
+        banditSelection,
       };
     }
     // isNewOrder=true: fall through to INSERT below (new independent transaction)
@@ -330,63 +391,129 @@ export async function processFailedPayment(
   }
 
   // FIRST ATTEMPT / NEW RETRY ORDER: Insert new row
-  await client.execute({
-    sql: `INSERT INTO live_payment_events
-      (id, razorpay_payment_id, razorpay_order_id, customer_profile_id, product_name, amount_paise,
-       status, failure_code, failure_description, failure_step, failure_source, failure_reason,
-       failure_class, ml_probability, ml_action, outreach_dispatched, vendor_notified, created_at_utc,
-       payment_method, card_last4, card_network, card_issuer, card_type, card_emi,
-       vpa, bank_code, is_international,
-       acquirer_auth_code, acquirer_rrn, acquirer_error_code,
-       razorpay_token_id, razorpay_contact, razorpay_email, razorpay_created_at,
-       customer_name, customer_phone, customer_email)
-      VALUES (?, ?, ?, ?, ?, ?, 'failed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-              ?, ?, ?, ?, ?, ?,
-              ?, ?, ?,
-              ?, ?, ?,
-              ?, ?, ?, ?,
-              ?, ?, ?)`,
-    args: [
-      eventId,
-      input.razorpayPaymentId,
-      input.razorpayOrderId,
-      input.customerProfileId,
-      input.productName,
-      input.amountPaise,
-      input.failureCode,
-      input.failureDescription,
-      input.failureStep,
-      input.failureSource,
-      input.failureReason,
-      failureClass,
-      probability,
-      decideOutput.chosen.action,
-      false,
-      0, // vendor_notified — false at INSERT time, set to 1 only when vendor is actually notified
-      nowUtc,
-      // New Razorpay webhook fields
-      input.paymentMethod || "unknown",
-      input.cardLast4 || null,
-      input.cardNetwork || null,
-      input.cardIssuer || null,
-      input.cardType || null,
-      input.cardEmi ? 1 : 0,
-      input.vpa || null,
-      input.bankCode || null,
-      input.isInternational ? 1 : 0,
-      input.acquirerAuthCode || null,
-      input.acquirerRrn || null,
-      input.acquirerErrorCode || null,
-      input.razorpayTokenId || null,
-      input.razorpayContact || null,
-      input.razorpayEmail || null,
-      input.razorpayCreatedAt || null,
-      // Snapshot customer data at transaction time
-      customer?.name || null,
-      customer?.phone || null,
-      customer?.email || null,
-    ],
-  });
+  try {
+    await client.execute({
+      sql: `INSERT INTO live_payment_events
+        (id, razorpay_payment_id, razorpay_order_id, customer_profile_id, product_name, amount_paise,
+         status, failure_code, failure_description, failure_step, failure_source, failure_reason,
+         failure_class, ml_probability, ml_action, bandit_action, bandit_context_json, bandit_ucb_score,
+         outreach_dispatched, vendor_notified, created_at_utc,
+         payment_method, card_last4, card_network, card_issuer, card_type, card_emi,
+         vpa, bank_code, is_international,
+         acquirer_auth_code, acquirer_rrn, acquirer_error_code,
+         razorpay_token_id, razorpay_contact, razorpay_email, razorpay_created_at,
+         customer_name, customer_phone, customer_email)
+        VALUES (?, ?, ?, ?, ?, ?, 'failed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?,
+                ?, ?, ?,
+                ?, ?, ?,
+                ?, ?, ?, ?,
+                ?, ?, ?)`,
+      args: [
+        eventId,
+        input.razorpayPaymentId,
+        input.razorpayOrderId,
+        input.customerProfileId,
+        input.productName,
+        input.amountPaise,
+        input.failureCode,
+        input.failureDescription,
+        input.failureStep,
+        input.failureSource,
+        input.failureReason,
+        failureClass,
+        probability,
+        decideOutput.chosen.action,
+        banditSelection.action,
+        JSON.stringify(banditSelection.context),
+        banditSelection.ucbScore,
+        false,
+        0, // vendor_notified — false at INSERT time, set to 1 only when vendor is actually notified
+        nowUtc,
+        // New Razorpay webhook fields
+        input.paymentMethod || "unknown",
+        input.cardLast4 || null,
+        input.cardNetwork || null,
+        input.cardIssuer || null,
+        input.cardType || null,
+        input.cardEmi ? 1 : 0,
+        input.vpa || null,
+        input.bankCode || null,
+        input.isInternational ? 1 : 0,
+        input.acquirerAuthCode || null,
+        input.acquirerRrn || null,
+        input.acquirerErrorCode || null,
+        input.razorpayTokenId || null,
+        input.razorpayContact || null,
+        input.razorpayEmail || null,
+        input.razorpayCreatedAt || null,
+        // Snapshot customer data at transaction time
+        customer?.name || null,
+        customer?.phone || null,
+        customer?.email || null,
+      ],
+    });
+  } catch (err: any) {
+    if (err?.message?.includes("bandit_action")) {
+      await client.execute({
+        sql: `INSERT INTO live_payment_events
+          (id, razorpay_payment_id, razorpay_order_id, customer_profile_id, product_name, amount_paise,
+           status, failure_code, failure_description, failure_step, failure_source, failure_reason,
+           failure_class, ml_probability, ml_action, outreach_dispatched, vendor_notified, created_at_utc,
+           payment_method, card_last4, card_network, card_issuer, card_type, card_emi,
+           vpa, bank_code, is_international,
+           acquirer_auth_code, acquirer_rrn, acquirer_error_code,
+           razorpay_token_id, razorpay_contact, razorpay_email, razorpay_created_at,
+           customer_name, customer_phone, customer_email)
+          VALUES (?, ?, ?, ?, ?, ?, 'failed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                  ?, ?, ?, ?, ?, ?,
+                  ?, ?, ?,
+                  ?, ?, ?,
+                  ?, ?, ?, ?,
+                  ?, ?, ?)`,
+        args: [
+          eventId,
+          input.razorpayPaymentId,
+          input.razorpayOrderId,
+          input.customerProfileId,
+          input.productName,
+          input.amountPaise,
+          input.failureCode,
+          input.failureDescription,
+          input.failureStep,
+          input.failureSource,
+          input.failureReason,
+          failureClass,
+          probability,
+          decideOutput.chosen.action,
+          false,
+          0,
+          nowUtc,
+          input.paymentMethod || "unknown",
+          input.cardLast4 || null,
+          input.cardNetwork || null,
+          input.cardIssuer || null,
+          input.cardType || null,
+          input.cardEmi ? 1 : 0,
+          input.vpa || null,
+          input.bankCode || null,
+          input.isInternational ? 1 : 0,
+          input.acquirerAuthCode || null,
+          input.acquirerRrn || null,
+          input.acquirerErrorCode || null,
+          input.razorpayTokenId || null,
+          input.razorpayContact || null,
+          input.razorpayEmail || null,
+          input.razorpayCreatedAt || null,
+          customer?.name || null,
+          customer?.phone || null,
+          customer?.email || null,
+        ],
+      });
+    } else {
+      throw err;
+    }
+  }
 
   // 8. Update customer profile
   await client.execute({
@@ -462,6 +589,19 @@ export async function processFailedPayment(
         expectedValuePaise: decideOutput.chosen.expectedValuePaise,
         traiQuietHours: "PASS",
         dndCheck: "PASS",
+      },
+      nowMs,
+    });
+    await appendAuditLedger(client, {
+      eventType: "BANDIT_ARM_SELECTED",
+      entityId: eventId,
+      customerId: input.customerProfileId,
+      payload: {
+        action: banditSelection.action,
+        estimatedReward: banditSelection.estimatedReward,
+        confidenceBound: banditSelection.confidenceBound,
+        ucbScore: banditSelection.ucbScore,
+        context: banditSelection.context,
       },
       nowMs,
     });
@@ -683,6 +823,7 @@ export async function processFailedPayment(
     outreachDispatched: !isSuspicious && dispatchResults.length > 0,
     dispatchResults,
     scheduledOutreach,
+    banditSelection,
   };
 }
 
@@ -714,17 +855,63 @@ export async function recordSuccessfulPayment(
   });
   const customer = custResult.rows[0] as any;
 
-  // Step 7: If customer had a failed payment for this product or order, UPDATE it to 'captured'
-  // (moves entry from failed view to successful view — no duplicate row)
-  const existingFailed = await client.execute({
-    sql: `SELECT id FROM live_payment_events
-          WHERE (customer_profile_id = ? OR razorpay_order_id = ?) AND status = 'failed'
-          ORDER BY created_at_utc DESC LIMIT 1`,
-    args: [params.customerProfileId, params.razorpayOrderId],
-  });
+  let existingFailed;
+  try {
+    existingFailed = await client.execute({
+      sql: `SELECT id, bandit_action, bandit_context_json FROM live_payment_events
+            WHERE (customer_profile_id = ? OR razorpay_order_id = ?) AND status = 'failed'
+            ORDER BY created_at_utc DESC LIMIT 1`,
+      args: [params.customerProfileId, params.razorpayOrderId],
+    });
+  } catch (err: any) {
+    if (err?.message?.includes("bandit_action")) {
+      existingFailed = await client.execute({
+        sql: `SELECT id FROM live_payment_events
+              WHERE (customer_profile_id = ? OR razorpay_order_id = ?) AND status = 'failed'
+              ORDER BY created_at_utc DESC LIMIT 1`,
+        args: [params.customerProfileId, params.razorpayOrderId],
+      });
+    } else {
+      throw err;
+    }
+  }
 
   if (existingFailed.rows.length > 0) {
     const existingId = String(existingFailed.rows[0].id);
+    const banditAction = existingFailed.rows[0].bandit_action ? String(existingFailed.rows[0].bandit_action) : null;
+    const banditContextJson = existingFailed.rows[0].bandit_context_json ? String(existingFailed.rows[0].bandit_context_json) : null;
+
+    // Closed-loop online RL feedback: update bandit arm with r=1.0 and persist
+    if (banditAction && banditContextJson) {
+      try {
+        const context = JSON.parse(banditContextJson) as number[];
+        if (Array.isArray(context)) {
+          defaultEnterpriseBandit.updateArm(banditAction as any, context, 1.0);
+          await defaultEnterpriseBandit.saveArmToDb(client, "enterprise", banditAction as any);
+          await appendAuditLedger(client, {
+            eventType: "BANDIT_REWARD_FEEDBACK",
+            entityId: existingId,
+            customerId: params.customerProfileId,
+            actor: "payment_workflow",
+            nowMs: params.nowMs,
+            payload: {
+              armType: "enterprise",
+              action: banditAction,
+              reward: 1.0,
+              orderId: params.razorpayOrderId,
+              paymentId: params.razorpayPaymentId,
+            },
+          });
+          logger.info({
+            msg: `[Bandit] Online reward (+1.0) applied to arm ${banditAction} for event ${existingId}`,
+            action: banditAction,
+            eventId: existingId,
+          });
+        }
+      } catch (banditErr) {
+        logger.error({ msg: "[Bandit] Failed to update bandit reward in recordSuccessfulPayment", err: banditErr });
+      }
+    }
     await client.execute({
       sql: `UPDATE live_payment_events SET
         status = 'captured',
@@ -906,6 +1093,45 @@ export async function onPaymentRecovered(
   }
 
   if (targetEventId) {
+    try {
+      const banditRow = await client.execute({
+        sql: `SELECT bandit_action, bandit_context_json, status FROM live_payment_events WHERE id = ?`,
+        args: [targetEventId],
+      });
+      if (banditRow.rows.length > 0) {
+        const bAction = banditRow.rows[0].bandit_action ? String(banditRow.rows[0].bandit_action) : null;
+        const bContextJson = banditRow.rows[0].bandit_context_json ? String(banditRow.rows[0].bandit_context_json) : null;
+        const prevStatus = String(banditRow.rows[0].status);
+        if (bAction && bContextJson && prevStatus !== "captured") {
+          const context = JSON.parse(bContextJson) as number[];
+          if (Array.isArray(context)) {
+            defaultEnterpriseBandit.updateArm(bAction as any, context, 1.0);
+            await defaultEnterpriseBandit.saveArmToDb(client, "enterprise", bAction as any);
+            await appendAuditLedger(client, {
+              eventType: "BANDIT_REWARD_FEEDBACK",
+              entityId: targetEventId,
+              customerId: params.customerProfileId,
+              actor: "customer_portal",
+              nowMs,
+              payload: {
+                armType: "enterprise",
+                action: bAction,
+                reward: 1.0,
+                orderId: params.orderId,
+              },
+            });
+            logger.info({
+              msg: `[Bandit] Online reward (+1.0) applied to arm ${bAction} via onPaymentRecovered for event ${targetEventId}`,
+              action: bAction,
+              eventId: targetEventId,
+            });
+          }
+        }
+      }
+    } catch (banditErr) {
+      logger.error({ msg: "[Bandit] Error updating bandit reward in onPaymentRecovered", err: banditErr });
+    }
+
     await client.execute({
       sql: `UPDATE live_payment_events
             SET status = 'captured', recovered_at_utc = ?, ml_action = 'PAYMENT_RECOVERED'

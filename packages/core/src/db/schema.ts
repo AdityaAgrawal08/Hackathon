@@ -10,6 +10,7 @@
 import {
   index,
   integer,
+  primaryKey,
   real,
   sqliteTable,
   text,
@@ -587,6 +588,9 @@ export const livePaymentEvents = sqliteTable(
     }),
     mlProbability: real("ml_probability"),
     mlAction: text("ml_action"),
+    banditAction: text("bandit_action"),
+    banditContextJson: text("bandit_context_json"),
+    banditUcbScore: real("bandit_ucb_score"),
     outreachDispatched: integer("outreach_dispatched", { mode: "boolean" }).notNull().default(false),
     vendorNotified: integer("vendor_notified", { mode: "boolean" }).notNull().default(false),
     vendorDecision: text("vendor_decision", { enum: ["approved", "rejected"] }),
@@ -599,6 +603,7 @@ export const livePaymentEvents = sqliteTable(
     index("idx_liveevt_failure_class").on(t.failureClass),
     index("idx_liveevt_created").on(t.createdAtUtc),
     index("idx_liveevt_vendor_notified").on(t.vendorNotified),
+    index("idx_liveevt_bandit_action").on(t.banditAction),
   ],
 );
 
@@ -626,6 +631,29 @@ export const scheduledOutreach = sqliteTable(
   (t) => [
     index("idx_scheduled_due").on(t.executed, t.scheduledAtUtc),
     index("idx_scheduled_event").on(t.livePaymentEventId),
+  ],
+);
+
+/* ── bandit state (persistent LinUCB weights) ───────────────────── */
+/**
+ * Persistent storage for LinUCB contextual bandit covariance matrix A and reward vector b.
+ * Guarantees online reinforcement learning survives server restarts.
+ */
+export const banditState = sqliteTable(
+  "bandit_state",
+  {
+    armType: text("arm_type").notNull(),
+    action: text("action").notNull(),
+    dimension: integer("dimension").notNull(),
+    matrixAJson: text("matrix_a_json").notNull(),
+    vectorBJson: text("vector_b_json").notNull(),
+    pullCount: integer("pull_count").notNull().default(0),
+    totalReward: real("total_reward").notNull().default(0.0),
+    updatedAtUtc: text("updated_at_utc").notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.armType, t.action] }),
+    index("idx_bandit_state_arm").on(t.armType, t.action),
   ],
 );
 

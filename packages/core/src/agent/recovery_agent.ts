@@ -72,7 +72,16 @@ export function rePlanRecoveryAction(
   }
 
   // 2. Check Stopping Rules
-  const stoppingEval = evaluateStoppingRules({ ...stoppingCtx, nowMs });
+  const isPortalInteraction =
+    event.interactionType === "PORTAL_EXITED_NO_PAY" ||
+    event.interactionType === "PORTAL_OPENED" ||
+    event.interactionType === "PAYMENT_ATTEMPTED_FAILED";
+
+  const stoppingEval = evaluateStoppingRules({
+    ...stoppingCtx,
+    isPortalSession: stoppingCtx.isPortalSession ?? isPortalInteraction,
+    nowMs,
+  });
   if (!stoppingEval.allowed) {
     return {
       action: "NO_ACTION",

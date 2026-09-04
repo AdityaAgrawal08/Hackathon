@@ -11,6 +11,7 @@ export interface StoppingRuleContext {
   createdAtUtc: string;
   domain: "D2C_CHECKOUT" | "SAAS_MANDATE" | "B2B_INVOICE";
   nowMs?: number;
+  isPortalSession?: boolean;
 }
 
 export interface StoppingRuleEvaluation {
@@ -61,8 +62,8 @@ export function evaluateStoppingRules(ctx: StoppingRuleContext): StoppingRuleEva
     };
   }
 
-  // Rule 4: Cooldown Floor (Min 4h between touches)
-  if (ctx.lastTouchAtUtc) {
+  // Rule 4: Cooldown Floor (Min 4h between touches) - applies to outbound pushes
+  if (!ctx.isPortalSession && ctx.lastTouchAtUtc) {
     const lastTouchMs = new Date(ctx.lastTouchAtUtc).getTime();
     const elapsedMs = nowMs - lastTouchMs;
     if (elapsedMs < MIN_COOLDOWN_MS) {
@@ -76,8 +77,8 @@ export function evaluateStoppingRules(ctx: StoppingRuleContext): StoppingRuleEva
     }
   }
 
-  // Rule 5: TRAI Quiet Hours (21:00 - 09:00 IST)
-  if (isQuietHoursIST(nowMs)) {
+  // Rule 5: TRAI Quiet Hours (21:00 - 09:00 IST) - applies to outbound telecom dunning
+  if (!ctx.isPortalSession && isQuietHoursIST(nowMs)) {
     const istDate = new Date(nowMs + IST_OFFSET_MS);
     const nextMorningIST = new Date(nowMs + IST_OFFSET_MS);
     if (istDate.getUTCHours() >= 21) {

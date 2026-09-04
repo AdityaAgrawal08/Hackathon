@@ -1803,9 +1803,14 @@ app.post("/api/decide/batch-sequence", (req: Request, res: Response) => {
       return res.status(400).json({ error: "candidates array is required" });
     }
 
+    const effectiveConfig = {
+      respectQuietHours: false,
+      ...config,
+    };
+
     const result = sequenceIntelligentRecoveryBatch(
       candidates,
-      config || {},
+      effectiveConfig,
       typeof nowMs === "number" ? nowMs : Date.now()
     );
 
@@ -1884,7 +1889,7 @@ app.post("/api/bandit/select-arm", (req: Request, res: Response) => {
   }
 });
 
-app.post("/api/bandit/feedback", (req: Request, res: Response) => {
+app.post("/api/bandit/feedback", async (req: Request, res: Response) => {
   try {
     const {
       action,
@@ -1911,6 +1916,7 @@ app.post("/api/bandit/feedback", (req: Request, res: Response) => {
         return res.status(400).json({ error: `Action '${action}' is not a valid legacy arm: ${BANDIT_ACTIONS.join(", ")}` });
       }
       defaultRecoveryBandit.updateArm(action as any, context, reward);
+      await defaultRecoveryBandit.saveArmToDb(dbClient, "legacy", action as any);
       const updatedState = defaultRecoveryBandit.getState()[action as any];
       return res.json({
         success: true,
@@ -1930,6 +1936,7 @@ app.post("/api/bandit/feedback", (req: Request, res: Response) => {
     }
 
     defaultEnterpriseBandit.updateArm(action as any, context, reward);
+    await defaultEnterpriseBandit.saveArmToDb(dbClient, "enterprise", action as any);
     const updatedState = defaultEnterpriseBandit.getState()[action as any];
     return res.json({
       success: true,
@@ -3117,6 +3124,12 @@ app.post("/api/whatsapp/simulate-interaction", async (req: Request, res: Respons
 // ── Startup ──────────────────────────────────────────────────────
 export async function startServer() {
   await runMigrations(dbClient);
+  try {
+    const loadedCount = await defaultEnterpriseBandit.loadFromDb(dbClient, "enterprise");
+    logger.info({ msg: `[Bandit] Rehydrated ${loadedCount} enterprise arms from database` });
+  } catch (err) {
+    logger.warn({ msg: "[Bandit] Could not rehydrate bandit from database", err });
+  }
   const server = app.listen(PORT, HOST, () => {
     logger.info({ msg: "\n  ARBITER Payment Server" });
     logger.info({ msg: `  Store:     http://${HOST}:${PORT}` });

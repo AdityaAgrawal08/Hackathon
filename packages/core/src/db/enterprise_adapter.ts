@@ -85,9 +85,8 @@ export class EnterpriseDataConnector {
 
     // 3. Amount resolution & currency unit detection
     const amountCol = findMatch([
-      /^(amount_paise|amount|total|order_total|grand_total|price|ticket_size|value)$/i,
-      /amount/i,
-      /total/i,
+      /^(amount_paise|amount|total|order_total|grand_total|price|price_paise|order_value|ticket_size|value)$/i,
+      /(amount|total|price|value)/i,
     ]) || "amount";
 
     // Sample amount values to determine if amounts are stored in paise or rupees
@@ -107,8 +106,8 @@ export class EnterpriseDataConnector {
 
     // 4. Status resolution
     const statusCol = findMatch([
-      /^(payment_status|order_status|status|state|txn_state)$/i,
-      /status/i,
+      /^(payment_status|order_status|payment_state|status|state|txn_state)$/i,
+      /(status|state)/i,
     ]) || "status";
 
     // 5. Failure code & reason resolution

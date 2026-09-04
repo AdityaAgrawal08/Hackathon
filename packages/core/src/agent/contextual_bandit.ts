@@ -14,6 +14,7 @@
  */
 
 import { clamp01, clamp } from "@arbiter/shared";
+import type { Client } from "@libsql/client";
 
 // ============================================================================
 // Bandit Actions (Enterprise Track 3 & Legacy Compatibility)
@@ -365,6 +366,110 @@ export class LinUCBBandit<TAction extends string = BanditActionId> {
       };
     }
     return out;
+  }
+
+  /**
+   * Rehydrates arm states (design matrix A, reward vector b, pull counts) from the database.
+   * Ensures online reinforcement learning persists across server restarts.
+   */
+  async loadFromDb(client: Client, armType?: string): Promise<number> {
+    const type = armType ?? (this.dimension === ENTERPRISE_CONTEXT_DIM ? "enterprise" : "legacy");
+    const res = await client.execute({
+      sql: `SELECT action, dimension, matrix_a_json, vector_b_json, pull_count, total_reward
+            FROM bandit_state
+            WHERE arm_type = ?`,
+      args: [type],
+    });
+
+    let loaded = 0;
+    for (const row of res.rows) {
+      const action = String(row.action) as TAction;
+      if (!this.actionList.includes(action)) continue;
+      const dim = Number(row.dimension);
+      if (dim !== this.dimension) continue;
+
+      try {
+        const A = JSON.parse(String(row.matrix_a_json)) as number[];
+        const b = JSON.parse(String(row.vector_b_json)) as number[];
+        if (Array.isArray(A) && A.length === dim * dim && Array.isArray(b) && b.length === dim) {
+          this.arms.set(action, {
+            A,
+            b,
+            pullCount: Number(row.pull_count) || 0,
+            totalReward: Number(row.total_reward) || 0,
+          });
+          loaded++;
+        }
+      } catch {
+        // Skip malformed rows
+      }
+    }
+    return loaded;
+  }
+
+  /**
+   * Persists all current arm states to the database using an upsert.
+   */
+  async saveToDb(client: Client, armType?: string): Promise<void> {
+    const type = armType ?? (this.dimension === ENTERPRISE_CONTEXT_DIM ? "enterprise" : "legacy");
+    const nowUtc = new Date().toISOString();
+
+    for (const [action, arm] of this.arms.entries()) {
+      await client.execute({
+        sql: `INSERT INTO bandit_state
+                (arm_type, action, dimension, matrix_a_json, vector_b_json, pull_count, total_reward, updated_at_utc)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+              ON CONFLICT (arm_type, action) DO UPDATE SET
+                dimension = excluded.dimension,
+                matrix_a_json = excluded.matrix_a_json,
+                vector_b_json = excluded.vector_b_json,
+                pull_count = excluded.pull_count,
+                total_reward = excluded.total_reward,
+                updated_at_utc = excluded.updated_at_utc`,
+        args: [
+          type,
+          action,
+          this.dimension,
+          JSON.stringify(arm.A),
+          JSON.stringify(arm.b),
+          arm.pullCount,
+          arm.totalReward,
+          nowUtc,
+        ],
+      });
+    }
+  }
+
+  /**
+   * Persists a single updated arm state to the database atomically.
+   */
+  async saveArmToDb(client: Client, armType: string, action: TAction): Promise<void> {
+    const arm = this.arms.get(action);
+    if (!arm) return;
+
+    const nowUtc = new Date().toISOString();
+    await client.execute({
+      sql: `INSERT INTO bandit_state
+              (arm_type, action, dimension, matrix_a_json, vector_b_json, pull_count, total_reward, updated_at_utc)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (arm_type, action) DO UPDATE SET
+              dimension = excluded.dimension,
+              matrix_a_json = excluded.matrix_a_json,
+              vector_b_json = excluded.vector_b_json,
+              pull_count = excluded.pull_count,
+              total_reward = excluded.total_reward,
+              updated_at_utc = excluded.updated_at_utc`,
+      args: [
+        armType,
+        action,
+        this.dimension,
+        JSON.stringify(arm.A),
+        JSON.stringify(arm.b),
+        arm.pullCount,
+        arm.totalReward,
+        nowUtc,
+      ],
+    });
   }
 
   /** Factory method for 5-Arm Enterprise Track 3 Bandit */
