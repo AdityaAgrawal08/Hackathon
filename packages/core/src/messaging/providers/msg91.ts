@@ -22,6 +22,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { formatINR, paise, isoUtc, logger } from "@arbiter/shared";
 import type { FailureClassId } from "../../decide/catalog.js";
 import type { OutreachPayload, OutreachProvider, ProviderDispatchResult } from "../types.js";
+import { msg91SmsLimiter } from "../rate_limiter.js";
 
 export interface MSG91Config {
   authKey?: string;
@@ -30,6 +31,8 @@ export interface MSG91Config {
   dltTemplateId?: string;
   templateId?: string;
   flowId?: string;
+  batchWindowMs?: number; // micro-batching window in ms (default 250ms in prod, 0 in test)
+  maxBatchSize?: number;  // maximum recipients per micro-batch (default 50)
 }
 
 // DLT template IDs for reference (kept for backward compatibility)
@@ -57,11 +60,25 @@ export class MSG91SmsProvider implements OutreachProvider {
   readonly name = "msg91";
   readonly channel = "SMS" as const;
 
+  private pendingBatch: Array<{
+    payload: OutreachPayload;
+    recipientObj: Record<string, string>;
+    isSimulated: boolean;
+    isPlaceholderTemplate: boolean;
+    simReason?: string;
+    resolve: (result: ProviderDispatchResult) => void;
+    reject: (err: any) => void;
+  }> = [];
+  private batchTimer: NodeJS.Timeout | null = null;
+
   constructor(private config: MSG91Config = {}) {
     const isTest = process.env.NODE_ENV === "test" || process.env.VITEST === "true";
     const rawKey = config.authKey || (!isTest ? process.env.MSG91_AUTH_KEY : undefined);
     this.config.authKey = (rawKey && !rawKey.includes("xxxxxx")) ? rawKey : undefined;
     this.config.senderId = config.senderId || process.env.MSG91_SENDER_ID || "ARBITR";
+    this.config.batchWindowMs = config.batchWindowMs !== undefined ? config.batchWindowMs : (isTest ? 0 : 250);
+    this.config.maxBatchSize = config.maxBatchSize || 50;
+
     // template_id: support MSG91_FLOW_ID, MSG91_TEMPLATE_ID, or MSG91_DLT_TEMPLATE_ID
     this.config.templateId =
       config.flowId ||
@@ -75,7 +92,13 @@ export class MSG91SmsProvider implements OutreachProvider {
       authKey: this.config.authKey ? "SET (" + this.config.authKey.slice(0, 8) + "...)" : "MISSING",
       templateId: this.config.templateId || "MISSING",
       sender: this.config.senderId,
+      batchWindowMs: this.config.batchWindowMs,
+      maxBatchSize: this.config.maxBatchSize,
     });
+  }
+
+  getPendingBatchSize(): number {
+    return this.pendingBatch.length;
   }
 
   async send(payload: OutreachPayload): Promise<ProviderDispatchResult> {
@@ -101,6 +124,37 @@ export class MSG91SmsProvider implements OutreachProvider {
         ? "no authKey"
         : (!hasTemplateId ? "no templateId" : `placeholder templateId (${this.config.templateId})`);
       logger.info({ msg: "[MSG91] SIMULATED SMS", phone, reason, failureClass: payload.failureClass, amount: formattedAmount, recoveryUrl });
+      
+      // If batching is enabled, enqueue into batch even in simulation mode so tests can verify aggregation
+      if (this.config.batchWindowMs && this.config.batchWindowMs > 0) {
+        return new Promise<ProviderDispatchResult>((resolve, reject) => {
+          this.pendingBatch.push({
+            payload,
+            recipientObj: {
+              mobiles: phone,
+              name: customerName,
+              amount: formattedAmount,
+              url: recoveryUrl,
+              VAR1: customerName,
+              VAR2: formattedAmount,
+              VAR3: recoveryUrl,
+              VAR4: "ARBITER Store",
+            },
+            isSimulated: true,
+            isPlaceholderTemplate: !!isPlaceholderTemplate,
+            simReason: reason,
+            resolve,
+            reject,
+          });
+
+          if (this.pendingBatch.length >= (this.config.maxBatchSize || 50)) {
+            this.flushBatch();
+          } else if (!this.batchTimer) {
+            this.batchTimer = setTimeout(() => this.flushBatch(), this.config.batchWindowMs);
+          }
+        });
+      }
+
       return {
         providerName: this.name,
         channel: this.channel,
@@ -143,6 +197,43 @@ export class MSG91SmsProvider implements OutreachProvider {
       "3": recoveryUrl,
       "4": "ARBITER Store",
     };
+
+    // Micro-Batching Aggregator (Phase 2)
+    if (this.config.batchWindowMs && this.config.batchWindowMs > 0) {
+      return new Promise<ProviderDispatchResult>((resolve, reject) => {
+        this.pendingBatch.push({
+          payload,
+          recipientObj,
+          isSimulated: false,
+          isPlaceholderTemplate: false,
+          resolve,
+          reject,
+        });
+
+        if (this.pendingBatch.length >= (this.config.maxBatchSize || 50)) {
+          this.flushBatch();
+        } else if (!this.batchTimer) {
+          this.batchTimer = setTimeout(() => this.flushBatch(), this.config.batchWindowMs);
+        }
+      });
+    }
+
+    // Direct single send (when batchWindowMs is 0)
+    // Rate limit outbound SMS to MSG91 Flow API (50 req/sec)
+    const acquired = await msg91SmsLimiter.acquire(1, 2000);
+    if (!acquired) {
+      logger.warn({ msg: "[MSG91] Rate limit timeout (50 req/sec) reached. Failing safely", phone });
+      return {
+        providerName: this.name,
+        channel: this.channel,
+        externalMessageId: "",
+        status: "FAILED",
+        costPaise: 0,
+        dispatchedAtUtc: nowUtc,
+        errorCode: "RATE_LIMIT_EXCEEDED",
+        errorMessage: "MSG91 outbound rate limit (50 req/sec) exceeded",
+      };
+    }
 
     const flowBody = {
       template_id: this.config.templateId,
@@ -206,6 +297,147 @@ export class MSG91SmsProvider implements OutreachProvider {
         dispatchedAtUtc: nowUtc,
         errorMessage: (err as Error).message,
       };
+    }
+  }
+
+  /**
+   * Flushes all pending buffered recipients immediately.
+   */
+  async flush(): Promise<void> {
+    while (this.pendingBatch.length > 0) {
+      await this.flushBatch();
+    }
+  }
+
+  /**
+   * Dispatches up to maxBatchSize buffered SMS messages in a single HTTP request.
+   */
+  private async flushBatch(): Promise<void> {
+    if (this.batchTimer) {
+      clearTimeout(this.batchTimer);
+      this.batchTimer = null;
+    }
+
+    if (this.pendingBatch.length === 0) return;
+
+    const batch = this.pendingBatch.splice(0, this.config.maxBatchSize || 50);
+    const nowUtc = isoUtc(Date.now());
+
+    // Check if entire batch is simulated
+    const allSimulated = batch.every((item) => item.isSimulated);
+    if (allSimulated) {
+      for (const item of batch) {
+        const formattedAmount = formatINR(paise(item.payload.amountPaise));
+        const phone = normalizeIndianPhone(item.payload.recipient.phone || "");
+        const recoveryUrl = item.payload.recoveryUrl || item.payload.paymentLinkUrl || "";
+        logger.info({
+          msg: "[MSG91] SIMULATED BATCH SMS",
+          phone,
+          reason: item.simReason,
+          failureClass: item.payload.failureClass,
+          amount: formattedAmount,
+          recoveryUrl,
+          batchSize: batch.length,
+        });
+        item.resolve({
+          providerName: this.name,
+          channel: this.channel,
+          externalMessageId: `msg91_sim_batch_${item.payload.proposalId}`,
+          status: item.isPlaceholderTemplate ? "FAILED" : "SENT",
+          costPaise: 0,
+          dispatchedAtUtc: nowUtc,
+          rawResponse: { simulated: true, batchSize: batch.length, templateId: this.config.templateId, phone, reason: item.simReason },
+          errorMessage: item.isPlaceholderTemplate
+            ? `FAILED: templateId is a placeholder (${this.config.templateId}). Configure an approved Flow ID from MSG91 dashboard for live delivery.`
+            : `SIMULATED: ${item.simReason}. Configure an approved 24-character MSG91_FLOW_ID for live delivery.`,
+        });
+      }
+      return;
+    }
+
+    // Rate limit outbound batch to MSG91 Flow API
+    const acquired = await msg91SmsLimiter.acquire(1, 2000);
+    if (!acquired) {
+      logger.warn({ msg: "[MSG91] Rate limit timeout (50 req/sec) reached on batch dispatch", batchSize: batch.length });
+      for (const item of batch) {
+        item.resolve({
+          providerName: this.name,
+          channel: this.channel,
+          externalMessageId: "",
+          status: "FAILED",
+          costPaise: 0,
+          dispatchedAtUtc: nowUtc,
+          errorCode: "RATE_LIMIT_EXCEEDED",
+          errorMessage: "MSG91 outbound rate limit (50 req/sec) exceeded",
+        });
+      }
+      return;
+    }
+
+    const flowBody = {
+      template_id: this.config.templateId,
+      sender: this.config.senderId || "ARBITR",
+      short_url: "0",
+      recipients: batch.map((item) => item.recipientObj),
+    };
+
+    logger.info({
+      msg: "[MSG91] SENDING BATCH SMS",
+      batchSize: batch.length,
+      templateId: this.config.templateId,
+      sender: this.config.senderId,
+    });
+
+    try {
+      const res = await fetch("https://control.msg91.com/api/v5/flow", {
+        method: "POST",
+        headers: {
+          authkey: this.config.authKey!,
+          "Content-Type": "application/json",
+          accept: "application/json",
+        },
+        body: JSON.stringify(flowBody),
+      });
+
+      const contentType = res.headers.get("content-type") || "";
+      let data: Record<string, unknown> = {};
+      if (contentType.includes("application/json")) {
+        data = (await res.json()) as Record<string, unknown>;
+      } else {
+        const text = await res.text();
+        data = { message: text.slice(0, 200), raw: text };
+      }
+
+      const hasErrorType = data.type === "error" || data.status === "error";
+      const hasErrorsList = Array.isArray(data.errors) && data.errors.length > 0;
+      const isSuccess = res.ok && !hasErrorType && !hasErrorsList;
+
+      for (const item of batch) {
+        item.resolve({
+          providerName: this.name,
+          channel: this.channel,
+          externalMessageId: String(data.message || data.request_id || `msg91_b_${item.payload.proposalId}`),
+          status: isSuccess ? "SENT" : "FAILED",
+          costPaise: isSuccess ? 25 : 0,
+          dispatchedAtUtc: nowUtc,
+          rawResponse: data,
+          errorCode: isSuccess ? undefined : String(data.code || "MSG91_ERROR"),
+          errorMessage: isSuccess ? undefined : String(data.message || "Failed to dispatch batch SMS"),
+        });
+      }
+    } catch (err: any) {
+      logger.error({ msg: "[MSG91] BATCH NETWORK ERROR", err });
+      for (const item of batch) {
+        item.resolve({
+          providerName: this.name,
+          channel: this.channel,
+          externalMessageId: "",
+          status: "FAILED",
+          costPaise: 0,
+          dispatchedAtUtc: nowUtc,
+          errorMessage: err.message || String(err),
+        });
+      }
     }
   }
 

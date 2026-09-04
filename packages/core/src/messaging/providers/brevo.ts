@@ -8,6 +8,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { formatINR, paise, isoUtc, COST_EMAIL_PAISE, logger } from "@arbiter/shared";
 import type { OutreachPayload, OutreachProvider, ProviderDispatchResult } from "../types.js";
 import { renderComplianceMessage } from "../templates.js";
+import { brevoEmailLimiter } from "../rate_limiter.js";
 
 export interface BrevoConfig {
   apiKey?: string;
@@ -157,6 +158,22 @@ export class BrevoEmailProvider implements OutreachProvider {
         dispatchedAtUtc: nowUtc,
         rawResponse: { simulated: true, to: payload.recipient.email, subject, reason: simReason },
         errorMessage: `SIMULATED: ${simReason}. Set BREVO_API_KEY for real delivery.`,
+      };
+    }
+
+    // Rate limit outbound emails to Brevo API (50 req/sec)
+    const acquired = await brevoEmailLimiter.acquire(1, 2000);
+    if (!acquired) {
+      logger.warn({ msg: "[Brevo] Outbound rate limit timeout (50 req/sec) reached. Failing safely", to: payload.recipient.email });
+      return {
+        providerName: this.name,
+        channel: this.channel,
+        externalMessageId: "",
+        status: "FAILED",
+        costPaise: 0,
+        dispatchedAtUtc: nowUtc,
+        errorCode: "RATE_LIMIT_EXCEEDED",
+        errorMessage: "Brevo outbound rate limit (50 req/sec) exceeded",
       };
     }
 

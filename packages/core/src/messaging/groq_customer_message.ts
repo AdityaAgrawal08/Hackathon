@@ -10,9 +10,10 @@
  */
 
 import { getCustomerMessage } from "../error-catalog.js";
+import { groqLlmLimiter } from "./rate_limiter.js";
 
 const GROQ_MODEL = process.env.GROQ_MODEL ?? "llama3-8b-8192";
-const GROQ_TIMEOUT_MS = 3000; // Never stall the payment flow — 3s max
+const GROQ_TIMEOUT_MS = 300; // Never stall the payment flow — 300ms max
 const cache = new Map<string, string>();
 const CACHE_MAX = 256;
 
@@ -47,6 +48,14 @@ export async function getGroqCustomerMessage(
 
   const apiKey = opts.apiKey ?? process.env.GROQ_API_KEY;
   if (!apiKey) {
+    const msg = fallback(failureCode, failureDescription);
+    if (!opts.noCache) { if (cache.size >= CACHE_MAX) cache.clear(); cache.set(key, msg); }
+    return msg;
+  }
+
+  // Rate Limiting (Phase 2): Guard against Groq 30 req/min rate limit.
+  // If rate limit is reached, fall back immediately to local catalog without network delay.
+  if (!groqLlmLimiter.tryAcquire()) {
     const msg = fallback(failureCode, failureDescription);
     if (!opts.noCache) { if (cache.size >= CACHE_MAX) cache.clear(); cache.set(key, msg); }
     return msg;

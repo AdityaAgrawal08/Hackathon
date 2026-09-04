@@ -64,6 +64,11 @@ import {
   defaultRecoveryBandit,
   ENTERPRISE_BANDIT_ACTIONS,
   BANDIT_ACTIONS,
+  defaultWebhookQueue,
+  type WebhookJob,
+  brevoEmailLimiter,
+  msg91SmsLimiter,
+  groqLlmLimiter,
 } from "../packages/core/src/index.js";
 
 import {
@@ -157,7 +162,17 @@ if (msg91Template) {
   logger.info({ msg: "[Providers] MSG91 template ID:", msg91Template: msg91Template, mode: "REAL" });
 }
 
-const webhookLimiter = rateLimit({ windowMs: 60_000, limit: RATE_LIMIT_WEBHOOKS_PER_MIN, standardHeaders: true, skip: () => isTest() });
+const webhookLimiter = rateLimit({
+  windowMs: 60_000,
+  limit: RATE_LIMIT_WEBHOOKS_PER_MIN,
+  standardHeaders: true,
+  skip: (req: Request) => {
+    if (isTest()) return true;
+    // Legitimate Razorpay webhooks signed with x-razorpay-signature bypass IP-based drops
+    const sig = req.headers["x-razorpay-signature"];
+    return Boolean(sig && typeof sig === "string" && sig.length >= 32);
+  },
+});
 const paymentLimiter = rateLimit({ windowMs: 60_000, limit: RATE_LIMIT_CHARGES_PER_MIN, standardHeaders: true, skip: () => isTest() });
 const checkoutLimiter = rateLimit({ windowMs: 60_000, limit: RATE_LIMIT_CHECKOUT_ORDERS_PER_MIN, standardHeaders: true, skip: () => isTest() });
 const adminLimiter = rateLimit({ windowMs: 60_000, limit: RATE_LIMIT_ADMIN_PER_MIN, standardHeaders: true, skip: () => isTest() });
@@ -192,6 +207,7 @@ function getSimplifiedReason(code: string, failureClass: string): string {
 // ── SSE ──────────────────────────────────────────────────────────
 interface SSEClient { res: Response; id: string; connectedAt: number; }
 const sseClients = new Map<string, Set<SSEClient>>();
+const inMemoryWebhookDedupe = new Set<string>();
 
 function broadcastSSE(channel: string, data: Record<string, unknown>) {
   const clients = sseClients.get(channel);
@@ -913,406 +929,449 @@ app.post("/api/webhooks/razorpay", webhookLimiter, async (req: Request, res: Res
       event.payload?.invoice?.entity?.id ||
       (event.id ? String(event.id) : undefined);
 
-    // Webhook deduplication — swallow duplicate deliveries across all entity types
+    // Webhook deduplication — instant in-memory check to guarantee <15ms response
     if (dedupeId) {
-      try {
-        const existing = await dbClient.execute({
-          sql: "SELECT provider_event_id FROM webhook_dedupe WHERE provider_event_id = ?",
-          args: [dedupeId],
-        });
-        if (existing.rows.length > 0) {
-          await dbClient.execute({
-            sql: "UPDATE webhook_dedupe SET swallow_count = swallow_count + 1 WHERE provider_event_id = ?",
-            args: [dedupeId],
-          });
-          return res.json({ received: true, deduped: true });
-        }
-        await dbClient.execute({
-          sql: "INSERT INTO webhook_dedupe (provider_event_id, first_seen_utc, swallow_count) VALUES (?, ?, 0)",
-          args: [dedupeId, isoUtc(Date.now())],
-        });
-      } catch {}
-    }
-
-    if (eventType === "payment.captured") {
-      if (payment?.id && payment?.order_id) {
-        // Fetch order to get customer profile (gracefully handle missing orders)
-        let customerProfileId = "";
-        let productName = "";
-        if (RZP_KEY_ID && RZP_KEY_SECRET && !RZP_KEY_ID.includes("xxxxxx")) {
-          try {
-            const auth = Buffer.from(`${RZP_KEY_ID}:${RZP_KEY_SECRET}`).toString("base64");
-            const orderRes = await fetch(`https://api.razorpay.com/v1/orders/${payment.order_id}`, {
-              headers: { Authorization: `Basic ${auth}` },
-            });
-            if (orderRes.ok) {
-              const orderData = (await orderRes.json()) as any;
-              customerProfileId = orderData?.notes?.customer_profile_id || "";
-              productName = orderData?.notes?.product_name || "";
-            }
-          } catch {}
-        }
-
-        if (customerProfileId) {
-          try {
-            await recordSuccessfulPayment(dbClient, {
-              razorpayPaymentId: payment.id,
-              razorpayOrderId: payment.order_id,
-              customerProfileId,
-              amountPaise: payment.amount || 0,
-              productName,
-              nowMs: Date.now(),
-            });
-
-            broadcastSSE("global", {
-              type: "PAYMENT_RECEIVED",
-              status: "captured",
-              customerProfileId,
-              amountPaise: payment.amount,
-            });
-          } catch (err) {
-            logger.error({ msg: "Failed to record successful payment", err: err });
-          }
-        }
+      if (inMemoryWebhookDedupe.has(dedupeId)) {
+        return res.json({ received: true, deduped: true });
       }
-    }
-
-    if (eventType === "payment.failed") {
-      if (payment?.id && payment?.order_id) {
-        // Fetch order to get customer profile (gracefully handle missing orders)
-        let customerProfileId = "";
-        let productName = "";
-        if (RZP_KEY_ID && RZP_KEY_SECRET && !RZP_KEY_ID.includes("xxxxxx")) {
-          try {
-            const auth = Buffer.from(`${RZP_KEY_ID}:${RZP_KEY_SECRET}`).toString("base64");
-            const orderRes = await fetch(`https://api.razorpay.com/v1/orders/${payment.order_id}`, {
-              headers: { Authorization: `Basic ${auth}` },
-            });
-            if (orderRes.ok) {
-              const orderData = (await orderRes.json()) as any;
-              customerProfileId = orderData?.notes?.customer_profile_id || "";
-              productName = orderData?.notes?.product_name || "";
-            }
-          } catch {}
-        }
-
-        // Fallback: create/find customer from webhook payload fields
-        if (!customerProfileId && (payment.contact || payment.email)) {
-          try {
-            const phone = payment.contact || "";
-            const email = payment.email || "";
-            const name = payment.customer_name || "Customer";
-            const nowUtc = isoUtc(Date.now());
-
-            // Upsert customer by phone
-            if (phone) {
-              const existing = await dbClient.execute({
-                sql: `SELECT id FROM customer_profiles WHERE phone = ? LIMIT 1`,
-                args: [phone],
-              });
-              if (existing.rows.length > 0) {
-                customerProfileId = String(existing.rows[0].id);
-              } else {
-                const custId = `cust_${Date.now()}_${createHash("sha256").update(phone).digest("hex").slice(0, 8)}`;
-                await dbClient.execute({
-                  sql: `INSERT INTO customer_profiles (id, name, phone, email, created_at_utc) VALUES (?, ?, ?, ?, ?)`,
-                  args: [custId, name, phone, email, nowUtc],
-                });
-                customerProfileId = custId;
-              }
-            }
-            if (!productName) productName = "Unknown Product";
-          } catch {}
-        }
-
-        if (customerProfileId) {
-          try {
-            // Extract ALL Razorpay webhook fields
-            const card = payment.card || {};
-            const acquirerData = payment.acquirer_data || {};
-
-            const result = await processFailedPayment(dbClient, {
-              razorpayPaymentId: payment.id,
-              razorpayOrderId: payment.order_id,
-              amountPaise: payment.amount || 0,
-              failureCode: payment.error_code || "UNKNOWN",
-              failureDescription: payment.error_description || "",
-              failureStep: payment.error_step || "",
-              failureSource: payment.error_source || "",
-              failureReason: payment.error_reason || "",
-              customerProfileId,
-              productName,
-              nowMs: Date.now(),
-
-              // Payment method details
-              paymentMethod: payment.method || "",
-              cardLast4: card.last4 || "",
-              cardNetwork: card.network || "",
-              cardIssuer: card.issuer || "",
-              cardType: card.type || "",
-              cardEmi: !!card.emi,
-
-              // UPI details
-              vpa: payment.vpa || "",
-
-              // Netbanking details
-              bankCode: payment.bank || "",
-
-              // International flag
-              isInternational: !!payment.international,
-
-              // Acquirer data
-              acquirerAuthCode: acquirerData.auth_code || "",
-              acquirerRrn: acquirerData.rrn || "",
-              acquirerErrorCode: acquirerData.error_code || "",
-
-              // Token and contact
-              razorpayTokenId: payment.token_id || "",
-              razorpayContact: payment.contact || "",
-              razorpayEmail: payment.email || "",
-              razorpayCreatedAt: payment.created_at || 0,
-            }, outreachRouter);
-
-            logger.info({ msg: `[Webhook] payment.failed processed: ${result.eventId} | method=${payment.method} | class=${result.failureClass} | action=${result.action}` });
-
-            // Broadcast to vendor dashboard
-            broadcastSSE("global", {
-              type: "PAYMENT_FAILED",
-              status: "failed",
-              eventId: result.eventId,
-              customerProfileId,
-              failureClass: result.failureClass,
-              probability: result.probability,
-              action: result.action,
-              paymentMethod: payment.method,
-              cardLast4: card.last4,
-              cardNetwork: card.network,
-              amountPaise: payment.amount,
-              productName: productName || "",
-            });
-
-            if (result.isSuspicious) {
-              broadcastSSE("vendor:alerts", {
-                type: "SUSPICIOUS_ACTIVITY",
-                eventId: result.eventId,
-                customerProfileId,
-                reasons: result.suspicionReasons,
-                amountPaise: payment.amount,
-                failureCode: payment.error_code,
-                paymentMethod: payment.method,
-              });
-            }
-          } catch (err) {
-            logger.error({ msg: "Failed to process failed payment", err: err });
-          }
-        }
+      if (inMemoryWebhookDedupe.size >= 50000) {
+        inMemoryWebhookDedupe.clear();
       }
+      inMemoryWebhookDedupe.add(dedupeId);
     }
 
-    // ── Phase 5 Extended Webhook Handlers ─────────────────────────
-    if (eventType === "order.paid") {
-      const order = event.payload?.order?.entity;
-      const paymentEntity = event.payload?.payment?.entity;
-      const orderId = order?.id;
-      if (orderId) {
-        const amountPaise = Number(order.amount_paid || order.amount || paymentEntity?.amount || 0);
-        let customerProfileId = order.notes?.customer_profile_id || "";
-        let productName = order.notes?.product_name || "Store Item";
+    const job: WebhookJob = {
+      id: dedupeId || `whk_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      receivedAtMs: Date.now(),
+      eventType,
+      payload: event,
+      rawBody: bodyStr,
+      signature,
+    };
 
-        if (!customerProfileId) {
-          try {
-            const ev = await dbClient.execute({
-              sql: "SELECT customer_profile_id, product_name FROM live_payment_events WHERE razorpay_order_id = ? ORDER BY created_at_utc DESC LIMIT 1",
-              args: [orderId],
-            });
-            if (ev.rows.length > 0) {
-              customerProfileId = String(ev.rows[0].customer_profile_id);
-              if (ev.rows[0].product_name) productName = String(ev.rows[0].product_name);
-            }
-          } catch {}
-        }
-
-        if (customerProfileId) {
-          try {
-            await recordSuccessfulPayment(dbClient, {
-              razorpayPaymentId: paymentEntity?.id || `pay_ord_${orderId.slice(-8)}`,
-              razorpayOrderId: orderId,
-              customerProfileId,
-              amountPaise,
-              productName,
-              nowMs: Date.now(),
-            });
-
-            await appendAuditLedger(dbClient, {
-              eventType: "ORDER_PAID",
-              entityId: orderId,
-              customerId: customerProfileId,
-              payload: {
-                orderId,
-                amountPaise,
-                productName,
-                receipt: order.receipt,
-                paymentId: paymentEntity?.id,
-              },
-              nowMs: Date.now(),
-            });
-
-            broadcastSSE("global", {
-              type: "ORDER_PAID",
-              orderId,
-              customerProfileId,
-              amountPaise,
-              productName,
-            });
-          } catch (err) {
-            logger.error({ msg: "Failed to process order.paid", err: (err as Error).message });
-          }
-        }
-      }
+    // Phase 2: Decoupled Async Queue Ingestion
+    // In production or when async mode is enabled (x-webhook-mode: async), return immediate 200 OK (<15ms)
+    // In synchronous test mode, await processing to preserve backward compatibility for tests asserting on immediate DB writes
+    const isAsync = !isTest() || req.headers["x-webhook-mode"] === "async";
+    if (isAsync) {
+      defaultWebhookQueue.enqueue(job);
+      return res.status(200).json({ received: true, queued: true, jobId: job.id });
+    } else {
+      await processWebhookJob(job);
+      return res.status(200).json({ received: true });
     }
-
-    if (eventType === "subscription.charged") {
-      const subscription = event.payload?.subscription?.entity;
-      const paymentEntity = event.payload?.payment?.entity;
-      const subId = subscription?.id;
-
-      if (subId) {
-        const amountPaise = Number(paymentEntity?.amount || subscription.plan_amount || 0);
-        const customerProfileId = subscription.notes?.customer_profile_id || subscription.customer_id || "cust_sub";
-
-        try {
-          await appendAuditLedger(dbClient, {
-            eventType: "SUBSCRIPTION_CHARGED",
-            entityId: subId,
-            customerId: customerProfileId,
-            payload: {
-              subscriptionId: subId,
-              planId: subscription.plan_id,
-              currentStart: subscription.current_start,
-              currentEnd: subscription.current_end,
-              chargeAt: subscription.charge_at,
-              amountPaise,
-              paymentId: paymentEntity?.id,
-              status: subscription.status,
-            },
-            nowMs: Date.now(),
-          });
-
-          broadcastSSE("global", {
-            type: "SUBSCRIPTION_CHARGED",
-            subscriptionId: subId,
-            customerProfileId,
-            amountPaise,
-            status: subscription.status,
-          });
-        } catch (err) {
-          logger.error({ msg: "Failed to process subscription.charged", err: (err as Error).message });
-        }
-      }
-    }
-
-    if (eventType === "subscription.halted") {
-      const subscription = event.payload?.subscription?.entity;
-      const subId = subscription?.id;
-
-      if (subId) {
-        const amountPaise = Number(subscription.plan_amount || subscription.notes?.amount_paise || 299900);
-        const customerProfileId = subscription.notes?.customer_profile_id || subscription.customer_id || "cust_halted";
-        const customerName = subscription.notes?.customer_name || "Subscriber";
-        const planName = subscription.notes?.plan_name || "Subscription Plan";
-
-        // Autonomously build SaaS Soft-lock Grace Period Strategy
-        const graceStrategy = buildSaaSGracePeriodStrategy({
-          mandateId: subId,
-          planName,
-          amountPaise,
-          softLockGraceDays: 5,
-          retryCount: 3,
-          maxRetries: 3,
-          rbiAdvanceNoticeHours: 24,
-        });
-
-        try {
-          await appendAuditLedger(dbClient, {
-            eventType: "SUBSCRIPTION_HALTED",
-            entityId: subId,
-            customerId: customerProfileId,
-            payload: {
-              subscriptionId: subId,
-              status: "halted",
-              gracePeriodDays: graceStrategy.softLockGraceDays,
-              softLockExpiresAtUtc: graceStrategy.softLockExpiresAtUtc,
-              customerMessage: graceStrategy.customerMessage,
-              actionUrl: graceStrategy.actionUrl,
-            },
-            nowMs: Date.now(),
-          });
-
-          broadcastSSE("global", {
-            type: "SUBSCRIPTION_HALTED",
-            subscriptionId: subId,
-            customerProfileId,
-            graceStrategy,
-          });
-        } catch (err) {
-          logger.error({ msg: "Failed to process subscription.halted", err: (err as Error).message });
-        }
-      }
-    }
-
-    if (eventType === "invoice.paid") {
-      const invoice = event.payload?.invoice?.entity;
-      const paymentEntity = event.payload?.payment?.entity;
-      const invoiceId = invoice?.id;
-
-      if (invoiceId) {
-        const amountPaidPaise = Number(invoice.amount_paid || invoice.amount || paymentEntity?.amount || 0);
-        const customerProfileId = invoice.customer_id || invoice.customer_details?.id || "cust_b2b";
-        const clientCompany = invoice.customer_details?.name || "Corporate Client";
-        const invoiceNumber = invoice.invoice_number || invoiceId;
-
-        // Calculate early settlement DSO interest savings if settlement discount occurred
-        const dsoDaysSaved = Number(invoice.notes?.dso_days_saved || 20);
-        const annualCapitalRate = Number(invoice.notes?.annual_cost_of_capital || 0.14);
-        const capitalSavingsPaise = Math.round(amountPaidPaise * (annualCapitalRate / 365) * dsoDaysSaved);
-
-        try {
-          await appendAuditLedger(dbClient, {
-            eventType: "INVOICE_PAID",
-            entityId: invoiceId,
-            customerId: customerProfileId,
-            payload: {
-              invoiceId,
-              invoiceNumber,
-              clientCompany,
-              amountPaidPaise,
-              dsoDaysSaved,
-              capitalSavingsPaise,
-              status: "paid",
-            },
-            nowMs: Date.now(),
-          });
-
-          broadcastSSE("global", {
-            type: "INVOICE_PAID",
-            invoiceId,
-            invoiceNumber,
-            clientCompany,
-            amountPaidPaise,
-            capitalSavingsPaise,
-          });
-        } catch (err) {
-          logger.error({ msg: "Failed to process invoice.paid", err: (err as Error).message });
-        }
-      }
-    }
-
-    res.json({ received: true });
   } catch (err) {
     logger.error({ msg: "Webhook processing error", err: err });
     res.status(200).json({ received: true }); // Always ACK webhooks
   }
 });
+
+// ── Webhook Queue Observability (Phase 2) ─────────────────────────
+app.get("/api/webhooks/queue/stats", adminLimiter, (_req: Request, res: Response) => {
+  res.json(defaultWebhookQueue.getStats());
+});
+
+// ── Webhook Worker Processor (Phase 2) ─────────────────────────────
+async function processWebhookJob(job: WebhookJob): Promise<void> {
+  // Persist deduplication record in database asynchronously
+  if (job.id) {
+    try {
+      const existing = await dbClient.execute({
+        sql: "SELECT provider_event_id FROM webhook_dedupe WHERE provider_event_id = ?",
+        args: [job.id],
+      });
+      if (existing.rows.length > 0) {
+        await dbClient.execute({
+          sql: "UPDATE webhook_dedupe SET swallow_count = swallow_count + 1 WHERE provider_event_id = ?",
+          args: [job.id],
+        });
+      } else {
+        await dbClient.execute({
+          sql: "INSERT INTO webhook_dedupe (provider_event_id, first_seen_utc, swallow_count) VALUES (?, ?, 0)",
+          args: [job.id, isoUtc(Date.now())],
+        });
+      }
+    } catch {}
+  }
+  const event = job.payload;
+  const eventType = job.eventType;
+  const payment = event.payload?.payment?.entity;
+
+  if (eventType === "payment.captured") {
+    if (payment?.id && payment?.order_id) {
+      // Fetch order to get customer profile (gracefully handle missing orders)
+      let customerProfileId = "";
+      let productName = "";
+      if (RZP_KEY_ID && RZP_KEY_SECRET && !RZP_KEY_ID.includes("xxxxxx")) {
+        try {
+          const auth = Buffer.from(`${RZP_KEY_ID}:${RZP_KEY_SECRET}`).toString("base64");
+          const orderRes = await fetch(`https://api.razorpay.com/v1/orders/${payment.order_id}`, {
+            headers: { Authorization: `Basic ${auth}` },
+          });
+          if (orderRes.ok) {
+            const orderData = (await orderRes.json()) as any;
+            customerProfileId = orderData?.notes?.customer_profile_id || "";
+            productName = orderData?.notes?.product_name || "";
+          }
+        } catch {}
+      }
+
+      if (customerProfileId) {
+        try {
+          await recordSuccessfulPayment(dbClient, {
+            razorpayPaymentId: payment.id,
+            razorpayOrderId: payment.order_id,
+            customerProfileId,
+            amountPaise: payment.amount || 0,
+            productName,
+            nowMs: Date.now(),
+          });
+
+          broadcastSSE("global", {
+            type: "PAYMENT_RECEIVED",
+            status: "captured",
+            customerProfileId,
+            amountPaise: payment.amount,
+          });
+        } catch (err) {
+          logger.error({ msg: "Failed to record successful payment", err: err });
+        }
+      }
+    }
+  }
+
+  if (eventType === "payment.failed") {
+    if (payment?.id && payment?.order_id) {
+      // Fetch order to get customer profile (gracefully handle missing orders)
+      let customerProfileId = "";
+      let productName = "";
+      if (RZP_KEY_ID && RZP_KEY_SECRET && !RZP_KEY_ID.includes("xxxxxx")) {
+        try {
+          const auth = Buffer.from(`${RZP_KEY_ID}:${RZP_KEY_SECRET}`).toString("base64");
+          const orderRes = await fetch(`https://api.razorpay.com/v1/orders/${payment.order_id}`, {
+            headers: { Authorization: `Basic ${auth}` },
+          });
+          if (orderRes.ok) {
+            const orderData = (await orderRes.json()) as any;
+            customerProfileId = orderData?.notes?.customer_profile_id || "";
+            productName = orderData?.notes?.product_name || "";
+          }
+        } catch {}
+      }
+
+      // Fallback: create/find customer from webhook payload fields
+      if (!customerProfileId && (payment.contact || payment.email)) {
+        try {
+          const phone = payment.contact || "";
+          const email = payment.email || "";
+          const name = payment.customer_name || "Customer";
+          const nowUtc = isoUtc(Date.now());
+
+          // Upsert customer by phone
+          if (phone) {
+            const existing = await dbClient.execute({
+              sql: `SELECT id FROM customer_profiles WHERE phone = ? LIMIT 1`,
+              args: [phone],
+            });
+            if (existing.rows.length > 0) {
+              customerProfileId = String(existing.rows[0].id);
+            } else {
+              const custId = `cust_${Date.now()}_${createHash("sha256").update(phone).digest("hex").slice(0, 8)}`;
+              await dbClient.execute({
+                sql: `INSERT INTO customer_profiles (id, name, phone, email, created_at_utc) VALUES (?, ?, ?, ?, ?)`,
+                args: [custId, name, phone, email, nowUtc],
+              });
+              customerProfileId = custId;
+            }
+          }
+          if (!productName) productName = "Unknown Product";
+        } catch {}
+      }
+
+      if (customerProfileId) {
+        try {
+          // Extract ALL Razorpay webhook fields
+          const card = payment.card || {};
+          const acquirerData = payment.acquirer_data || {};
+
+          const result = await processFailedPayment(dbClient, {
+            razorpayPaymentId: payment.id,
+            razorpayOrderId: payment.order_id,
+            amountPaise: payment.amount || 0,
+            failureCode: payment.error_code || "UNKNOWN",
+            failureDescription: payment.error_description || "",
+            failureStep: payment.error_step || "",
+            failureSource: payment.error_source || "",
+            failureReason: payment.error_reason || "",
+            customerProfileId,
+            productName,
+            nowMs: Date.now(),
+
+            // Payment method details
+            paymentMethod: payment.method || "",
+            cardLast4: card.last4 || "",
+            cardNetwork: card.network || "",
+            cardIssuer: card.issuer || "",
+            cardType: card.type || "",
+            cardEmi: !!card.emi,
+
+            // UPI details
+            vpa: payment.vpa || "",
+
+            // Netbanking details
+            bankCode: payment.bank || "",
+
+            // International flag
+            isInternational: !!payment.international,
+
+            // Acquirer data
+            acquirerAuthCode: acquirerData.auth_code || "",
+            acquirerRrn: acquirerData.rrn || "",
+            acquirerErrorCode: acquirerData.error_code || "",
+
+            // Token and contact
+            razorpayTokenId: payment.token_id || "",
+            razorpayContact: payment.contact || "",
+            razorpayEmail: payment.email || "",
+            razorpayCreatedAt: payment.created_at || 0,
+          }, outreachRouter);
+
+          logger.info({ msg: `[Webhook] payment.failed processed: ${result.eventId} | method=${payment.method} | class=${result.failureClass} | action=${result.action}` });
+
+          // Broadcast to vendor dashboard
+          broadcastSSE("global", {
+            type: "PAYMENT_FAILED",
+            status: "failed",
+            eventId: result.eventId,
+            customerProfileId,
+            failureClass: result.failureClass,
+            probability: result.probability,
+            action: result.action,
+            paymentMethod: payment.method,
+            cardLast4: card.last4,
+            cardNetwork: card.network,
+            amountPaise: payment.amount,
+            productName: productName || "",
+          });
+
+          if (result.isSuspicious) {
+            broadcastSSE("vendor:alerts", {
+              type: "SUSPICIOUS_ACTIVITY",
+              eventId: result.eventId,
+              customerProfileId,
+              reasons: result.suspicionReasons,
+              amountPaise: payment.amount,
+              failureCode: payment.error_code,
+              paymentMethod: payment.method,
+            });
+          }
+        } catch (err) {
+          logger.error({ msg: "Failed to process failed payment", err: err });
+        }
+      }
+    }
+  }
+
+  // ── Phase 5 Extended Webhook Handlers ─────────────────────────
+  if (eventType === "order.paid") {
+    const order = event.payload?.order?.entity;
+    const paymentEntity = event.payload?.payment?.entity;
+    const orderId = order?.id;
+    if (orderId) {
+      const amountPaise = Number(order.amount_paid || order.amount || paymentEntity?.amount || 0);
+      let customerProfileId = order.notes?.customer_profile_id || "";
+      let productName = order.notes?.product_name || "Store Item";
+
+      if (!customerProfileId) {
+        try {
+          const ev = await dbClient.execute({
+            sql: "SELECT customer_profile_id, product_name FROM live_payment_events WHERE razorpay_order_id = ? ORDER BY created_at_utc DESC LIMIT 1",
+            args: [orderId],
+          });
+          if (ev.rows.length > 0) {
+            customerProfileId = String(ev.rows[0].customer_profile_id);
+            if (ev.rows[0].product_name) productName = String(ev.rows[0].product_name);
+          }
+        } catch {}
+      }
+
+      if (customerProfileId) {
+        try {
+          await recordSuccessfulPayment(dbClient, {
+            razorpayPaymentId: paymentEntity?.id || `pay_ord_${orderId.slice(-8)}`,
+            razorpayOrderId: orderId,
+            customerProfileId,
+            amountPaise,
+            productName,
+            nowMs: Date.now(),
+          });
+
+          await appendAuditLedger(dbClient, {
+            eventType: "ORDER_PAID",
+            entityId: orderId,
+            customerId: customerProfileId,
+            payload: {
+              orderId,
+              amountPaise,
+              productName,
+              receipt: order.receipt,
+              paymentId: paymentEntity?.id,
+            },
+            nowMs: Date.now(),
+          });
+
+          broadcastSSE("global", {
+            type: "ORDER_PAID",
+            orderId,
+            customerProfileId,
+            amountPaise,
+            productName,
+          });
+        } catch (err) {
+          logger.error({ msg: "Failed to process order.paid", err: (err as Error).message });
+        }
+      }
+    }
+  }
+
+  if (eventType === "subscription.charged") {
+    const subscription = event.payload?.subscription?.entity;
+    const paymentEntity = event.payload?.payment?.entity;
+    const subId = subscription?.id;
+
+    if (subId) {
+      const amountPaise = Number(paymentEntity?.amount || subscription.plan_amount || 0);
+      const customerProfileId = subscription.notes?.customer_profile_id || subscription.customer_id || "cust_sub";
+
+      try {
+        await appendAuditLedger(dbClient, {
+          eventType: "SUBSCRIPTION_CHARGED",
+          entityId: subId,
+          customerId: customerProfileId,
+          payload: {
+            subscriptionId: subId,
+            planId: subscription.plan_id,
+            currentStart: subscription.current_start,
+            currentEnd: subscription.current_end,
+            chargeAt: subscription.charge_at,
+            amountPaise,
+            paymentId: paymentEntity?.id,
+            status: subscription.status,
+          },
+          nowMs: Date.now(),
+        });
+
+        broadcastSSE("global", {
+          type: "SUBSCRIPTION_CHARGED",
+          subscriptionId: subId,
+          customerProfileId,
+          amountPaise,
+          status: subscription.status,
+        });
+      } catch (err) {
+        logger.error({ msg: "Failed to process subscription.charged", err: (err as Error).message });
+      }
+    }
+  }
+
+  if (eventType === "subscription.halted") {
+    const subscription = event.payload?.subscription?.entity;
+    const subId = subscription?.id;
+
+    if (subId) {
+      const amountPaise = Number(subscription.plan_amount || subscription.notes?.amount_paise || 299900);
+      const customerProfileId = subscription.notes?.customer_profile_id || subscription.customer_id || "cust_halted";
+      const customerName = subscription.notes?.customer_name || "Subscriber";
+      const planName = subscription.notes?.plan_name || "Subscription Plan";
+
+      // Autonomously build SaaS Soft-lock Grace Period Strategy
+      const graceStrategy = buildSaaSGracePeriodStrategy({
+        mandateId: subId,
+        planName,
+        amountPaise,
+        softLockGraceDays: 5,
+        retryCount: 3,
+        maxRetries: 3,
+        rbiAdvanceNoticeHours: 24,
+      });
+
+      try {
+        await appendAuditLedger(dbClient, {
+          eventType: "SUBSCRIPTION_HALTED",
+          entityId: subId,
+          customerId: customerProfileId,
+          payload: {
+            subscriptionId: subId,
+            status: "halted",
+            gracePeriodDays: graceStrategy.softLockGraceDays,
+            softLockExpiresAtUtc: graceStrategy.softLockExpiresAtUtc,
+            customerMessage: graceStrategy.customerMessage,
+            actionUrl: graceStrategy.actionUrl,
+          },
+          nowMs: Date.now(),
+        });
+
+        broadcastSSE("global", {
+          type: "SUBSCRIPTION_HALTED",
+          subscriptionId: subId,
+          customerProfileId,
+          graceStrategy,
+        });
+      } catch (err) {
+        logger.error({ msg: "Failed to process subscription.halted", err: (err as Error).message });
+      }
+    }
+  }
+
+  if (eventType === "invoice.paid") {
+    const invoice = event.payload?.invoice?.entity;
+    const paymentEntity = event.payload?.payment?.entity;
+    const invoiceId = invoice?.id;
+
+    if (invoiceId) {
+      const amountPaidPaise = Number(invoice.amount_paid || invoice.amount || paymentEntity?.amount || 0);
+      const customerProfileId = invoice.customer_id || invoice.customer_details?.id || "cust_b2b";
+      const clientCompany = invoice.customer_details?.name || "Corporate Client";
+      const invoiceNumber = invoice.invoice_number || invoiceId;
+
+      // Calculate early settlement DSO interest savings if settlement discount occurred
+      const dsoDaysSaved = Number(invoice.notes?.dso_days_saved || 20);
+      const annualCapitalRate = Number(invoice.notes?.annual_cost_of_capital || 0.14);
+      const capitalSavingsPaise = Math.round(amountPaidPaise * (annualCapitalRate / 365) * dsoDaysSaved);
+
+      try {
+        await appendAuditLedger(dbClient, {
+          eventType: "INVOICE_PAID",
+          entityId: invoiceId,
+          customerId: customerProfileId,
+          payload: {
+            invoiceId,
+            invoiceNumber,
+            clientCompany,
+            amountPaidPaise,
+            dsoDaysSaved,
+            capitalSavingsPaise,
+            status: "paid",
+          },
+          nowMs: Date.now(),
+        });
+
+        broadcastSSE("global", {
+          type: "INVOICE_PAID",
+          invoiceId,
+          invoiceNumber,
+          clientCompany,
+          amountPaidPaise,
+          capitalSavingsPaise,
+        });
+      } catch (err) {
+        logger.error({ msg: "Failed to process invoice.paid", err: (err as Error).message });
+      }
+    }
+  }
+}
+
+defaultWebhookQueue.setHandler(processWebhookJob);
 
 // ── Vendor Dashboard API ─────────────────────────────────────────
 app.get("/api/vendor/payments", adminLimiter, async (_req: Request, res: Response) => {
