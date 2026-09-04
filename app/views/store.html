@@ -777,6 +777,7 @@
       const linkBtn = document.getElementById('rec-link-btn');
       if (linkBtn) linkBtn.href = recoveryUrl;
       banner.style.display = 'block';
+      setTimeout(() => { banner.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 100);
     }
 
     function switchDomain(domain) {
@@ -955,6 +956,11 @@
         const rzp = new Razorpay(options);
         rzp.on('payment.failed', async function(resp) {
           showToast('⚠️ Payment failed: ' + (resp.error?.description || 'Declined by bank'), 'error');
+          // Dismiss Razorpay modal overlay so ARBITER's recovery banner is front and center
+          try { rzp.close(); } catch {}
+          const rzpOverlay = document.querySelector('.razorpay-container');
+          if (rzpOverlay) { rzpOverlay.style.display = 'none'; }
+
           try {
             const failRes = await fetch('/api/payments/failed', {
               method: 'POST',
@@ -990,7 +996,6 @@
           } catch (fErr) {
             console.error('Failed to notify backend of failure:', fErr);
           }
-          rzp.close();
         });
         rzp.open();
       } catch (err) {
