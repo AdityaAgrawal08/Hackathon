@@ -2854,14 +2854,105 @@ app.get("/api/recovery/batch-report", async (_req: Request, res: Response) => {
   }
 });
 
-// ── 4-Way Comparative Baseline Ablation Benchmark (Task 6.3 / BEN-15) ──
+// ── 4-Way Comparative Baseline Ablation Benchmark (Task 6.3 / BEN-15 / Phase 6) ──
 app.get("/api/benchmark/four-way", (req: Request, res: Response) => {
   try {
     const size = parseInt(req.query.size as string, 10) || 1000;
     const seed = parseInt(req.query.seed as string, 16) || 0x5eed;
-    const report = runFourWayAblationBenchmark(size, seed);
+    const domain = (req.query.domain as string) || "d2c";
+    const minTicketInr = req.query.minTicket ? parseInt(req.query.minTicket as string, 10) : undefined;
+    const maxTicketInr = req.query.maxTicket ? parseInt(req.query.maxTicket as string, 10) : undefined;
+    const report = runFourWayAblationBenchmark({
+      batchSize: size,
+      seed,
+      domain: domain as any,
+      minTicketInr,
+      maxTicketInr,
+    });
     res.json(report);
   } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+app.post("/api/benchmark/four-way/run", (req: Request, res: Response) => {
+  try {
+    const options = req.body || {};
+    const report = runFourWayAblationBenchmark(options);
+    res.json({ success: true, report });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// ── Customer Behavioral Intelligence Profiles (Phase 1 / Phase 6) ──
+app.get("/api/customers/profiles", async (req: Request, res: Response) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit as string, 10) || 50, 200);
+    const offset = Math.max(parseInt(req.query.offset as string, 10) || 0, 0);
+
+    const result = await dbClient.execute({
+      sql: `
+        SELECT 
+          id, name, phone, email, preferred_channel, 
+          email_open_latency_mins, historical_open_rate, historical_click_rate,
+          payment_method_affinity, ticket_sensitivity_score, alternate_account_converted,
+          total_recovered_paise, patience_score, last_engaged_channel, last_engaged_at_utc,
+          created_at_utc
+        FROM customer_profiles
+        ORDER BY total_recovered_paise DESC, created_at_utc DESC
+        LIMIT ? OFFSET ?
+      `,
+      args: [limit, offset],
+    });
+
+    res.json({
+      success: true,
+      count: result.rows.length,
+      profiles: result.rows,
+    });
+  } catch (err) {
+    logger.error({ msg: "[CustomerProfiles] Error", err: (err as Error).message });
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// ── Intelligent Priority Queue Live Telemetry (Phase 3 / Phase 6) ──
+app.get("/api/decide/priority-queue", async (_req: Request, res: Response) => {
+  try {
+    const result = await dbClient.execute({
+      sql: `
+        SELECT 
+          lpe.id, lpe.customer_profile_id, lpe.razorpay_order_id, lpe.amount_paise,
+          lpe.failure_reason, lpe.failure_code, lpe.created_at_utc,
+          cp.name as customer_name, cp.email as customer_email, cp.phone as customer_phone,
+          cp.preferred_channel, cp.email_open_latency_mins, cp.historical_open_rate,
+          cp.historical_click_rate, cp.alternate_account_converted, cp.ticket_sensitivity_score
+        FROM live_payment_events lpe
+        LEFT JOIN customer_profiles cp ON cp.id = lpe.customer_profile_id
+        WHERE lpe.status = 'failed'
+        ORDER BY lpe.created_at_utc DESC
+        LIMIT 50
+      `,
+      args: [],
+    });
+
+    const candidates = result.rows.map((r: any) => {
+      const openLatency = r.email_open_latency_mins ?? 45;
+      return {
+        id: String(r.id),
+        amountPaise: Number(r.amount_paise || 100000),
+        preferredChannel: (r.preferred_channel as any) || "AUTO",
+        emailOpenLatencyMins: openLatency,
+        historicalOpenRate: Number(r.historical_open_rate || 0.5),
+        domainType: "D2C_ECOMMERCE" as const,
+      };
+    });
+
+    const sequenced = sequenceIntelligentRecoveryBatch(candidates, {}, Date.now());
+    res.json({ success: true, queue: sequenced });
+  } catch (err) {
+    logger.error({ msg: "[PriorityQueue] Error", err: (err as Error).message });
     res.status(500).json({ error: (err as Error).message });
   }
 });
