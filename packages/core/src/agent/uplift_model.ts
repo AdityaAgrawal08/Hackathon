@@ -147,7 +147,7 @@ export class TLearnerUpliftModel {
     let segment: CausalSegment;
     if (mu0 >= 0.70) {
       segment = "SURE_THING";
-    } else if (mu1 < 0.20 && tau < 0.05) {
+    } else if ((mu1 < 0.20 && tau < 0.05) || (features.priorFailureCount >= 4 && features.priorSuccessCount === 0 && (features.hoursSinceFailure ?? 0) > 24)) {
       segment = "LOST_CAUSE";
     } else if (tau < 0) {
       segment = "SLEEPING_DOG";

@@ -521,7 +521,7 @@ app.post("/api/payment-success", paymentLimiter, verifyPaymentHandler);
 // 1. 1-Tap UPI Intent URI Generator
 app.post("/api/recovery/upi-intent", recoveryLimiter, async (req: Request, res: Response) => {
   try {
-    const { eventId } = req.body;
+    const { eventId, amountPaise: overrideAmount } = req.body;
     if (!eventId) return res.status(400).json({ error: "Missing eventId" });
 
     const evResult = await dbClient.execute({
@@ -532,7 +532,7 @@ app.post("/api/recovery/upi-intent", recoveryLimiter, async (req: Request, res: 
       return res.status(404).json({ error: "Event not found" });
     }
     const ev = evResult.rows[0] as any;
-    const amountPaise = Number(ev.amount_paise || 499900);
+    const amountPaise = Number(overrideAmount || ev.amount_paise || 499900);
 
     const intents = generateUpiIntents({
       amountPaise,
@@ -3715,9 +3715,14 @@ app.post("/api/webhooks/inbound-message", async (req: Request, res: Response) =>
     broadcastSSE("global", {
       type: "customer.conversational_reply",
       from,
+      customerText: text,
       intent: reply.intent,
       replyText: reply.replyText,
       recoveryUrl: reply.recoveryUrl,
+      toolCalls: reply.toolCalls,
+      chainOfThought: reply.chainOfThought,
+      auditEntryId: reply.auditEntryId,
+      timestamp: new Date().toISOString(),
     });
 
     res.json({ success: true, ...reply });

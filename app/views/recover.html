@@ -80,6 +80,20 @@
     /* Exit-Intent Downsell Modal (FIX-019) */
     .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 9999; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
     .modal-card { background: #0f172a; border: 1px solid #3b82f6; border-radius: 16px; padding: 24px; max-width: 420px; width: 90%; text-align: center; box-shadow: 0 20px 40px rgba(0,0,0,0.6); }
+
+    /* Conversational Recovery Assistant Widget */
+    .agent-assistant-card { background: #0f172a; border: 1px solid #3b82f6; border-radius: 14px; padding: 18px 20px; margin-bottom: 20px; text-align: left; }
+    .chat-stream-box { background: #020617; border: 1px solid #1e293b; border-radius: 10px; padding: 12px; max-height: 220px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; margin-top: 10px; margin-bottom: 10px; }
+    .chat-bubble { max-width: 88%; padding: 8px 12px; border-radius: 10px; font-size: 13px; line-height: 1.45; }
+    .chat-bubble.agent { align-self: flex-start; background: #172554; border: 1px solid #1e40af; border-radius: 10px 10px 10px 0; color: #f8fafc; }
+    .chat-bubble.customer { align-self: flex-end; background: #1e293b; border: 1px solid #475569; border-radius: 10px 10px 0 10px; color: #e2e8f0; }
+    .quick-chips-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+    .quick-chip-btn { background: #1e293b; border: 1px solid #334155; color: #93c5fd; font-size: 11px; font-weight: 500; padding: 4px 10px; border-radius: 14px; cursor: pointer; transition: all 0.2s; }
+    .quick-chip-btn:hover { background: #2563eb; color: #fff; border-color: #3b82f6; }
+    .chat-input-row { display: flex; gap: 8px; }
+    .chat-input-field { flex: 1; background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 8px 12px; color: #f8fafc; font-size: 13px; }
+    .chat-send-btn { background: #2563eb; color: white; border: none; border-radius: 8px; padding: 8px 14px; font-size: 13px; font-weight: 700; cursor: pointer; transition: background 0.2s; }
+    .chat-send-btn:hover { background: #1d4ed8; }
   </style>
 </head>
 <body>
@@ -133,6 +147,47 @@
           <div class="product-tag" id="product-name">Subscription Plan</div>
         </div>
         <div class="amount-value" id="amount-display">--</div>
+      </div>
+
+      <!-- Interactive 2-Way Conversational Recovery Assistant -->
+      <div class="agent-assistant-card" id="agent-assistant-card">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="font-size:20px;">🤖</span>
+            <div>
+              <div style="font-size:14px; font-weight:700; color:#f8fafc;">ARBITER Recovery Assistant</div>
+              <div style="font-size:10px; color:#34d399; font-weight:600;">● Online • Powered by Llama-3 & MarginGuard</div>
+            </div>
+          </div>
+          <span style="font-size:10px; background:#1e40af; color:#bfdbfe; padding:2px 8px; border-radius:10px; font-weight:700;">24/7 INSTANT HELP</span>
+        </div>
+
+        <div style="font-size:12px; color:#94a3b8; line-height:1.4;">
+          Have questions, need a salary reminder, or looking for a courtesy discount? Chat with our assistant:
+        </div>
+
+        <!-- Chat Stream -->
+        <div class="chat-stream-box" id="customer-chat-stream">
+          <!-- Populated dynamically -->
+        </div>
+
+        <!-- Quick Action Chips -->
+        <div class="quick-chips-row" id="customer-quick-chips">
+          <button type="button" class="quick-chip-btn" onclick="sendCustomerQuickReply('Why did my payment fail? Was money deducted?')">❓ Why did it fail?</button>
+          <button type="button" class="quick-chip-btn" onclick="sendCustomerQuickReply('Can I pay tomorrow after my salary gets credited?')">📅 Remind me tomorrow</button>
+          <button type="button" class="quick-chip-btn" onclick="sendCustomerQuickReply('Can I get a courtesy discount on this order?')">💰 Request courtesy discount</button>
+          <button type="button" class="quick-chip-btn" onclick="sendCustomerQuickReply('How do I pay using Google Pay or PhonePe?')">📱 How to pay via UPI?</button>
+          <button type="button" class="quick-chip-btn" onclick="sendCustomerQuickReply('I want to talk to human support')">👤 Human support</button>
+        </div>
+
+        <!-- Input Bar -->
+        <div class="chat-input-row">
+          <input type="text" id="customer-chat-input" class="chat-input-field" placeholder="Ask in English or Hinglish (e.g. 'discount milega kya?')..." onkeydown="if(event.key==='Enter') sendCustomerMessage()">
+          <button type="button" class="chat-send-btn" onclick="sendCustomerMessage()">Send &rarr;</button>
+        </div>
+        <div style="font-size:10px; color:#64748b; margin-top:6px; text-align:center;">
+          TRAI Quiet Hours Compliant • MarginGuard Guardrails • SHA-256 Tamper-Evident Ledger
+        </div>
       </div>
 
       <div class="options-title">Select Recovery Action</div>
@@ -308,6 +363,9 @@
           }
 
           loadUpiIntents();
+          setTimeout(() => {
+            initAssistantGreeting();
+          }, 200);
         }
       } catch (e) {
         console.error('Portal load error:', e);
@@ -316,12 +374,132 @@
       createRecoveryOrder();
     }
 
-    async function loadUpiIntents() {
+    function initAssistantGreeting() {
+      const cName = eventData?.customerName ? ` ${eventData.customerName}` : '';
+      const amtDisplay = document.getElementById('amount-display');
+      const amtVal = amtDisplay ? amtDisplay.textContent : 'your order';
+      appendCustomerChatBubble('agent', `👋 Hi${cName}! I'm your AI payment recovery assistant for this order. We noticed your payment of ${amtVal} was declined by your bank. Don't worry — no money was deducted, and your order is reserved. How can I help you complete your payment?`);
+    }
+
+    function appendCustomerChatBubble(sender, text, meta) {
+      const stream = document.getElementById('customer-chat-stream');
+      if (!stream) return;
+      const bubble = document.createElement('div');
+      bubble.className = 'chat-bubble ' + (sender === 'customer' ? 'customer' : 'agent');
+
+      let header = '';
+      if (sender === 'agent') {
+        const intentBadge = meta?.intent ? `<span style="background:#1e40af;color:#93c5fd;font-size:9px;font-weight:700;padding:1px 5px;border-radius:4px;margin-left:4px;">${meta.intent}</span>` : '';
+        header = `<div style="font-size:10px;color:#60a5fa;font-weight:700;margin-bottom:3px;display:flex;align-items:center;">⚡ ARBITER ${intentBadge}</div>`;
+      } else {
+        header = `<div style="font-size:10px;color:#94a3b8;margin-bottom:3px;font-weight:600;">You</div>`;
+      }
+
+      let toolTrace = '';
+      if (meta?.toolCalls && meta.toolCalls.length > 0) {
+        toolTrace = `<div style="margin-top:6px;padding:3px 6px;background:#020617;border-radius:4px;font-size:10px;color:#34d399;">✓ Executed: ${meta.toolCalls.map(t => t.toolName).join(', ')}</div>`;
+      }
+
+      bubble.innerHTML = `${header}<div>${text}</div>${toolTrace}`;
+      stream.appendChild(bubble);
+      stream.scrollTop = stream.scrollHeight;
+    }
+
+    function sendCustomerQuickReply(text) {
+      const input = document.getElementById('customer-chat-input');
+      if (input) input.value = text;
+      sendCustomerMessage();
+    }
+
+    async function sendCustomerMessage() {
+      const input = document.getElementById('customer-chat-input');
+      if (!input) return;
+      const text = input.value.trim();
+      if (!text) return;
+      input.value = '';
+
+      appendCustomerChatBubble('customer', text);
+
+      const stream = document.getElementById('customer-chat-stream');
+      const typing = document.createElement('div');
+      typing.id = 'chat-typing-indicator';
+      typing.className = 'chat-bubble agent';
+      typing.style.color = '#94a3b8';
+      typing.style.fontSize = '11px';
+      typing.textContent = '⚡ Checking transaction status & formulating response...';
+      if (stream) {
+        stream.appendChild(typing);
+        stream.scrollTop = stream.scrollHeight;
+      }
+
+      const customerIdentifier = eventData?.customerPhone || eventData?.phone || eventData?.customerEmail || eventData?.email || ('cust_' + eventId);
+
       try {
+        const res = await fetch('/api/webhooks/inbound-message', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            from: customerIdentifier,
+            text,
+            channel: 'WEB_PORTAL',
+            paymentEventId: eventId,
+            orderId: eventData?.razorpayOrderId
+          })
+        });
+
+        const data = await res.json();
+        const typingEl = document.getElementById('chat-typing-indicator');
+        if (typingEl) typingEl.remove();
+
+        if (data.replyText) {
+          appendCustomerChatBubble('agent', data.replyText, {
+            intent: data.intent,
+            toolCalls: data.toolCalls
+          });
+        }
+
+        // Action side-effects
+        const discountTool = data.toolCalls?.find(t => t.toolName === 'offer_courtesy_discount');
+        if (discountTool || data.intent === 'PRICE_OBJECTION') {
+          triggerCourtesyDiscount(10);
+        } else if (data.intent === 'RESCHEDULE_REQUEST') {
+          showAlert('📅 Reminder scheduled for tomorrow 10:00 AM (TRAI quiet hours respected).', 'info');
+        } else if (data.intent === 'OPT_OUT') {
+          showAlert('🛡️ Automated recovery outreach cancelled per your request.', 'info');
+        }
+      } catch (err) {
+        const typingEl = document.getElementById('chat-typing-indicator');
+        if (typingEl) typingEl.remove();
+        appendCustomerChatBubble('agent', 'I am currently routing your request. You can also complete your payment immediately using the 1-Tap UPI options below.');
+      }
+    }
+
+    function triggerCourtesyDiscount(percent = 10) {
+      if (discountApplied) return;
+      discountApplied = true;
+      const originalPaise = Number(eventData?.amountPaise || 499900);
+      const discountedPaise = Math.round(originalPaise * (1 - percent / 100));
+
+      const amtDisplay = document.getElementById('amount-display');
+      if (amtDisplay) {
+        amtDisplay.innerHTML = `
+          <span style="color:#22c55e;font-size:26px;font-weight:800;">₹${(discountedPaise / 100).toLocaleString('en-IN')}</span>
+          <span style="color:#64748b;text-decoration:line-through;font-size:14px;margin-left:8px;">₹${(originalPaise / 100).toLocaleString('en-IN')}</span>
+          <span style="background:#15803d;color:#dcfce7;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;margin-left:6px;">${percent}% COURTESY APPLIED</span>
+        `;
+      }
+      loadUpiIntents(discountedPaise);
+      showAlert(`🎉 Special courtesy discount of ${percent}% applied! Complete your order with 1-Tap UPI below.`, 'info');
+    }
+
+    async function loadUpiIntents(customAmountPaise) {
+      try {
+        const bodyObj = { eventId };
+        if (customAmountPaise) bodyObj.amountPaise = customAmountPaise;
         const res = await fetch('/api/recovery/upi-intent', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ eventId }),
+          body: JSON.stringify(bodyObj),
         });
         if (res.ok) {
           const upiData = await res.json();

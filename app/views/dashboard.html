@@ -252,8 +252,8 @@
 
   <div class="tab-nav">
     <button class="tab-btn active" id="tab-transactions" onclick="switchTab('transactions')">🛒 Live Operations & Recovery Feed</button>
-    <button class="tab-btn" id="tab-ablation" onclick="switchTab('ablation')">📊 4-Tier Ablation & CSV Benchmark</button>
-    <button class="tab-btn" id="tab-conversational" onclick="switchTab('conversational')">💬 2-Way Conversational Recovery</button>
+    <button class="tab-btn" id="tab-ablation" onclick="switchTab('ablation')">📊 Batch Benchmark & CSV Ingestion</button>
+    <button class="tab-btn" id="tab-conversational" onclick="switchTab('conversational')">💬 Customer Conversations & Agent Audit</button>
     <button class="tab-btn" id="tab-behavioral-memory" onclick="switchTab('behavioral-memory')">🧠 Behavioral Memory & Priority Queue</button>
     <button class="tab-btn" id="tab-bank-matrix" onclick="switchTab('bank-matrix')">🌐 Optimizer & Bank Matrix</button>
     <button class="tab-btn" id="tab-recovery-report" onclick="switchTab('recovery-report')">📈 Recovery Analytics & Benchmark</button>
@@ -671,7 +671,12 @@
         </div>
       </div>
 
-      <h3 style="font-size:15px;font-weight:700;margin-bottom:12px;color:#f1f5f9;">Top 4 Indian Issuer Bank Switch Real-Time Telemetry</h3>
+      <div style="margin-bottom:12px;">
+        <h3 style="font-size:15px;font-weight:700;margin-bottom:4px;color:#f1f5f9;">Top 4 Indian Issuer Bank Switch Real-Time Telemetry</h3>
+        <p style="font-size:11px;color:#94a3b8;line-height:1.4;">
+          <span style="color:#38bdf8;font-weight:600;">ℹ️ Platform-Inferred Telemetry:</span> Aggregated from 5-minute rolling checkout telemetry across platform traffic. (Indian banks do not provide external switch uptime APIs; health is inferred from live checkout cohorts).
+        </p>
+      </div>
       <div class="bank-cards-grid" id="bank-cards-container">
         <!-- Rendered by loadBankMatrix() -->
       </div>
@@ -688,7 +693,7 @@
       <div class="table-card">
         <div class="table-card-header">
           <div class="table-title">National Payment Rails Composite Health (NPCI Feed)</div>
-          <div style="font-size:12px;color:#64748b;">Deterministic IST hourly stress curves</div>
+          <div style="font-size:12px;color:#64748b;">Simulated peak-hour rail stress models calibrated to NPCI benchmarks</div>
         </div>
         <table class="rails-table">
           <thead>
@@ -709,7 +714,7 @@
     <!-- Recovery Telemetry & Analytics Panel -->
     <div class="tab-panel" id="panel-recovery-report">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
-        <h2 style="font-size:18px;font-weight:600;">Recovery Telemetry & Empirical Ablation</h2>
+        <h2 style="font-size:18px;font-weight:600;">Recovery Telemetry & Net Margin Analytics</h2>
         <button class="analysis-btn" onclick="loadRecoveryReport()">↻ Re-run Analytics</button>
       </div>
       <div id="report-loading" style="text-align:center;padding:40px;color:#64748b;">Loading batch telemetry...</div>
@@ -726,9 +731,9 @@
     <div class="tab-panel" id="panel-ablation">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
         <div>
-          <h2 style="font-size:18px;font-weight:600;color:#f8fafc;">4-Tier Comparative Baseline Ablation Benchmark</h2>
+          <h2 style="font-size:18px;font-weight:600;color:#f8fafc;">Batch Recovery Benchmark & CSV Ingestion Engine</h2>
           <p style="font-size:12px;color:#94a3b8;margin-top:4px;">
-            Empirically measures recovered GMV across 4 parallel strategies under independent banking rail friction.
+            Empirically measures recovered GMV across 4 recovery strategies (Control, Blind Retries, Rule-Based, and ARBITER Intelligent Recovery).
           </p>
         </div>
         <div style="display:flex;gap:8px;">
@@ -803,16 +808,17 @@
     <!-- 2-Way Conversational Recovery Simulator Panel (FIX-020, FIX-021) -->
     <div class="tab-panel" id="panel-conversational">
       <div style="margin-bottom:16px;">
-        <h2 style="font-size:18px;font-weight:600;color:#f8fafc;">Two-Way Conversational Recovery Agent Simulator</h2>
+        <h2 style="font-size:18px;font-weight:600;color:#f8fafc;">Customer Recovery Dialogue & Agent Compliance Audit</h2>
         <p style="font-size:12px;color:#94a3b8;margin-top:4px;">
-          Simulate inbound customer replies (SMS / WhatsApp) to test autonomous intent classification, dynamic rescheduling, downsell discount negotiation, and regulatory compliance.
+          Live audit log of active customer recovery interactions across Web Recovery Assistant, WhatsApp, and SMS channels. Includes a merchant diagnostic webhook emulator to verify agent decision bounds and safety guardrails.
         </p>
       </div>
 
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
         <!-- Left: Interactive Inbound Trigger Simulator -->
         <div style="background:#0f172a;border:1px solid #1e293b;border-radius:12px;padding:20px;">
-          <h3 style="font-size:14px;color:#60a5fa;margin-bottom:14px;">📱 Inbound Message Dispatcher</h3>
+          <h3 style="font-size:14px;color:#60a5fa;margin-bottom:4px;">🛠️ Merchant Diagnostic Inbound Webhook Emulator</h3>
+          <p style="font-size:11px;color:#94a3b8;margin-bottom:14px;">Simulate an inbound customer reply to audit intent classification, TRAI quiet hours enforcement, and MarginGuard concession limits.</p>
 
           <div class="form-row" style="margin-bottom:12px;">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
@@ -852,11 +858,14 @@
 
         <!-- Right: Real-Time Dialogue Thread & Proofs -->
         <div style="background:#0f172a;border:1px solid #1e293b;border-radius:12px;padding:20px;display:flex;flex-direction:column;">
-          <h3 style="font-size:14px;color:#34d399;margin-bottom:14px;">💬 Live Agent Dialogue & Compliance Proofs</h3>
+          <div style="margin-bottom:14px;">
+            <h3 style="font-size:14px;color:#34d399;margin-bottom:4px;">💬 Live Agent Dialogue & Compliance Proofs</h3>
+            <p style="font-size:11px;color:#94a3b8;">Real-time feed of customer dialogues from Web Recovery Assistant, SMS, and WhatsApp.</p>
+          </div>
 
           <div id="conv-chat-stream" style="flex:1;min-height:260px;max-height:360px;overflow-y:auto;background:#020617;border:1px solid #1e293b;border-radius:8px;padding:14px;display:flex;flex-direction:column;gap:12px;margin-bottom:14px;">
             <div style="font-size:12px;color:#64748b;text-align:center;padding:20px;">
-              No messages yet. Send an inbound message or click a trigger scenario on the left.
+              No messages yet. Real-time dialogues from customer recovery will stream here automatically.
             </div>
           </div>
 
@@ -1252,8 +1261,9 @@
           <td>${informed}</td>
           <td>${action}</td>
           <td>
-            <a href="/recover/${safeId}" target="_blank" class="audit-link" style="color:#60a5fa;text-decoration:none;margin-right:6px;font-weight:600;">🔗 Recovery Portal</a>
-            <span class="audit-link" onclick="openConvSimulatorForCustomer('${safeId}', '${safeContact}', '${safeName}')" style="color:#34d399;margin-right:6px;cursor:pointer;">💬 Sim Agent</span>
+            <button onclick="copyCustomerRecoveryLink('${safeId}')" class="audit-link" style="background:#1e293b;border:1px solid #334155;color:#60a5fa;margin-right:6px;cursor:pointer;padding:2px 8px;border-radius:4px;font-size:11px;">📋 Copy Link</button>
+            <a href="/recover/${safeId}?preview=vendor" target="_blank" class="audit-link" style="color:#94a3b8;text-decoration:none;margin-right:6px;font-size:11px;">👁️ Customer View</a>
+            <span class="audit-link" onclick="openConvSimulatorForCustomer('${safeId}', '${safeContact}', '${safeName}')" style="color:#34d399;margin-right:6px;cursor:pointer;">💬 Audit Chat</span>
             <span class="audit-link" onclick="openAuditModal('${safeId}')">🛡️ Audit</span>
           </td>
         </tr>`;
@@ -1725,7 +1735,10 @@
             showToast('✓ Payment recovered! Dunning reminders auto-cancelled.', 'success');
             refreshAll();
           } else if (data.type === 'customer.conversational_reply') {
-            showToast('💬 Customer reply: ' + (data.intent || 'Received'), 'info');
+            showToast('💬 Customer dialogue: ' + (data.intent || 'Received'), 'info');
+            if (typeof appendDialogueToDashboardStream === 'function') {
+              appendDialogueToDashboardStream(data);
+            }
           }
         } catch {}
       };
@@ -2416,7 +2429,7 @@
             <div style="margin-top:10px;padding:8px 12px;background:#1e293b;border-radius:6px;display:flex;align-items:center;justify-content:space-between;gap:8px;">
               <span style="font-size:11px;color:#94a3b8;">1-Tap UPI URL:</span>
               <a href="${data.recoveryUrl}" target="_blank" style="color:#38bdf8;text-decoration:none;font-weight:700;font-size:12px;background:#2563eb;padding:4px 10px;border-radius:4px;">
-                ⚡ Open Recovery Portal &rarr;
+                👁️ Preview Customer Recovery Page &rarr;
               </a>
             </div>
           ` : ''}
@@ -2558,6 +2571,81 @@
       if (textInput) textInput.value = `Hi, I was trying to purchase for ${name && name !== '—' ? name : 'my account'} and the payment failed. Can you help me complete it?`;
       window.scrollTo({ top: 0, behavior: 'smooth' });
       showToast('Customer persona loaded into conversational simulator', 'info');
+    }
+
+    function copyCustomerRecoveryLink(eventId) {
+      const url = window.location.origin + '/recover/' + eventId;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(url).then(() => {
+          showToast('✓ Customer 1-Tap recovery link copied to clipboard!', 'success');
+        }).catch(() => {
+          prompt('Customer recovery link for outreach:', url);
+        });
+      } else {
+        prompt('Customer recovery link for outreach:', url);
+      }
+    }
+
+    function appendDialogueToDashboardStream(data) {
+      const stream = document.getElementById('conv-chat-stream');
+      if (!stream) return;
+
+      // Remove placeholder text if present
+      if (stream.children.length === 1 && stream.children[0].textContent.includes('No messages yet')) {
+        stream.innerHTML = '';
+      }
+
+      // 1. Customer bubble
+      if (data.customerText) {
+        const custDiv = document.createElement('div');
+        custDiv.style.cssText = 'align-self:flex-end;max-width:85%;background:#1e293b;border:1px solid #334155;border-radius:10px 10px 0 10px;padding:10px 14px;color:#f8fafc;font-size:13px;';
+        custDiv.innerHTML = `<div style="font-size:10px;color:#94a3b8;margin-bottom:2px;">Customer (${escapeHtml(data.from || 'Customer')})</div>${escapeHtml(data.customerText)}`;
+        stream.appendChild(custDiv);
+      }
+
+      // 2. Agent reply bubble
+      const agentDiv = document.createElement('div');
+      agentDiv.style.cssText = 'align-self:flex-start;max-width:90%;background:#0f172a;border:1px solid #3b82f6;border-radius:10px 10px 10px 0;padding:12px 14px;color:#f8fafc;font-size:13px;';
+      const intentBadge = data.intent ? `<span style="background:#2563eb;color:#fff;font-size:10px;font-weight:700;padding:2px 6px;border-radius:4px;margin-left:6px;">${escapeHtml(data.intent)}</span>` : '';
+
+      let toolTraceHtml = '';
+      if (data.toolCalls && data.toolCalls.length > 0) {
+        toolTraceHtml = `
+          <div style="margin-top:8px;background:#020617;border:1px solid #1e293b;border-radius:6px;padding:6px 8px;font-size:11px;">
+            <div style="color:#38bdf8;font-weight:700;margin-bottom:4px;">🛠️ Autonomous Tools Executed (${data.toolCalls.length}):</div>
+            ${data.toolCalls.map(t => `
+              <div style="margin-bottom:3px;padding:3px 6px;background:#0f172a;border-radius:4px;border-left:2px solid ${t.guardrailPassed !== false ? '#10b981' : '#f59e0b'};">
+                <span style="color:#a78bfa;font-family:monospace;font-weight:600;">${escapeHtml(t.toolName || '')}()</span>
+                <span style="color:#64748b;margin-left:4px;">${t.guardrailPassed !== false ? '✓ passed' : '⚠ clamped'}</span>
+              </div>
+            `).join('')}
+          </div>
+        `;
+      }
+
+      agentDiv.innerHTML = `
+        <div style="font-size:10px;color:#60a5fa;margin-bottom:4px;display:flex;align-items:center;">
+          ⚡ ARBITER Autonomous Recovery Agent ${intentBadge}
+        </div>
+        ${toolTraceHtml}
+        <div style="margin-top:6px;font-size:13px;line-height:1.4;">${escapeHtml(data.replyText || 'Response dispatched.')}</div>
+        ${data.recoveryUrl ? `
+          <div style="margin-top:8px;padding:6px 10px;background:#1e293b;border-radius:6px;display:flex;align-items:center;justify-content:space-between;gap:8px;">
+            <span style="font-size:11px;color:#94a3b8;">1-Tap URL:</span>
+            <a href="${data.recoveryUrl}" target="_blank" style="color:#38bdf8;text-decoration:none;font-weight:700;font-size:11px;background:#2563eb;padding:3px 8px;border-radius:4px;">
+              👁️ Preview Recovery &rarr;
+            </a>
+          </div>
+        ` : ''}
+      `;
+
+      stream.appendChild(agentDiv);
+      stream.scrollTop = stream.scrollHeight;
+
+      if (data.auditEntryId) {
+        const hashEl = document.getElementById('conv-audit-hash');
+        if (hashEl) hashEl.textContent = 'sha256:' + data.auditEntryId;
+      }
     }
   </script>
 </body>
