@@ -176,9 +176,6 @@ export const dbClient: Client = createClient({ url: dbUrl, authToken: process.en
 applyDbPragmas(dbClient).catch((err) => {
   logger.debug({ msg: "[Database] Initial pragma execution deferred or non-fatal", err });
 });
-defaultEnterpriseBandit.loadArmsFromDb(dbClient, "enterprise").catch((err) => {
-  logger.debug({ msg: "[Bandit] Initial bandit load deferred or non-fatal", err });
-});
 
 const outreachRouter = new OutreachRouter();
 const brevoProvider = new BrevoEmailProvider();
