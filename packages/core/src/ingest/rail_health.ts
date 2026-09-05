@@ -1,16 +1,3 @@
-/**
- * Real-time payment-rail health (§4.5) — the "call only when network healthy"
- * signal that makes recovery timing India-aware.
- *
- * In production this ingests an NPCI/UPI status feed (or Razorpay Optimizer
- * health scores). For the demo it is a *deterministic, reproducible* simulator
- * so the rail-health gate is auditable and never flakes.
- *
- * Design: rail health is a SCHEDULING/ELIGIBILITY signal, deliberately kept
- * OUT of the 13-dim model feature vector (§4.5) so adding it cannot silently
- * shift model behavior or break the frozen-feature contract. It feeds the
- * decision engine's timing/deferral, not the logreg score.
- */
 import { hashSeed, clamp01 } from "@arbiter/shared";
 import { RAIL_HEALTH_THRESHOLD } from "../decide/window.js";
 
@@ -18,9 +5,7 @@ export type RailId = "upi" | "imps" | "neft" | "cards" | "autopay";
 
 export interface RailHealth {
   rail: RailId;
-  /** 0 (down) .. 1 (fully healthy). */
   score: number;
-  /** True when below the recovery threshold. */
   degraded: boolean;
 }
 
@@ -30,21 +15,60 @@ export interface RailHealthSnapshot {
   asOfUtc: string;
 }
 
-/**
- * Deterministic simulated rail-health for a moment. Models a recurring UPI
- * degradation window in late evening IST (when UPI load peaks) plus small
- * per-rail jitter seeded from the timestamp, so the same `nowMs` always yields
- * the same health (reproducible demo).
- */
+export interface BankDowntimeEvent {
+  bank: string;
+  status: "UP" | "DEGRADED" | "DOWN";
+  severity: "LOW" | "HIGH";
+  instrument?: "upi" | "card" | "netbanking" | "all";
+  updatedAtUtc: string;
+}
+
+const activeBankDowntimes = new Map<string, BankDowntimeEvent>();
+
+export function recordBankDowntime(
+  bank: string,
+  status: "UP" | "DEGRADED" | "DOWN",
+  severity: "LOW" | "HIGH" = "HIGH",
+  instrument: "upi" | "card" | "netbanking" | "all" = "all",
+): void {
+  const normBank = bank.trim().toUpperCase();
+  if (status === "UP") {
+    activeBankDowntimes.delete(normBank);
+  } else {
+    activeBankDowntimes.set(normBank, {
+      bank: normBank,
+      status,
+      severity,
+      instrument,
+      updatedAtUtc: new Date().toISOString(),
+    });
+  }
+}
+
+export function getBankHealth(bank: string): { bank: string; status: "UP" | "DEGRADED" | "DOWN"; degraded: boolean } {
+  const normBank = bank.trim().toUpperCase();
+  const event = activeBankDowntimes.get(normBank);
+  if (!event || event.status === "UP") {
+    return { bank: normBank, status: "UP", degraded: false };
+  }
+  return { bank: normBank, status: event.status, degraded: true };
+}
+
+export function getAllBankDowntimes(): BankDowntimeEvent[] {
+  return Array.from(activeBankDowntimes.values());
+}
+
+export function clearBankDowntimes(): void {
+  activeBankDowntimes.clear();
+}
+
 export function simulatedRailHealth(nowMs: number): RailHealthSnapshot {
   if (!Number.isFinite(nowMs)) throw new Error("simulatedRailHealth: non-finite clock");
 
-  // Hour-of-day in IST drives a smooth UPI stress curve (peak ~21:00 IST).
-  // Keep the fractional part so mid-peak vs off-peak differ smoothly.
   const istMs = nowMs + 330 * 60_000;
   const istHour = (istMs % 86_400_000) / 3_600_000;
-  const upiStress = Math.max(0, 1 - Math.abs(istHour - 21) / 6); // 0..1, peaks at 21:00
-  const seed = hashSeed(`rail:${Math.floor(nowMs / 60_000)}`); // per-minute jitter
+  const upiStress = Math.max(0, 1 - Math.abs(istHour - 21) / 6);
+  const seed = hashSeed(`rail:${Math.floor(nowMs / 60_000)}`);
   const jitter = ((seed % 1000) / 1000 - 0.5) * 0.1;
 
   const upi = clamp01(0.95 - upiStress * 0.55 + jitter);
@@ -64,7 +88,6 @@ export function simulatedRailHealth(nowMs: number): RailHealthSnapshot {
   return { overall, rails, asOfUtc: new Date(nowMs).toISOString() };
 }
 
-/** Convenience: is the overall rail healthy enough to attempt a recovery now? */
 export function isRailHealthy(nowMs: number): boolean {
   return simulatedRailHealth(nowMs).overall >= RAIL_HEALTH_THRESHOLD;
 }

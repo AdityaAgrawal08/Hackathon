@@ -6,7 +6,8 @@
  *   - "razorpay" / "dry-run" / "live" → razorpayProvider
  */
 import { ActionProvider } from "./types.js";
-import { razorpayProvider } from "./razorpay.js";
+import { razorpayProvider, createRazorpayNativePaymentLink } from "./razorpay.js";
+export { razorpayProvider, createRazorpayNativePaymentLink };
 
 function getProviderName(): string {
   const mode = process.env.REAL_EXECUTION_MODE?.toLowerCase() ?? "simulation";

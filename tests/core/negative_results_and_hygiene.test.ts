@@ -2,7 +2,6 @@ import { describe, it, expect } from "vitest";
 import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { getErrorEntry, getCustomerMessage, getFailureClass } from "../../packages/core/src/error-catalog.js";
-import { FEDERATION_EPOCH_MS } from "../../packages/ml/src/federation.js";
 
 describe("Phase 5: Repository Hygiene & Negative Results Integrity", () => {
   it("Task 5.1: Deterministic Error Catalog executes sub-millisecond on 70+ bank codes", () => {
@@ -31,11 +30,6 @@ describe("Phase 5: Repository Hygiene & Negative Results Integrity", () => {
     }
     const elapsed = performance.now() - start;
     expect(elapsed).toBeLessThan(15); // Sub-millisecond per code
-  });
-
-  it("Task 5.1: Federated Learning module is isolated with deterministic RNG and epoch", () => {
-    expect(FEDERATION_EPOCH_MS).toBeDefined();
-    expect(FEDERATION_EPOCH_MS).toBe(Date.UTC(2026, 0, 1, 0, 0, 0));
   });
 
   it("Task 5.2: Negative Results documentation and Demo Script exist and are complete", () => {

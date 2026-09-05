@@ -17,15 +17,38 @@ const GROQ_TIMEOUT_MS = 300; // Never stall the payment flow — 300ms max
 const cache = new Map<string, string>();
 const CACHE_MAX = 256;
 
-function promptFor(failureCode: string, failureDescription: string): string {
+export interface CustomerMessageContext {
+  amountPaise?: number;
+  productName?: string;
+  paymentMethod?: string;
+  cardIssuer?: string;
+  cardLast4?: string;
+  bankCode?: string;
+  vpa?: string;
+  customerName?: string;
+  isHinglish?: boolean;
+}
+
+function promptFor(failureCode: string, failureDescription: string, context?: CustomerMessageContext): string {
+  const methodDetail = context?.paymentMethod
+    ? `Method: ${context.paymentMethod}${context.cardIssuer ? ` (${context.cardIssuer})` : ""}${context.cardLast4 ? ` ending in ${context.cardLast4}` : ""}`
+    : "";
+  const amountDetail = context?.amountPaise ? `Amount: ₹${(context.amountPaise / 100).toFixed(2)}` : "";
+  const languageDirective = context?.isHinglish
+    ? `Language: Conversational Hinglish (e.g., 'Fikr mat kijiye, aapke paise safe hain...').`
+    : `Language: English.`;
+
   return [
-    `Rewrite this payment failure reason into ONE simple sentence for a customer.`,
-    `Use plain language, no jargon, no codes. Mention that no money was deducted if applicable.`,
-    `Max 30 words. Plain text only, no preamble.`,
+    `Rewrite this payment failure reason into ONE simple, empathetic, reassuring sentence for a customer.`,
+    `Use plain language, no technical codes. Explicitly mention that no money was deducted if applicable.`,
+    methodDetail,
+    amountDetail,
+    languageDirective,
+    `Max 35 words. Plain text only, no preamble.`,
     ``,
     `Failure code: ${failureCode}`,
     `Description: ${failureDescription || "(none)"}`,
-  ].join("\n");
+  ].filter(Boolean).join("\n");
 }
 
 function fallback(failureCode: string, failureDescription: string): string {
@@ -34,16 +57,19 @@ function fallback(failureCode: string, failureDescription: string): string {
 
 /**
  * Returns a GROQ-polished customer message. Never throws — always returns
- * the catalog fallback on any failure. Cached per code+description.
+ * the catalog fallback on any failure. Cached per code+description+context.
  *
- * PII: Only code+description are sent. Customer name/email/phone/amount are NEVER included.
+ * PII: Customer name/email/phone are NEVER sent. Only generic payment method/bank details.
  */
 export async function getGroqCustomerMessage(
   failureCode: string,
   failureDescription: string,
-  opts: { apiKey?: string; timeoutMs?: number; noCache?: boolean } = {},
+  opts: { apiKey?: string; timeoutMs?: number; noCache?: boolean; context?: CustomerMessageContext } = {},
 ): Promise<string> {
-  const key = `${failureCode}::${failureDescription}`;
+  const ctxKey = opts.context
+    ? `::${opts.context.paymentMethod || ""}:${opts.context.cardIssuer || ""}:${opts.context.isHinglish ? "hi" : "en"}`
+    : "";
+  const key = `${failureCode}::${failureDescription}${ctxKey}`;
   if (!opts.noCache && cache.has(key)) return cache.get(key)!;
 
   const apiKey = opts.apiKey ?? process.env.GROQ_API_KEY;
@@ -81,9 +107,9 @@ export async function getGroqCustomerMessage(
           {
             role: "system",
             content:
-              "You rewrite payment failure reasons into ONE customer-friendly sentence. Plain language, no codes, no jargon. Mention no money deducted when true. Max 30 words.",
+              "You rewrite payment failure reasons into ONE empathetic customer-friendly sentence. Plain language, no codes, no jargon. Mention no money deducted when true. Max 35 words.",
           },
-          { role: "user", content: promptFor(failureCode, failureDescription) },
+          { role: "user", content: promptFor(failureCode, failureDescription, opts.context) },
         ],
       }),
     });

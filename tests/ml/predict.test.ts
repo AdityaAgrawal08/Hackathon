@@ -53,4 +53,61 @@ describe("scoreWithArtifact", () => {
     expect(() => scoreWithArtifact([1, 2, 3], MODEL)).toThrow(/expected/);
     expect(() => scoreWithArtifact([Number.NaN, 1], MODEL)).toThrow();
   });
+
+  it("dynamically manages active model and loads from database", async () => {
+    const { getActiveModel, setActiveModel, getActiveModelId, loadActiveModelFromDb, DEFAULT_16D_MODEL } = await import(
+      "../../packages/ml/src/predict.js"
+    );
+    expect(getActiveModel()).toBeDefined();
+    expect(getActiveModel().weights.length).toBe(22);
+    expect(getActiveModelId()).toBe("default_calibrated_baseline");
+
+    // Custom model
+    const customModel = {
+      ...DEFAULT_16D_MODEL,
+      bias: 0.99,
+    };
+    setActiveModel(customModel, "custom_v2");
+    expect(getActiveModel().bias).toBe(0.99);
+    expect(getActiveModelId()).toBe("custom_v2");
+
+    // Mock DB client without incumbent
+    const mockClientEmpty = {
+      execute: async () => ({ rows: [] }),
+    } as any;
+    const fallback = await loadActiveModelFromDb(mockClientEmpty);
+    expect(fallback).toBeDefined();
+
+    // Mock DB client with incumbent
+    const mockClientWithIncumbent = {
+      execute: async () => ({
+        rows: [
+          {
+            id: "model_incumbent_99",
+            kind: "logreg",
+            weights_json: JSON.stringify({
+              featureVersion: "v1",
+              weights: new Array(22).fill(0.1),
+              bias: 0.42,
+              mu: new Array(22).fill(0),
+              sigma: new Array(22).fill(1),
+            }),
+            weights_sha256: "sha256_mock",
+            dataset_sha256: "dataset_mock",
+            feature_names_json: JSON.stringify(DEFAULT_16D_MODEL.featureNames),
+            metrics_json: "{}",
+            trained_at_utc: "2026-09-05T00:00:00Z",
+            status: "INCUMBENT",
+          },
+        ],
+      }),
+    } as any;
+    const loaded = await loadActiveModelFromDb(mockClientWithIncumbent);
+    expect(loaded.bias).toBe(0.42);
+    expect(getActiveModelId()).toBe("model_incumbent_99");
+
+    // Clean up
+    setActiveModel(DEFAULT_16D_MODEL, "default_calibrated_baseline");
+  });
 });
+

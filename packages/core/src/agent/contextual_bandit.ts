@@ -24,14 +24,14 @@ export type EnterpriseBanditAction =
   | "SMS_1TAP_UPI"
   | "EMAIL_1TAP_UPI"
   | "IN_FLIGHT_CASCADE"
-  | "B2B_EARLY_SETTLEMENT"
+  | "DOWNSELL_OFFER"
   | "SPLIT_PAY_3X";
 
 export const ENTERPRISE_BANDIT_ACTIONS: readonly EnterpriseBanditAction[] = [
   "SMS_1TAP_UPI",
   "EMAIL_1TAP_UPI",
   "IN_FLIGHT_CASCADE",
-  "B2B_EARLY_SETTLEMENT",
+  "DOWNSELL_OFFER",
   "SPLIT_PAY_3X",
 ] as const;
 
@@ -41,6 +41,7 @@ export type BanditActionId =
   | "SWITCH_TO_WHATSAPP"
   | "TRIGGER_SPLIT_PAY_3X"
   | "TRIGGER_DOWNSELL_5PCT"
+  | "B2B_EARLY_SETTLEMENT"
   | EnterpriseBanditAction;
 
 export const BANDIT_ACTIONS: readonly BanditActionId[] = [

@@ -1,4 +1,3 @@
-/** Decision engine (P3) — catalog, policy pack, EV optimizer. */
 export * from "./catalog.js";
 export * from "./policy.js";
 export * from "./policy_file.js";
@@ -10,3 +9,5 @@ export * from "./ablation_benchmark.js";
 export * from "./merchant_policy.js";
 export * from "./batch_sequencer.js";
 export * from "./bank_circuit_breaker.js";
+export * from "./historical_dataset.js";
+export * from "./off_policy_evaluation.js";

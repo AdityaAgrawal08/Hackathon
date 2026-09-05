@@ -6,8 +6,8 @@
  */
 import type { Client } from "@libsql/client";
 import { createHash } from "node:crypto";
-import { isoUtc, paise, formatINR, logger } from "../packages/shared/src/index.js";
-import { classifyByCode, computeFeatures, scoreWithArtifact, DEFAULT_16D_MODEL, assessCredibility } from "../packages/ml/src/index.js";
+import { isoUtc, paise, formatINR, logger, getPublicBaseUrl, getMerchantVpa } from "../packages/shared/src/index.js";
+import { classifyByCode, computeFeatures, scoreWithArtifact, DEFAULT_22D_MODEL, DEFAULT_16D_MODEL, getActiveModel, assessCredibility } from "../packages/ml/src/index.js";
 import {
   decide,
   defaultPolicy,
@@ -21,6 +21,7 @@ import {
   type ArmSelectionResult,
   recordMetricsDelta,
   getMethodDelta,
+  createRazorpayNativePaymentLink,
 } from "../packages/core/src/index.js";
 import { OutreachRouter, type OutreachChannel, type OutreachPayload, type ProviderDispatchResult } from "../packages/core/src/messaging/index.js";
 import { getErrorEntry, getCustomerMessage, getVendorMessage, getFailureClass as getCatalogFailureClass } from "../packages/core/src/error-catalog.js";
@@ -35,6 +36,7 @@ export interface Product {
 }
 
 export const PRODUCTS: Product[] = [
+  // ── D2C Products ──
   {
     id: "prod_premium_plan",
     name: "Premium Annual Plan",
@@ -62,6 +64,50 @@ export const PRODUCTS: Product[] = [
     description: "Custom solution for large organizations",
     pricePaise: 999900,
     image: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Crect fill='%23475569' width='200' height='200'/%3E%3Ctext fill='%23ffffff' x='100' y='90' text-anchor='middle' font-size='40' font-family='Arial'%3E⬢%3C/text%3E%3Ctext fill='%2394a3b8' x='100' y='120' text-anchor='middle' font-size='14' font-family='Arial'%3EEnterprise%3C/text%3E%3C/svg%3E",
+  },
+  // ── SaaS Mandates (UPI Autopay / eNACH) ──
+  {
+    id: "mandate_cloud_pro",
+    name: "Cloud Infrastructure Pro",
+    description: "Monthly recurring UPI Autopay subscription for cloud infrastructure",
+    pricePaise: 299900,
+    image: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Crect fill='%230369a1' width='200' height='200'/%3E%3Ctext fill='%23ffffff' x='100' y='90' text-anchor='middle' font-size='40' font-family='Arial'%3E⚡%3C/text%3E%3Ctext fill='%23bae6fd' x='100' y='120' text-anchor='middle' font-size='14' font-family='Arial'%3ECloud Pro%3C/text%3E%3C/svg%3E",
+  },
+  {
+    id: "mandate_saas_annual",
+    name: "SaaS Enterprise Mandate",
+    description: "Annual eNACH recurring mandate with multi-attempt grace period",
+    pricePaise: 1299900,
+    image: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Crect fill='%2315803d' width='200' height='200'/%3E%3Ctext fill='%23ffffff' x='100' y='90' text-anchor='middle' font-size='40' font-family='Arial'%3E🛡️%3C/text%3E%3Ctext fill='%23bbf7d0' x='100' y='120' text-anchor='middle' font-size='14' font-family='Arial'%3ESaaS Mandate%3C/text%3E%3C/svg%3E",
+  },
+  {
+    id: "mandate_starter",
+    name: "Micro-SaaS Starter Mandate",
+    description: "Fixed monthly subscription mandate with automated bank switch routing",
+    pricePaise: 49900,
+    image: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Crect fill='%23b45309' width='200' height='200'/%3E%3Ctext fill='%23ffffff' x='100' y='90' text-anchor='middle' font-size='40' font-family='Arial'%3E✨%3C/text%3E%3Ctext fill='%23fde68a' x='100' y='120' text-anchor='middle' font-size='14' font-family='Arial'%3EStarter%3C/text%3E%3C/svg%3E",
+  },
+  // ── B2B Invoices (2/10 Net 30 Terms) ──
+  {
+    id: "inv_software_retainer",
+    name: "Enterprise Software Retainer",
+    description: "Net 30 invoice offering 2% instant cash discount if paid within 10 days",
+    pricePaise: 15000000,
+    image: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Crect fill='%234338ca' width='200' height='200'/%3E%3Ctext fill='%23ffffff' x='100' y='90' text-anchor='middle' font-size='40' font-family='Arial'%3E📜%3C/text%3E%3Ctext fill='%23c7d2fe' x='100' y='120' text-anchor='middle' font-size='14' font-family='Arial'%3ERetainer%3C/text%3E%3C/svg%3E",
+  },
+  {
+    id: "inv_infra_sla",
+    name: "Dedicated Cloud SLA Invoice",
+    description: "High-ticket corporate invoice saving 2% on early settlement terms",
+    pricePaise: 42500000,
+    image: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Crect fill='%237c2d12' width='200' height='200'/%3E%3Ctext fill='%23ffffff' x='100' y='90' text-anchor='middle' font-size='40' font-family='Arial'%3E🏛️%3C/text%3E%3Ctext fill='%23fed7aa' x='100' y='120' text-anchor='middle' font-size='14' font-family='Arial'%3ESLA Invoice%3C/text%3E%3C/svg%3E",
+  },
+  {
+    id: "inv_api_usage",
+    name: "Monthly API Volume Invoicing",
+    description: "Corporate receivable with automated SMS/Email finance chaser",
+    pricePaise: 8500000,
+    image: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Crect fill='%23047857' width='200' height='200'/%3E%3Ctext fill='%23ffffff' x='100' y='90' text-anchor='middle' font-size='40' font-family='Arial'%3E📈%3C/text%3E%3Ctext fill='%23a7f3d0' x='100' y='120' text-anchor='middle' font-size='14' font-family='Arial'%3EUsage Invoice%3C/text%3E%3C/svg%3E",
   },
 ];
 
@@ -219,8 +265,10 @@ export async function processFailedPayment(
       channelResponsiveness: (customer?.total_attempts ?? 0) > 0
         ? (customer.total_successes ?? 0) / customer.total_attempts
         : null,
-      // paydayPattern not available in customer_profiles table (migration 0008) — null is correct sentinel
-      paydayPattern: null,
+      // Derive paydayPattern from customer profile's inferred_payday_day and payday_confidence_bp
+      paydayPattern: customer?.inferred_payday_day
+        ? { [String(customer.inferred_payday_day)]: Math.max(1, Math.round((customer.payday_confidence_bp ?? 5000) / 1000)) }
+        : null,
     },
     // Payment method features (from Razorpay webhook)
     paymentMethod: input.paymentMethod,
@@ -230,7 +278,7 @@ export async function processFailedPayment(
   });
 
   // 4. Score with ML model
-  const scoreResult = scoreWithArtifact(features.values, DEFAULT_16D_MODEL);
+  const scoreResult = scoreWithArtifact(features.values, getActiveModel());
   const probability = scoreResult.probability;
 
   // 5. EV Decision
@@ -319,55 +367,28 @@ export async function processFailedPayment(
       const existingRetryCount = Number(existingRow.rows[0].retry_count || 0);
       const newRetryCount = isSameEventDifferentSource ? 0 : existingRetryCount + 1;
 
-      try {
-        await client.execute({
-          sql: `UPDATE live_payment_events SET
-            razorpay_payment_id = ?, razorpay_order_id = ?,
-            failure_code = ?, failure_description = ?, failure_step = ?, failure_source = ?, failure_reason = ?,
-            failure_class = ?, ml_probability = ?, ml_action = ?,
-            bandit_action = ?, bandit_context_json = ?, bandit_ucb_score = ?,
-            payment_method = ?, card_last4 = ?, card_network = ?, card_issuer = ?, card_type = ?,
-            vpa = ?, bank_code = ?,
-            retry_count = ?,
-            created_at_utc = ?
-            WHERE id = ?`,
-          args: [
-            input.razorpayPaymentId, input.razorpayOrderId,
-            input.failureCode, input.failureDescription, input.failureStep, input.failureSource, input.failureReason,
-            failureClass, probability, decideOutput.chosen.action,
-            banditSelection.action, JSON.stringify(banditSelection.context), banditSelection.ucbScore,
-            input.paymentMethod || "unknown", input.cardLast4 || null, input.cardNetwork || null,
-            input.cardIssuer || null, input.cardType || null,
-            input.vpa || null, input.bankCode || null,
-            newRetryCount, nowUtc, existingId,
-          ],
-        });
-      } catch (err: any) {
-        if (err?.message?.includes("bandit_action")) {
-          await client.execute({
-            sql: `UPDATE live_payment_events SET
-              razorpay_payment_id = ?, razorpay_order_id = ?,
-              failure_code = ?, failure_description = ?, failure_step = ?, failure_source = ?, failure_reason = ?,
-              failure_class = ?, ml_probability = ?, ml_action = ?,
-              payment_method = ?, card_last4 = ?, card_network = ?, card_issuer = ?, card_type = ?,
-              vpa = ?, bank_code = ?,
-              retry_count = ?,
-              created_at_utc = ?
-              WHERE id = ?`,
-            args: [
-              input.razorpayPaymentId, input.razorpayOrderId,
-              input.failureCode, input.failureDescription, input.failureStep, input.failureSource, input.failureReason,
-              failureClass, probability, decideOutput.chosen.action,
-              input.paymentMethod || "unknown", input.cardLast4 || null, input.cardNetwork || null,
-              input.cardIssuer || null, input.cardType || null,
-              input.vpa || null, input.bankCode || null,
-              newRetryCount, nowUtc, existingId,
-            ],
-          });
-        } else {
-          throw err;
-        }
-      }
+      await client.execute({
+        sql: `UPDATE live_payment_events SET
+          razorpay_payment_id = ?, razorpay_order_id = ?,
+          failure_code = ?, failure_description = ?, failure_step = ?, failure_source = ?, failure_reason = ?,
+          failure_class = ?, ml_probability = ?, ml_action = ?,
+          bandit_action = ?, bandit_context_json = ?, bandit_ucb_score = ?,
+          payment_method = ?, card_last4 = ?, card_network = ?, card_issuer = ?, card_type = ?,
+          vpa = ?, bank_code = ?,
+          retry_count = ?,
+          created_at_utc = ?
+          WHERE id = ?`,
+        args: [
+          input.razorpayPaymentId, input.razorpayOrderId,
+          input.failureCode, input.failureDescription, input.failureStep, input.failureSource, input.failureReason,
+          failureClass, probability, decideOutput.chosen.action,
+          banditSelection.action, JSON.stringify(banditSelection.context), banditSelection.ucbScore,
+          input.paymentMethod || "unknown", input.cardLast4 || null, input.cardNetwork || null,
+          input.cardIssuer || null, input.cardType || null,
+          input.vpa || null, input.bankCode || null,
+          newRetryCount, nowUtc, existingId,
+        ],
+      });
       logger.info({ msg: `${isSameEventDifferentSource ? 'Webhook fill-in' : 'Update'}: event ${existingId} (retry #${newRetryCount})`, event: existingId, retryCount: newRetryCount });
 
       await client.execute({
@@ -455,67 +476,6 @@ export async function processFailedPayment(
         customer?.email || null,
       ],
     });
-  } catch (err: any) {
-    if (err?.message?.includes("bandit_action")) {
-      await client.execute({
-        sql: `INSERT INTO live_payment_events
-          (id, razorpay_payment_id, razorpay_order_id, customer_profile_id, product_name, amount_paise,
-           status, failure_code, failure_description, failure_step, failure_source, failure_reason,
-           failure_class, ml_probability, ml_action, outreach_dispatched, vendor_notified, created_at_utc,
-           payment_method, card_last4, card_network, card_issuer, card_type, card_emi,
-           vpa, bank_code, is_international,
-           acquirer_auth_code, acquirer_rrn, acquirer_error_code,
-           razorpay_token_id, razorpay_contact, razorpay_email, razorpay_created_at,
-           customer_name, customer_phone, customer_email)
-          VALUES (?, ?, ?, ?, ?, ?, 'failed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                  ?, ?, ?, ?, ?, ?,
-                  ?, ?, ?,
-                  ?, ?, ?,
-                  ?, ?, ?, ?,
-                  ?, ?, ?)`,
-        args: [
-          eventId,
-          input.razorpayPaymentId,
-          input.razorpayOrderId,
-          input.customerProfileId,
-          input.productName,
-          input.amountPaise,
-          input.failureCode,
-          input.failureDescription,
-          input.failureStep,
-          input.failureSource,
-          input.failureReason,
-          failureClass,
-          probability,
-          decideOutput.chosen.action,
-          false,
-          0,
-          nowUtc,
-          input.paymentMethod || "unknown",
-          input.cardLast4 || null,
-          input.cardNetwork || null,
-          input.cardIssuer || null,
-          input.cardType || null,
-          input.cardEmi ? 1 : 0,
-          input.vpa || null,
-          input.bankCode || null,
-          input.isInternational ? 1 : 0,
-          input.acquirerAuthCode || null,
-          input.acquirerRrn || null,
-          input.acquirerErrorCode || null,
-          input.razorpayTokenId || null,
-          input.razorpayContact || null,
-          input.razorpayEmail || null,
-          input.razorpayCreatedAt || null,
-          customer?.name || null,
-          customer?.phone || null,
-          customer?.email || null,
-        ],
-      });
-    } else {
-      throw err;
-    }
-  }
 
   // Update vendor metrics summary atomically
   await recordMetricsDelta(client, {
@@ -624,8 +584,7 @@ export async function processFailedPayment(
   if (!isSuspicious) {
     // Immediate outreach via primary channels (Email + SMS only, no WhatsApp/Voice)
     // Build recovery URL with product info so customer's cart is restored
-    const baseUrl = (process.env.PUBLIC_BASE_URL || process.env.BASE_URL || "").replace(/\/$/, "")
-      || (process.env.NODE_ENV === "test" ? "http://localhost:3000" : `http://localhost:${process.env.PORT || "3000"}`);
+    const baseUrl = getPublicBaseUrl();
     const recoveryUrl = new URL(`/recover/${eventId}`, baseUrl);
     if (input.productName) {
       // Map product name back to product ID
@@ -639,9 +598,18 @@ export async function processFailedPayment(
       recoveryUrl.searchParams.set("product", pid);
       recoveryUrl.searchParams.set("productName", input.productName);
     }
-    // Include failure class info in URL for recovery page UI
     // GROQ-polished customer message for transaction-specific heading (no PII sent to GROQ)
-    const groqCustomerMessage = await getGroqCustomerMessage(input.failureCode, input.failureDescription);
+    const groqCustomerMessage = await getGroqCustomerMessage(input.failureCode, input.failureDescription, {
+      context: {
+        amountPaise: input.amountPaise,
+        productName: input.productName,
+        paymentMethod: input.paymentMethod,
+        cardIssuer: input.cardIssuer,
+        cardLast4: input.cardLast4,
+        bankCode: input.bankCode,
+        vpa: input.vpa,
+      },
+    });
     recoveryUrl.searchParams.set("class", failureClass);
     recoveryUrl.searchParams.set("code", input.failureCode);
     recoveryUrl.searchParams.set("reason", groqCustomerMessage);
@@ -655,6 +623,23 @@ export async function processFailedPayment(
     if (input.vpa) recoveryUrl.searchParams.set("vpa", input.vpa);
     if (input.bankCode) recoveryUrl.searchParams.set("bank", input.bankCode);
 
+    // FIX-016: Generate native Razorpay Payment Link (https://rzp.io/i/...) when credentials active
+    let effectivePaymentLink = recoveryUrl.toString();
+    try {
+      const nativeLink = await createRazorpayNativePaymentLink({
+        amountPaise: input.amountPaise,
+        description: `Order recovery retry for ${input.productName || "Purchase"}`,
+        customer: customer ? { name: customer.name, phone: customer.phone, email: customer.email } : undefined,
+        callbackUrl: recoveryUrl.toString(),
+        notes: { event_id: eventId, failure_class: failureClass },
+        idempotencyKey: `pl_link_${eventId}`,
+      });
+      if (nativeLink?.short_url) {
+        effectivePaymentLink = nativeLink.short_url;
+        logger.info({ msg: "[PaymentWorkflow] Created native Razorpay Payment Link", url: effectivePaymentLink, eventId });
+      }
+    } catch {}
+
     const outreachPayload: OutreachPayload = {
       proposalId: eventId,
       failureClass,
@@ -665,7 +650,7 @@ export async function processFailedPayment(
         email: customer?.email ?? "",
       },
       amountPaise: input.amountPaise,
-      paymentLinkUrl: recoveryUrl.toString(),
+      paymentLinkUrl: effectivePaymentLink,
       language: "EN",
       rawErrorReason: input.failureCode,
       instrumentDescription: input.failureDescription,
@@ -679,16 +664,54 @@ export async function processFailedPayment(
       bank: input.bankCode || "",
     };
 
-    logger.info({ msg: `Dispatching outreach for ${failureClass}`, failureClass, phone: outreachPayload.recipient.phone || '(none)', email: outreachPayload.recipient.email || '(none)' });
+    logger.info({
+      msg: `Dispatching arm-governed outreach for ${failureClass}`,
+      failureClass,
+      banditAction: banditSelection.action,
+      phone: outreachPayload.recipient.phone || '(none)',
+      email: outreachPayload.recipient.email || '(none)'
+    });
 
-    // Dispatch Email via Brevo (skip if no email)
-    if (outreachPayload.recipient.email) {
+    const chosenAction = banditSelection.action;
+    const hasPhone = !!outreachPayload.recipient.phone;
+    const hasEmail = !!outreachPayload.recipient.email;
+
+    // Strict Bandit-Governed Primary Channel Execution
+    const isSmsPrimary = chosenAction === "SMS_1TAP_UPI" || chosenAction === "SPLIT_PAY_3X" || chosenAction === "IN_FLIGHT_CASCADE";
+    const isEmailPrimary = chosenAction === "EMAIL_1TAP_UPI" || chosenAction === "DOWNSELL_OFFER";
+
+    // 1. Execute Primary Bandit Action
+    if (isSmsPrimary && hasPhone) {
+      try {
+        const smsResult = await outreachRouter.dispatchWithCascade("SMS", outreachPayload, nowMs);
+        dispatchResults.push(smsResult);
+        logger.info({ msg: `BANDIT PRIMARY DISPATCH SMS → ${smsResult.status} via ${smsResult.providerName}`, channel: smsResult.channel, status: smsResult.status, provider: smsResult.providerName, banditAction: chosenAction });
+
+        const isSmsSimulated = !!smsResult.errorMessage?.startsWith("SIMULATED:");
+        const smsDeliveryStatus = isSmsSimulated ? "SENT_SIMULATED" : (smsResult.status.includes("SENT") ? "SENT" : (smsResult.status.includes("SUPPRESSED") ? "SUPPRESSED" : "FAILED"));
+        try {
+          await client.execute({
+            sql: `INSERT OR IGNORE INTO scheduled_outreach
+              (id, live_payment_event_id, customer_profile_id, channel, scheduled_at_utc, executed, executed_at_utc, status, error_message)
+              VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)`,
+            args: [
+              `init_${eventId}_${smsResult.channel}`, eventId, input.customerProfileId,
+              smsResult.channel,
+              nowUtc, nowUtc,
+              smsDeliveryStatus,
+              smsResult.errorMessage || null,
+            ],
+          });
+        } catch {}
+      } catch (err) {
+        logger.error({ msg: "Bandit primary SMS dispatch failed", err: err as Error });
+      }
+    } else if (isEmailPrimary && hasEmail) {
       try {
         const emailResult = await outreachRouter.dispatch("EMAIL", outreachPayload, nowMs);
         dispatchResults.push(emailResult);
-        logger.info({ msg: `EMAIL → ${emailResult.status} via ${emailResult.providerName}`, channel: 'EMAIL', status: emailResult.status, provider: emailResult.providerName });
-        // Store initial outreach result in scheduled_outreach for AI Action tracking
-        // Distinguish simulated from real delivery
+        logger.info({ msg: `BANDIT PRIMARY DISPATCH EMAIL → ${emailResult.status} via ${emailResult.providerName}`, channel: 'EMAIL', status: emailResult.status, provider: emailResult.providerName, banditAction: chosenAction });
+
         const isSimulated = !!emailResult.errorMessage?.startsWith("SIMULATED:");
         const deliveryStatus = isSimulated ? "SENT_SIMULATED" : (emailResult.status.includes("SENT") ? "SENT" : "FAILED");
         try {
@@ -705,43 +728,53 @@ export async function processFailedPayment(
           });
         } catch {}
       } catch (err) {
-        logger.error({ msg: "Email dispatch failed", err: err as Error });
-        // Store failed attempt
+        logger.error({ msg: "Bandit primary Email dispatch failed", err: err as Error });
+      }
+    }
+
+    // 2. Multi-Channel Enterprise Escalation / Fallback Dispatch
+    // If Email was not dispatched as primary but is available on profile, dispatch Email confirmation
+    if (hasEmail && !dispatchResults.some(r => r.channel === "EMAIL")) {
+      try {
+        const emailResult = await outreachRouter.dispatch("EMAIL", outreachPayload, nowMs);
+        dispatchResults.push(emailResult);
+        logger.info({ msg: `EMAIL NOTIFICATION → ${emailResult.status} via ${emailResult.providerName}`, channel: 'EMAIL', status: emailResult.status, provider: emailResult.providerName });
+
+        const isSimulated = !!emailResult.errorMessage?.startsWith("SIMULATED:");
+        const deliveryStatus = isSimulated ? "SENT_SIMULATED" : (emailResult.status.includes("SENT") ? "SENT" : "FAILED");
         try {
           await client.execute({
             sql: `INSERT OR IGNORE INTO scheduled_outreach
               (id, live_payment_event_id, customer_profile_id, channel, scheduled_at_utc, executed, executed_at_utc, status, error_message)
-              VALUES (?, ?, ?, 'EMAIL', ?, 1, ?, 'FAILED', ?)`,
+              VALUES (?, ?, ?, 'EMAIL', ?, 1, ?, ?, ?)`,
             args: [
               `init_${eventId}_EMAIL`, eventId, input.customerProfileId,
-              nowUtc, nowUtc, (err as Error).message,
+              nowUtc, nowUtc,
+              deliveryStatus,
+              emailResult.errorMessage || null,
             ],
           });
         } catch {}
+      } catch (err) {
+        logger.error({ msg: "Email notification dispatch failed", err: err as Error });
       }
-    } else {
-      logger.info({ msg: "SKIPPED email: no email address on customer profile" });
     }
 
-    // Dispatch SMS via MSG91 (skip if no phone)
-    if (outreachPayload.recipient.phone) {
+    // If SMS was not dispatched as primary but phone is available and email is missing, dispatch SMS
+    if (hasPhone && dispatchResults.length === 0) {
       try {
-        const smsResult = await outreachRouter.dispatch("SMS", outreachPayload, nowMs);
+        const smsResult = await outreachRouter.dispatchWithCascade("SMS", outreachPayload, nowMs);
         dispatchResults.push(smsResult);
-        logger.info({ msg: `SMS → ${smsResult.status} via ${smsResult.providerName}`, channel: 'SMS', status: smsResult.status, provider: smsResult.providerName });
-        if (smsResult.status.includes("SUPPRESSED")) {
-          logger.info({ msg: `SMS suppressed: ${smsResult.errorMessage}`, channel: 'SMS', reason: smsResult.errorMessage });
-        }
-        // Store initial outreach result in scheduled_outreach for AI Action tracking
         const isSmsSimulated = !!smsResult.errorMessage?.startsWith("SIMULATED:");
         const smsDeliveryStatus = isSmsSimulated ? "SENT_SIMULATED" : (smsResult.status.includes("SENT") ? "SENT" : (smsResult.status.includes("SUPPRESSED") ? "SUPPRESSED" : "FAILED"));
         try {
           await client.execute({
             sql: `INSERT OR IGNORE INTO scheduled_outreach
               (id, live_payment_event_id, customer_profile_id, channel, scheduled_at_utc, executed, executed_at_utc, status, error_message)
-              VALUES (?, ?, ?, 'SMS', ?, 1, ?, ?, ?)`,
+              VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)`,
             args: [
-              `init_${eventId}_SMS`, eventId, input.customerProfileId,
+              `init_${eventId}_${smsResult.channel}`, eventId, input.customerProfileId,
+              smsResult.channel,
               nowUtc, nowUtc,
               smsDeliveryStatus,
               smsResult.errorMessage || null,
@@ -749,22 +782,8 @@ export async function processFailedPayment(
           });
         } catch {}
       } catch (err) {
-        logger.error({ msg: "SMS dispatch failed", err: err as Error });
-        // Store failed attempt
-        try {
-          await client.execute({
-            sql: `INSERT OR IGNORE INTO scheduled_outreach
-              (id, live_payment_event_id, customer_profile_id, channel, scheduled_at_utc, executed, executed_at_utc, status, error_message)
-              VALUES (?, ?, ?, 'SMS', ?, 1, ?, 'FAILED', ?)`,
-            args: [
-              `init_${eventId}_SMS`, eventId, input.customerProfileId,
-              nowUtc, nowUtc, (err as Error).message,
-            ],
-          });
-        } catch {}
+        logger.error({ msg: "Fallback SMS dispatch failed", err: err as Error });
       }
-    } else {
-      logger.info({ msg: "SKIPPED SMS: no phone number on customer profile" });
     }
 
     // Schedule follow-ups dynamically based on user engagement history
@@ -1167,31 +1186,70 @@ export async function onPaymentRecovered(
       logger.error({ msg: "[Bandit] Error updating bandit reward in onPaymentRecovered", err: banditErr });
     }
 
-    await client.execute({
-      sql: `UPDATE live_payment_events
-            SET status = 'captured', recovered_at_utc = ?, ml_action = 'PAYMENT_RECOVERED'
-            WHERE id = ?`,
-      args: [nowUtc, targetEventId],
-    });
+    // 2. Atomic multi-statement batch update for settlement integrity (FIX-025)
+    let cancelledOutreachCount = 0;
+    try {
+      const countRes = await client.execute({
+        sql: `SELECT count(*) as count FROM scheduled_outreach
+              WHERE (customer_profile_id = ? OR live_payment_event_id = ?) AND (executed = 0 OR status = 'PENDING')`,
+        args: [params.customerProfileId, targetEventId || ""],
+      });
+      cancelledOutreachCount = Number(countRes.rows[0]?.count ?? 0);
+    } catch {}
+
+    try {
+      await client.batch([
+        {
+          sql: `UPDATE live_payment_events
+                SET status = 'captured', recovered_at_utc = ?, ml_action = 'PAYMENT_RECOVERED'
+                WHERE id = ?`,
+          args: [nowUtc, targetEventId],
+        },
+        {
+          sql: `UPDATE payment_intents SET status = 'SUCCEEDED', resolved_at_utc = ? WHERE order_id = ? OR customer_id = ?`,
+          args: [nowUtc, params.orderId, params.customerProfileId],
+        },
+        {
+          sql: `UPDATE scheduled_outreach
+                SET executed = 1, status = 'CANCELLED', cancelled_reason = 'PAYMENT_COMPLETED',
+                    cancelled_at_utc = ?, executed_at_utc = ?
+                WHERE (customer_profile_id = ? OR live_payment_event_id = ?) AND (executed = 0 OR status = 'PENDING')`,
+          args: [nowUtc, nowUtc, params.customerProfileId, targetEventId || ""],
+        },
+      ], "write");
+    } catch {
+      await client.execute({
+        sql: `UPDATE live_payment_events
+              SET status = 'captured', recovered_at_utc = ?, ml_action = 'PAYMENT_RECOVERED'
+              WHERE id = ?`,
+        args: [nowUtc, targetEventId],
+      });
+      try {
+        await client.execute({
+          sql: `UPDATE payment_intents SET status = 'SUCCEEDED', resolved_at_utc = ? WHERE order_id = ? OR customer_id = ?`,
+          args: [nowUtc, params.orderId, params.customerProfileId],
+        });
+      } catch {}
+      await client.execute({
+        sql: `UPDATE scheduled_outreach
+              SET executed = 1, status = 'CANCELLED', cancelled_reason = 'PAYMENT_COMPLETED',
+                  cancelled_at_utc = ?, executed_at_utc = ?
+              WHERE (customer_profile_id = ? OR live_payment_event_id = ?) AND (executed = 0 OR status = 'PENDING')`,
+        args: [nowUtc, nowUtc, params.customerProfileId, targetEventId || ""],
+      });
+    }
   }
 
-  // 2. Mark any payment_intents for this order as SUCCEEDED
+  let finalCancelledCount = 0;
   try {
-    await client.execute({
-      sql: `UPDATE payment_intents SET status = 'SUCCEEDED', resolved_at_utc = ? WHERE order_id = ? OR customer_id = ?`,
-      args: [nowUtc, params.orderId, params.customerProfileId],
+    const checkRes = await client.execute({
+      sql: `SELECT count(*) as count FROM scheduled_outreach
+            WHERE (customer_profile_id = ? OR live_payment_event_id = ?) AND status = 'CANCELLED' AND cancelled_reason = 'PAYMENT_COMPLETED'`,
+      args: [params.customerProfileId, targetEventId || ""],
     });
+    finalCancelledCount = Number(checkRes.rows[0]?.count ?? 0);
   } catch {}
-
-  // 3. INSTANTLY cancel all pending/scheduled dunning messages across channels
-  const cancelRes = await client.execute({
-    sql: `UPDATE scheduled_outreach
-          SET executed = 1, status = 'CANCELLED', cancelled_reason = 'PAYMENT_COMPLETED',
-              cancelled_at_utc = ?, executed_at_utc = ?
-          WHERE (customer_profile_id = ? OR live_payment_event_id = ?) AND (executed = 0 OR status = 'PENDING')`,
-    args: [nowUtc, nowUtc, params.customerProfileId, targetEventId || ""],
-  });
-  const cancelledOutreachCount = cancelRes.rowsAffected ?? 0;
+  const cancelledOutreachCount = finalCancelledCount;
 
   // 5. Append immutable cryptographic SHA-256 audit ledger entry
   const audit = await appendAuditLedger(client, {
@@ -1241,7 +1299,7 @@ export function generateUpiIntents(params: {
   amountRupees: string;
 } {
   const amountRupees = (params.amountPaise / 100).toFixed(2);
-  const vpa = params.merchantVpa || "merchant@razorpay";
+  const vpa = getMerchantVpa(params.merchantVpa);
   const name = encodeURIComponent(params.merchantName || "ARBITER");
   const note = encodeURIComponent(params.transactionNote || `Payment_Recovery_${params.transactionRef}`);
   const ref = encodeURIComponent(params.transactionRef);

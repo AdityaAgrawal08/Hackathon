@@ -5,7 +5,7 @@
  * 2. Magic Checkout Pre-Payment Cart Drop-Offs
  * 3. B2B Corporate Invoices & Receivables (2/10 Net 30 Terms)
  */
-import { formatINR, paise, isoUtc } from "@arbiter/shared";
+import { formatINR, paise, isoUtc, getPublicBaseUrl } from "@arbiter/shared";
 
 // ============================================================================
 // 1. SaaS Recurring Subscription Mandates
@@ -128,9 +128,10 @@ export interface CartRecoveryLink {
  */
 export function generateCartRecoveryLink(
   checkout: AbandonedCheckout,
-  baseUrl: string = "http://localhost:3000",
+  baseUrl?: string,
 ): CartRecoveryLink {
-  const recoveryUrl = `${baseUrl}/checkout/restore/${checkout.recoveryToken}`;
+  const resolvedBaseUrl = getPublicBaseUrl(baseUrl);
+  const recoveryUrl = `${resolvedBaseUrl}/checkout/restore/${checkout.recoveryToken}`;
   const formattedAmount = formatINR(paise(checkout.cartAmountPaise));
 
   return {

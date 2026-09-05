@@ -316,14 +316,14 @@ describe("Phase 1: LinUCB Contextual Bandit Persistence & Live Closed-Loop RL In
       const initialSel = bandit.selectArm(testContext);
       const initialVar = initialSel.confidenceBound;
 
-      // Train arm B2B_EARLY_SETTLEMENT with high reward (1.0), and SMS_1TAP_UPI with lower reward (0.2)
+      // Train arm DOWNSELL_OFFER with high reward (1.0), and SMS_1TAP_UPI with lower reward (0.2)
       for (let i = 0; i < 10; i++) {
-        bandit.updateArm("B2B_EARLY_SETTLEMENT", testContext, 1.0);
+        bandit.updateArm("DOWNSELL_OFFER", testContext, 1.0);
         bandit.updateArm("SMS_1TAP_UPI", testContext, 0.2);
       }
 
       const postTrainSel = bandit.selectArm(testContext);
-      expect(postTrainSel.action).toBe("B2B_EARLY_SETTLEMENT");
+      expect(postTrainSel.action).toBe("DOWNSELL_OFFER");
       expect(postTrainSel.estimatedReward).toBeGreaterThan(0.5);
 
       // Save and reload to verify convergence persists across restarts
@@ -332,7 +332,7 @@ describe("Phase 1: LinUCB Contextual Bandit Persistence & Live Closed-Loop RL In
       await rehydrated.loadFromDb(dbClient, "enterprise");
 
       const rehydratedSel = rehydrated.selectArm(testContext);
-      expect(rehydratedSel.action).toBe("B2B_EARLY_SETTLEMENT");
+      expect(rehydratedSel.action).toBe("DOWNSELL_OFFER");
       expect(rehydratedSel.estimatedReward).toBeCloseTo(postTrainSel.estimatedReward, 3);
     });
 

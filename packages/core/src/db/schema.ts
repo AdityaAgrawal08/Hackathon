@@ -682,4 +682,25 @@ export const vendorMetricsSummary = sqliteTable(
   },
 );
 
+/* ── support escalation tickets (FIX-016) ─────────────────────────── */
+export const supportEscalationTickets = sqliteTable(
+  "support_escalation_tickets",
+  {
+    id: text("id").primaryKey(),
+    eventId: text("event_id").notNull(),
+    customerId: text("customer_id").notNull(),
+    reason: text("reason").notNull(),
+    priority: text("priority").notNull().default("NORMAL"),
+    status: text("status").notNull().default("OPEN"),
+    assignedAgent: text("assigned_agent"),
+    createdAtUtc: text("created_at_utc").notNull(),
+    resolvedAtUtc: text("resolved_at_utc"),
+  },
+  (t) => [
+    index("idx_support_tickets_event").on(t.eventId),
+    index("idx_support_tickets_status").on(t.status),
+  ],
+);
+
+
 

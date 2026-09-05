@@ -537,22 +537,27 @@
         <div id="selected-summary" style="background:#0a0f1d;border:1px solid #1e293b;border-radius:10px;padding:14px;margin-bottom:18px;"></div>
 
         <form id="checkout-form">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <span style="font-size:12px; color:#94a3b8;">Customer Details</span>
+            <button type="button" onclick="loadRandomPersona()" style="background:#1e293b; border:1px solid #3b82f6; color:#60a5fa; font-size:11px; padding:3px 10px; border-radius:6px; cursor:pointer;">👤 Load Test Persona</button>
+          </div>
+
           <div class="form-row">
             <label for="cust-name">Customer Full Name</label>
-            <input type="text" id="cust-name" value="Aditya Agrawal" required>
+            <input type="text" id="cust-name" placeholder="e.g. Ramesh Kumar" required>
           </div>
 
           <div class="form-row">
             <label for="cust-phone">Mobile Phone (MSG91 SMS Notifications)</label>
             <div class="phone-input-wrap">
               <span class="phone-prefix">+91</span>
-              <input type="tel" id="cust-phone" value="9876543210" maxlength="10" pattern="[0-9]{10}" required>
+              <input type="tel" id="cust-phone" placeholder="9876500001" maxlength="10" pattern="[0-9]{10}" required>
             </div>
           </div>
 
           <div class="form-row">
             <label for="cust-email">Email Address</label>
-            <input type="email" id="cust-email" value="aditya@example.com" required>
+            <input type="email" id="cust-email" placeholder="ramesh@example.com" required>
           </div>
 
           <button type="submit" class="btn-submit" id="btn-submit">
@@ -586,7 +591,7 @@
 
           <div class="telemetry-item">
             <div class="telemetry-label">Active Autonomous Agent</div>
-            <div class="telemetry-val blue" id="tel-agent">LinUCB Contextual Bandit (4×4 Ridge Inversion)</div>
+            <div class="telemetry-val blue" id="tel-agent">LinUCB Contextual Bandit (5×5 Ridge Inversion)</div>
           </div>
 
           <div class="telemetry-item">
@@ -754,6 +759,22 @@
     let currentDomain = 'd2c';
     let selectedProduct = null;
     let activeOrderId = null;
+
+    const TEST_PERSONAS = [
+      { name: "Ramesh Kumar", phone: "9876500001", email: "ramesh@example.com" },
+      { name: "Priya Sharma", phone: "9876500002", email: "priya@example.com" },
+      { name: "Sneha Reddy", phone: "9876500003", email: "sneha@example.com" },
+      { name: "Vikram Patel", phone: "9876500004", email: "vikram@example.com" },
+      { name: "Arjun Mehta", phone: "9876500005", email: "arjun@example.com" }
+    ];
+
+    function loadRandomPersona() {
+      const p = TEST_PERSONAS[Math.floor(Math.random() * TEST_PERSONAS.length)];
+      document.getElementById('cust-name').value = p.name;
+      document.getElementById('cust-phone').value = p.phone;
+      document.getElementById('cust-email').value = p.email;
+      showToast(`👤 Loaded test persona: ${p.name}`, 'info');
+    }
 
     function formatINR(paise) {
       return '₹' + (paise / 100).toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
@@ -1001,6 +1022,47 @@
       } catch (err) {
         btn.disabled = false;
         showToast('Razorpay error: ' + err.message, 'error');
+      }
+    });
+
+    // FIX-017: Pre-Payment Abandoned Checkout Beacon & 15-min Price Hold Salvage
+    let cartAbandonmentBeaconSent = false;
+    function sendAbandonmentBeacon() {
+      if (cartAbandonmentBeaconSent || !selectedProduct) return;
+      const phoneVal = document.getElementById('cust-phone')?.value;
+      if (!phoneVal || phoneVal.trim().length < 10) return;
+      cartAbandonmentBeaconSent = true;
+
+      const payload = {
+        customerName: document.getElementById('cust-name')?.value || "Shopper",
+        customerPhone: phoneVal.trim(),
+        customerEmail: document.getElementById('cust-email')?.value || null,
+        cartItems: [{ id: selectedProduct.id, name: selectedProduct.name, pricePaise: selectedProduct.pricePaise }],
+        cartAmountPaise: selectedProduct.pricePaise,
+        dropOffStep: "CHECKOUT_SCREEN_EXIT"
+      };
+
+      if (navigator.sendBeacon) {
+        navigator.sendBeacon('/api/checkouts/abandoned', new Blob([JSON.stringify(payload)], { type: 'application/json' }));
+      } else {
+        fetch('/api/checkouts/abandoned', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+          keepalive: true
+        }).catch(() => {});
+      }
+    }
+
+    document.addEventListener('mouseleave', function(e) {
+      if (e.clientY <= 10 && document.getElementById('checkout-pane') && document.getElementById('checkout-pane').style.display !== 'none') {
+        sendAbandonmentBeacon();
+      }
+    });
+
+    document.addEventListener('visibilitychange', function() {
+      if (document.visibilityState === 'hidden' && document.getElementById('checkout-pane') && document.getElementById('checkout-pane').style.display !== 'none') {
+        sendAbandonmentBeacon();
       }
     });
 

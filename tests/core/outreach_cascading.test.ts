@@ -134,4 +134,42 @@ describe("Phase 2 / SMS-03: Multi-Rail Failover & Cascading Router", () => {
     expect(result.cascadedFrom).toBe("SMS");
     expect(result.status).toBe("SENT");
   });
+
+  it("limits concurrent dispatches and queues excess requests without socket exhaustion", async () => {
+    // Router with max concurrency of 2
+    const router = new OutreachRouter({ maxConcurrentDispatches: 2 });
+    let concurrentCount = 0;
+    let maxSeenConcurrent = 0;
+
+    const mockProvider = {
+      name: "slow_mock",
+      channel: "EMAIL" as const,
+      send: vi.fn().mockImplementation(async () => {
+        concurrentCount++;
+        maxSeenConcurrent = Math.max(maxSeenConcurrent, concurrentCount);
+        await new Promise((r) => setTimeout(r, 20));
+        concurrentCount--;
+        return {
+          providerName: "slow_mock",
+          channel: "EMAIL",
+          externalMessageId: "msg_1",
+          status: "SENT",
+          costPaise: 10,
+          dispatchedAtUtc: new Date().toISOString(),
+        };
+      }),
+    };
+
+    router.registerProvider(mockProvider);
+
+    // Launch 10 dispatches concurrently
+    const promises = Array.from({ length: 10 }, () => router.dispatch("EMAIL", testPayload));
+    const results = await Promise.all(promises);
+
+    expect(results.length).toBe(10);
+    expect(results.every((r) => r.status === "SENT")).toBe(true);
+    expect(maxSeenConcurrent).toBeLessThanOrEqual(2);
+    expect(router.getConcurrencyStats().inFlight).toBe(0);
+    expect(router.getConcurrencyStats().queued).toBe(0);
+  });
 });

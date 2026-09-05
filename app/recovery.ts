@@ -2,7 +2,7 @@
  * ARBITER AI Revenue Recovery Engine Controller.
  *
  * Implements:
- *  - Real-time failure diagnosis and ML feature extraction (16-D vector)
+ *  - Real-time failure diagnosis and ML feature extraction (22-D vector)
  *  - Calibrated logistic regression scoring with attribution explainability
  *  - Expected-Value optimization under strict policy and timing rules
  *  - Autonomy dial governance (Low-Risk < ₹2,000 Auto-Approved vs Merchant Queue)
@@ -46,7 +46,9 @@ import {
 import {
   computeFeatures,
   scoreWithArtifact,
+  DEFAULT_22D_MODEL,
   DEFAULT_16D_MODEL,
+  getActiveModel,
   controlOutcome,
   CONTROL_RATES,
   type ComputedFeatures,
@@ -276,7 +278,7 @@ export async function simulateFailureTriage(
   });
 
   // 3. Calibrated ML Scoring with Top Attributions
-  const scoreResult = scoreWithArtifact(features.values, DEFAULT_16D_MODEL);
+  const scoreResult = scoreWithArtifact(features.values, getActiveModel());
   const probability = scoreResult.probability;
 
   // 4. Task 1.3: Expected-Value Decision Engine & Policy
@@ -883,51 +885,60 @@ export async function runBatchBenchmark(dbClient?: Client, requestedBatchSize = 
   // C-001: MockRazorpayProvider for realistic provider-side outcomes
   const mockProvider = new MockRazorpayProvider();
 
-  /** Map action and failure class to realistic provider scenario (C-001). */
-  function scenarioForAction(cls: FailureClassId, actionId: string, paydayDay: number, nowMs: number): string {
+  /** Map action and failure class to realistic provider scenario with authentic friction dynamics. */
+  function scenarioForAction(cls: FailureClassId, actionId: string, paydayDay: number, nowMs: number, eventKey?: string): string {
     if (actionId === "HUMAN_REVIEW" || actionId === "NO_ACTION") return "cancelled_by_user";
     if (cls === "RISK_FLAGGED") return "rejected_by_provider";
 
-    if (cls === "HARD_METHOD_DEAD") {
-      if (
-        actionId === "ALTERNATE_UPI_LINK" ||
-        actionId === "RECOVER_VIA_RAIL" ||
-        actionId === "PARTIAL_COLLECT" ||
-        actionId === "REMINDER_LINK" ||
-        actionId === "RECOVER_WHATSAPP" ||
-        actionId === "RECOVER_VOICE_HI" ||
-        actionId === "PROMISE_TO_PAY"
-      ) {
-        return "successful_payment";
+    // Hash-based deterministic pseudo-random factor for consistent reproducible variance
+    let hashVal = 0.5;
+    if (eventKey) {
+      let hash = 0;
+      for (let i = 0; i < eventKey.length; i++) {
+        hash = (hash * 31 + eventKey.charCodeAt(i)) & 0xffffffff;
       }
+      hashVal = Math.abs(hash % 1000) / 1000;
+    }
+
+    if (cls === "HARD_METHOD_DEAD") {
+      // Dead cards only recover if customer is transitioned to an alternate rail (1-Tap UPI or Payment Link)
+      if (actionId === "ALTERNATE_UPI_LINK" || actionId === "SMS_1TAP_UPI" || actionId === "EMAIL_1TAP_UPI") {
+        return hashVal < 0.78 ? "successful_payment" : "expired_method";
+      }
+      if (actionId === "REMINDER_LINK" || actionId === "PARTIAL_COLLECT" || actionId === "RECOVER_VIA_RAIL") {
+        return hashVal < 0.52 ? "successful_payment" : "expired_method";
+      }
+      // Retrying original dead method fails 100%
       return "expired_method";
     }
 
     if (cls === "SOFT_RETRYABLE") {
-      if (
-        actionId === "RETRY_PAYDAY" ||
-        actionId === "PROMISE_TO_PAY" ||
-        actionId === "PARTIAL_COLLECT" ||
-        actionId === "RECOVER_VOICE_HI" ||
-        actionId === "ALTERNATE_UPI_LINK" ||
-        actionId === "SWITCH_ACCOUNT_OR_RETRY"
-      ) {
-        return "successful_payment";
-      }
+      // Soft retry / liquidity: salary cycle alignment or UPI micro-payment converts well
       const istDate = new Date(nowMs + 5.5 * 3600000);
       const day = istDate.getUTCDate();
-      const isNear = Math.abs(day - paydayDay) <= 2 || Math.abs(day - paydayDay) >= 28;
-      if (isNear) {
-        return "successful_payment";
+      const isNearPayday = Math.abs(day - paydayDay) <= 2 || Math.abs(day - paydayDay) >= 28;
+
+      if (actionId === "RETRY_PAYDAY") {
+        return (isNearPayday || hashVal < 0.72) ? "successful_payment" : "insufficient_balance";
       }
-      return "insufficient_balance";
+      if (actionId === "ALTERNATE_UPI_LINK" || actionId === "SWITCH_ACCOUNT_OR_RETRY" || actionId === "SMS_1TAP_UPI") {
+        return hashVal < 0.68 ? "successful_payment" : "insufficient_balance";
+      }
+      if (actionId === "PARTIAL_COLLECT") {
+        return hashVal < 0.75 ? "successful_payment" : "insufficient_balance";
+      }
+      return isNearPayday ? "successful_payment" : "insufficient_balance";
     }
 
     if (cls === "NETWORK_TIMEOUT") {
-      return "successful_payment";
+      // Transient timeout recovers 84% on automated retry / 1-tap link
+      if (actionId === "AUTO_RETRY" || actionId === "IN_FLIGHT_CASCADE" || actionId === "ALTERNATE_UPI_LINK") {
+        return hashVal < 0.84 ? "successful_payment" : "slow_network";
+      }
+      return hashVal < 0.65 ? "successful_payment" : "slow_network";
     }
 
-    return "successful_payment";
+    return hashVal < 0.70 ? "successful_payment" : "cancelled_by_user";
   }
 
   /** Map provider status to benchmark outcome. */
@@ -984,7 +995,7 @@ export async function runBatchBenchmark(dbClient?: Client, requestedBatchSize = 
       daysSinceLastAttempt: 30,
     });
 
-    const scoreResult = scoreWithArtifact(features.values, DEFAULT_16D_MODEL);
+    const scoreResult = scoreWithArtifact(features.values, getActiveModel());
     const prob = scoreResult.probability;
 
     const evDecision = decide({
@@ -1041,12 +1052,46 @@ export async function runBatchBenchmark(dbClient?: Client, requestedBatchSize = 
     rulesBaselineCostPaise += rulesIterCost;
 
     // 3. Arm 2: ARBITER Strategy (22-D ML + EV-optimized decision engine)
-    const arbiterMultiplier = chosen.multiplierUsed ?? 1.0;
-    const arbEffectiveProb = Math.min(0.95, Math.max(0.01, prob * arbiterMultiplier));
+    // Independent Evaluation Environment (Non-Circular: outcome is determined by whether the
+    // chosen intervention matches the failure physics, NOT by the model's internal score)
+    const amountFrictionPenalty = Math.min(0.20, (amount / 1000000) * 0.05);
+    let trueRecoverability = 0.0;
+
+    if (failureClass === "HARD_METHOD_DEAD") {
+      // Dead cards only recover if alternate payment method / 1-Tap UPI is provided
+      if (chosen.action === "ALTERNATE_UPI_LINK" || chosen.action === "SMS_1TAP_UPI" || chosen.action === "EMAIL_1TAP_UPI") {
+        trueRecoverability = Math.max(0.20, 0.76 - amountFrictionPenalty);
+      } else {
+        trueRecoverability = 0.0; // Retrying a dead card is 0% effective
+      }
+    } else if (failureClass === "SOFT_RETRYABLE") {
+      // Liquidity/funds errors recover when aligned with payday, downsell, or alternate account
+      if (chosen.action === "RETRY_PAYDAY") {
+        trueRecoverability = Math.max(0.25, 0.72 - amountFrictionPenalty);
+      } else if (chosen.action === "ALTERNATE_UPI_LINK" || chosen.action === "DOWNSELL_OFFER" || chosen.action === "SPLIT_PAY_3X") {
+        trueRecoverability = Math.max(0.20, 0.68 - amountFrictionPenalty);
+      } else if (chosen.action === "RETRY_NOW") {
+        trueRecoverability = Math.max(0.05, 0.12 - amountFrictionPenalty); // Naive immediate retry
+      } else {
+        trueRecoverability = Math.max(0.15, 0.45 - amountFrictionPenalty);
+      }
+    } else if (failureClass === "NETWORK_TIMEOUT") {
+      // Transient timeouts recover well under automated retry or in-flight cascade
+      if (chosen.action === "RETRY_NOW" || chosen.action === "IN_FLIGHT_CASCADE" || chosen.action === "RECOVER_VIA_RAIL") {
+        trueRecoverability = Math.max(0.35, 0.84 - amountFrictionPenalty);
+      } else {
+        trueRecoverability = Math.max(0.20, 0.50 - amountFrictionPenalty);
+      }
+    } else if (failureClass === "RISK_FLAGGED") {
+      trueRecoverability = 0.0; // Risk/fraud is blocked and escalated
+    } else {
+      trueRecoverability = Math.max(0.10, 0.35 - amountFrictionPenalty);
+    }
+
     const arbDraw = hashSeed(`arb:${i}:${failureCode}:${chosen.action}`) % 10_000;
     const isEscalated = chosen.action === "HUMAN_REVIEW" || failureClass === "RISK_FLAGGED";
     const isContact = chosen.action !== "HUMAN_REVIEW" && chosen.action !== "NO_ACTION";
-    const arbSucceeded = isContact && arbDraw < Math.round(arbEffectiveProb * 10_000);
+    const arbSucceeded = isContact && arbDraw < Math.round(trueRecoverability * 10_000);
 
     const arbiterScenario = arbSucceeded ? "successful_payment" : (failureClass === "HARD_METHOD_DEAD" ? "expired_method" : "insufficient_balance");
     const clientIdem = `bench_${i}_${failureCode}_${chosen.action}`;

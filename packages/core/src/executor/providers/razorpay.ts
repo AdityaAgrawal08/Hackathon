@@ -337,3 +337,58 @@ export const razorpayProvider: ActionProvider = {
     };
   },
 };
+
+/**
+ * Creates an authentic Razorpay Payment Link (https://rzp.io/i/...)
+ * using Razorpay's native POST /v1/payment_links API (FIX-016).
+ */
+export async function createRazorpayNativePaymentLink(params: {
+  amountPaise: number;
+  description: string;
+  customer?: { name?: string; phone?: string; email?: string };
+  callbackUrl?: string;
+  notes?: Record<string, string>;
+  idempotencyKey?: string;
+}): Promise<{ id: string; short_url: string } | null> {
+  const { isLive, keyId, keySecret, hasTestKeys } = getCredentials();
+  if (!isLive && !hasTestKeys) {
+    return null;
+  }
+
+  try {
+    const auth = Buffer.from(`${keyId}:${keySecret}`).toString("base64");
+    const response = await fetch("https://api.razorpay.com/v1/payment_links", {
+      method: "POST",
+      headers: {
+        "Authorization": `Basic ${auth}`,
+        "Content-Type": "application/json",
+        ...(params.idempotencyKey ? { "X-Razorpay-Idempotency-Key": params.idempotencyKey } : {}),
+      },
+      body: JSON.stringify({
+        amount: params.amountPaise,
+        currency: "INR",
+        description: params.description,
+        customer: params.customer ? {
+          name: params.customer.name,
+          contact: params.customer.phone || undefined,
+          email: params.customer.email || undefined,
+        } : undefined,
+        notify: { sms: false, email: false },
+        callback_url: params.callbackUrl,
+        notes: params.notes,
+      }),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      logger.warn({ msg: "[Razorpay API] Payment link creation returned non-200", status: response.status, err: errText });
+      return null;
+    }
+
+    const data = await response.json() as { id: string; short_url?: string };
+    return { id: data.id, short_url: data.short_url || `https://rzp.io/i/${data.id}` };
+  } catch (err) {
+    logger.warn({ msg: "[Razorpay API] Payment link creation failed", err: (err as Error).message });
+    return null;
+  }
+}

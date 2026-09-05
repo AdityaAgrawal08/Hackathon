@@ -8,8 +8,10 @@
  *  - Explainable: returns exact logreg attributions wᵢ·x̂ᵢ whose sum + bias
  *    reconstructs the logit to 1e-9 (identity is TESTED, not assumed).
  */
+import type { Client } from "@libsql/client";
 import { stableSigmoid } from "./logreg.js";
 import { FEATURE_NAMES } from "./features.js";
+import { getIncumbent } from "./registry.js";
 
 /**
  * Structural model view — ModelArtifact satisfies this, but evaluation code
@@ -24,7 +26,7 @@ export interface LinearModel {
 }
 
 /** Pre-calibrated default 22-D model weights (deterministic baseline). */
-export const DEFAULT_16D_MODEL: LinearModel = {
+export const DEFAULT_22D_MODEL: LinearModel = {
   featureNames: FEATURE_NAMES,
   weights: [
     0.85, // f_class_soft
@@ -56,6 +58,50 @@ export const DEFAULT_16D_MODEL: LinearModel = {
   sigma: Array(22).fill(1),
 };
 
+/** Backward-compatible alias for DEFAULT_22D_MODEL. */
+export const DEFAULT_16D_MODEL: LinearModel = DEFAULT_22D_MODEL;
+
+let activeCachedModel: LinearModel = DEFAULT_22D_MODEL;
+let activeCachedModelId: string = "default_calibrated_baseline";
+
+export function getActiveModel(): LinearModel {
+  return activeCachedModel;
+}
+
+export function getActiveModelId(): string {
+  return activeCachedModelId;
+}
+
+export function setActiveModel(model: LinearModel, id: string = "custom_model"): void {
+  activeCachedModel = model;
+  activeCachedModelId = id;
+}
+
+export async function loadActiveModelFromDb(client: Client): Promise<LinearModel> {
+  try {
+    const incumbent = await getIncumbent(client);
+    if (
+      incumbent &&
+      incumbent.weights &&
+      incumbent.weights.length === FEATURE_NAMES.length &&
+      incumbent.weights.every((w) => Number.isFinite(w))
+    ) {
+      activeCachedModel = {
+        featureNames: incumbent.featureNames,
+        weights: incumbent.weights,
+        bias: incumbent.bias,
+        mu: incumbent.mu,
+        sigma: incumbent.sigma,
+      };
+      activeCachedModelId = incumbent.id;
+      return activeCachedModel;
+    }
+  } catch {
+    // Graceful fallback to calibrated baseline
+  }
+  return activeCachedModel;
+}
+
 export interface ScoreResult {
   probability: number;
   logit: number;
@@ -65,25 +111,26 @@ export interface ScoreResult {
 
 export function scoreWithArtifact(
   values: readonly number[],
-  model: LinearModel = DEFAULT_16D_MODEL,
+  model?: LinearModel,
 ): ScoreResult {
-  if (values.length !== model.featureNames.length) {
+  const activeModel = model ?? activeCachedModel;
+  if (values.length !== activeModel.featureNames.length) {
     throw new Error(
-      `scoreWithArtifact: expected ${model.featureNames.length} values, got ${values.length}`,
+      `scoreWithArtifact: expected ${activeModel.featureNames.length} values, got ${values.length}`,
     );
   }
-  let z = model.bias;
+  let z = activeModel.bias;
   const contributions: Array<{ feature: string; contribution: number }> = [];
   for (let i = 0; i < values.length; i++) {
-    const xs = ((values[i] as number) - (model.mu[i] as number)) / (model.sigma[i] as number);
-    const c = (model.weights[i] as number) * xs;
-    contributions.push({ feature: model.featureNames[i] as string, contribution: c });
+    const xs = ((values[i] as number) - (activeModel.mu[i] as number)) / (activeModel.sigma[i] as number);
+    const c = (activeModel.weights[i] as number) * xs;
+    contributions.push({ feature: activeModel.featureNames[i] as string, contribution: c });
     z += c;
   }
   const probability = stableSigmoid(z);
 
   // Attribution identity: Σcontributions + bias === logit
-  let sum = model.bias;
+  let sum = activeModel.bias;
   for (const c of contributions) sum += c.contribution;
   if (Math.abs(sum - z) > 1e-9) {
     throw new Error(`attribution identity violated: ${sum} vs ${z}`);

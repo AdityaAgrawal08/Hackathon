@@ -76,9 +76,35 @@
     .status-alert { display: none; padding: 12px; border-radius: 8px; font-size: 13px; margin-top: 12px; text-align: left; }
     .status-error { background: #450a0a; border: 1px solid #7f1d1d; color: #fca5a5; display: block; }
     .status-info { background: #172554; border: 1px solid #1e40af; color: #93c5fd; display: block; }
+
+    /* Exit-Intent Downsell Modal (FIX-019) */
+    .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 9999; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
+    .modal-card { background: #0f172a; border: 1px solid #3b82f6; border-radius: 16px; padding: 24px; max-width: 420px; width: 90%; text-align: center; box-shadow: 0 20px 40px rgba(0,0,0,0.6); }
   </style>
 </head>
 <body>
+  <!-- Exit Intent Downsell Modal (FIX-019) -->
+  <div class="modal-overlay" id="downsell-modal">
+    <div class="modal-card">
+      <div style="font-size: 40px; margin-bottom: 12px;">🎁</div>
+      <h3 style="color: #f8fafc; font-size: 18px; margin-bottom: 8px;">Wait! Don't Miss Out</h3>
+      <p style="color: #94a3b8; font-size: 13px; line-height: 1.5; margin-bottom: 16px;">
+        We've unlocked a courtesy <strong>10% instant discount</strong> on your order. Complete your order now before this reserved link expires.
+      </p>
+      <div style="background: #1e293b; border: 1px dashed #3b82f6; border-radius: 10px; padding: 12px; margin-bottom: 16px;">
+        <div style="font-size: 11px; color: #94a3b8; text-transform: uppercase;">Special Courtesy Price</div>
+        <div style="font-size: 22px; font-weight: 800; color: #38bdf8;" id="modal-discount-amt">₹0.00</div>
+        <div style="font-size: 11px; color: #64748b; text-decoration: line-through;" id="modal-original-amt">₹0.00</div>
+      </div>
+      <button class="primary-retry-btn" style="margin-top: 0; background: #2563eb;" onclick="acceptDiscountAndPay()">
+        ⚡ Claim 10% Off & Pay via 1-Tap UPI
+      </button>
+      <button onclick="closeDownsellModal()" style="background: none; border: none; color: #64748b; font-size: 12px; margin-top: 12px; cursor: pointer;">
+        No thanks, continue without discount
+      </button>
+    </div>
+  </div>
+
   <div class="portal-card" id="recovery-portal">
     <div class="banner-offline" id="banner-offline" style="background:#854d0e;color:#fef3c7;padding:12px;border-radius:8px;margin-bottom:16px;font-size:13px;display:none;">You appear to be offline. Please check your connection.</div>
     <div class="portal-badge" id="portal-badge">⚡ Instant Recovery Portal</div>
@@ -314,9 +340,9 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             productId: eventData ? mapProductNameToId(eventData.productName) : 'prod_premium_plan',
-            customerName: eventData ? eventData.customerName : 'Customer',
-            customerPhone: eventData ? eventData.phone : '9876543210',
-            customerEmail: eventData ? eventData.email : 'customer@example.com',
+            customerName: eventData?.customerName || '',
+            customerPhone: eventData?.phone || '',
+            customerEmail: eventData?.email || '',
           }),
         });
         if (orderRes.ok) {
@@ -517,6 +543,44 @@
         sendInteractionBeacon('PORTAL_EXITED_NO_PAY', { dwellTimeSeconds: dwell, _isUnload: true });
       }
     }
+
+    // FIX-019: Exit-Intent Downsell Interception
+    let hasShownDownsellModal = false;
+    let discountApplied = false;
+
+    function checkAndShowDownsellModal() {
+      if (hasShownDownsellModal || isPaymentSettled) return;
+      hasShownDownsellModal = true;
+      const originalAmt = amountPaise;
+      const discountedAmt = Math.round(originalAmt * 0.90);
+      document.getElementById('modal-original-amt').textContent = '₹' + (originalAmt / 100).toLocaleString('en-IN', { minimumFractionDigits: 2 });
+      document.getElementById('modal-discount-amt').textContent = '₹' + (discountedAmt / 100).toLocaleString('en-IN', { minimumFractionDigits: 2 });
+      document.getElementById('downsell-modal').style.display = 'flex';
+      sendInteractionBeacon('DOWNSELL_MODAL_SHOWN', { originalAmt, discountedAmt });
+    }
+
+    function closeDownsellModal() {
+      document.getElementById('downsell-modal').style.display = 'none';
+      sendInteractionBeacon('DOWNSELL_MODAL_DISMISSED');
+    }
+
+    function acceptDiscountAndPay() {
+      discountApplied = true;
+      document.getElementById('downsell-modal').style.display = 'none';
+      amountPaise = Math.round(amountPaise * 0.90);
+      document.getElementById('amount-display').textContent = '₹' + (amountPaise / 100).toLocaleString('en-IN', { minimumFractionDigits: 2 });
+      sendInteractionBeacon('DOWNSELL_MODAL_ACCEPTED', { discountedAmountPaise: amountPaise });
+      showAlert('10% courtesy discount applied successfully! Proceed with 1-Tap UPI.', 'info');
+      // Trigger primary UPI flow
+      const firstUpiBtn = document.querySelector('.upi-btn');
+      if (firstUpiBtn) firstUpiBtn.click();
+    }
+
+    document.addEventListener('mouseleave', function(e) {
+      if (e.clientY <= 10) {
+        checkAndShowDownsellModal();
+      }
+    });
 
     window.addEventListener('pagehide', onPortalExit);
     document.addEventListener('visibilitychange', () => {
