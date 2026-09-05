@@ -37,36 +37,9 @@ The stated bar for **Razorpay AI Buildathon Track 03 (AI Revenue Recovery)** req
 
 ARBITER is an autonomous, approval-gated decision engine designed to operate directly atop Razorpay's payments infrastructure. It unifies real-time checkout telemetry, online contextual bandit reinforcement learning, and a cryptographically verifiable state machine.
 
-```
-┌────────────────────────────────────────────────────────────────────────────────────────┐
-│                                   ARBITER ARCHITECTURE                                 │
-└────────────────────────────────────────────────────────────────────────────────────────┘
-
-    [Payment Event Stream] ──────► [22-D Feature Vectorizer]
-     (Razorpay Webhooks,            (Failure Taxonomy, Ticket Value,
-      Checkout Failures)             Customer LTV, Issuer Health, Payday)
-                                             │
-                                             ▼
-                                 [LinUCB Contextual Bandit]
-                                 (Expected Value [EV] Maximizer)
-                                             │
-                                             ▼
-     [Finite State Machine] ◄─── [Strict Regulatory Guardrails]
-      - Terminal Success          - TRAI 09:00 - 21:00 IST Quiet Hours
-      - Hard Method Dead          - DPDP Act 2023 Identity Anonymization
-      - Max Retries Clamping      - RBI 24h Advance Notice Mandates
-                                             │
-                                             ▼
-                                [Targeted Action Execution]
-                                 ├── Tier 0: In-Flight Gateway Optimizer
-                                 ├── Tier 1: 1-Tap UPI Intent Link (0% MDR)
-                                 ├── Tier 2: DLT-Paced SMS / Transactional Email
-                                 └── Tier 3: B2B Dynamic Invoice Cash Terms
-                                             │
-                                             ▼
-                             [SHA-256 Tamper-Evident Ledger]
-                             (Cryptographic Audit Chaining H_i)
-```
+<p align="center">
+  <img src="docs/assets/arbiter_architecture.jpg" alt="ARBITER Autonomous AI Revenue Recovery Architecture" width="100%" />
+</p>
 
 ### Multi-Domain Operational Impact
 1. **D2C E-Commerce & Retail**: Recovers high-intent consumer checkout drop-offs via instant 1-Tap UPI deep links, recovering gross merchandise value (GMV) while bypassing expensive credit card merchant discount rates (MDR arbitrage).
