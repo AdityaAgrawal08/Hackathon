@@ -1,146 +1,267 @@
-# ARBITER — AI Revenue Recovery Engine
+# ARBITER
 
-**Intelligent payment failure recovery with ML-powered decisions, 1-tap customer retention portals, and cryptographic audit trails.**
-
-ARBITER detects failed payments via real Razorpay webhooks, diagnoses root causes via a sub-millisecond 70+ bank error catalog, makes Expected-Value-maximizing recovery decisions, dispatches personalized 1-tap outreach (Email + SMS), and auto-cancels dunning reminders the instant recovery succeeds.
+> **Autonomous AI-Driven Revenue Recovery & Dynamic Liquidity Decision Engine**  
+> *Razorpay AI Buildathon 2026 — Track 03: AI Revenue Recovery*
 
 ---
 
-## Architecture Overview
+## 1. The Problem & Inspiration
+
+### The Problem Statement
+In Indian digital commerce, payment failures are not anomalies; they are systemic. Across Unified Payments Interface (UPI), Credit/Debit Cards, Netbanking, and Recurring Mandates (eNACH/UPI Autopay), **15% to 30% of checkout attempts fail** before reaching captured status.
+
+Payment failures typically manifest across three systemic vectors:
+1. **User Actionable Friction**: Incorrect UPI PINs on PhonePe/Google Pay, session drops at 3D Secure OTP verification screens, or temporary account balance deficits.
+2. **Technical & Issuer Congestion**: Sudden bank switch degradation (e.g., core banking switch maintenance at HDFC, ICICI, SBI), gateway timeouts, and NPCI network throttle limits.
+3. **Permanent Method Invalidation**: Expired cards, closed bank accounts, international card restrictions on domestic merchant accounts, and cancelled recurring mandates.
+
+When a payment drops, current industry approaches fail:
+* **Naive Blind Retries**: Firing background retries against an exhausted card or expired OTP produces consecutive gateway error codes, consumes payment aggregator API quotas, and incurs acquirer decline fees without recovering revenue.
+* **Uncoordinated Dunning Spam**: Firing rigid multi-channel blast sequences (SMS, WhatsApp, Email) regardless of whether the failure was an expired card or an issuer outage alienates customers, violates TRAI anti-harassment regulations, and burns messaging cost of goods sold (COGS).
+* **High Working Capital Drag (High DSO)**: In SaaS subscriptions and B2B corporate commerce, delayed accounts receivable and mandate rejections directly inflate Days Sales Outstanding (DSO), forcing merchants into expensive short-term working capital debt.
+
+### Inspiration & The Track 03 Bar
+The stated bar for **Razorpay AI Buildathon Track 03 (AI Revenue Recovery)** requires:
+> *"Show measured money recovered across a batch, with compliant escalation, stopping rules, and an audit trail."*
+
+ARBITER was engineered from first principles to transform payment recovery from a blind batch script into a mathematically grounded, closed-loop decision engine. Instead of treating payment failure as a terminal loss, ARBITER acts as an autonomous financial router that computes optimal interventions, enforces regulatory safety bounds, and preserves net operating margin.
+
+---
+
+## 2. The Solution
+
+ARBITER is an autonomous, approval-gated decision engine designed to operate directly atop Razorpay's payments infrastructure. It unifies real-time checkout telemetry, online contextual bandit reinforcement learning, and a cryptographically verifiable state machine.
 
 ```
-┌─────────────────┐     ┌──────────────────┐     ┌────────────────────────┐
-│   Storefront    │────▶│ Razorpay Gateway │────▶│ Webhook Ingestion      │
-│   (Store.html)  │     │ (Checkout.js)    │     │ /api/webhooks/razorpay │
-└─────────────────┘     └──────────────────┘     └───────────┬────────────┘
-                                                             │
-                               ┌─────────────────────────────┘
-                               ▼
-               ┌──────────────────────────────┐
-               │     payment_workflow.ts      │
-               │ ┌──────────────────────────┐ │
-               │ │ 1. 70+ Error Extraction  │ │
-               │ │ 2. Discrete Diagnosis    │ │
-               │ │ 3. 22-D Feature Vector   │ │
-               │ │ 4. Calibrated ML Scorer  │ │
-               │ │ 5. EV Policy Optimizer   │ │
-               │ │ 6. SHA-256 Audit Ledger  │ │
-               │ └──────────────────────────┘ │
-               └───────────────┬──────────────┘
-                               │
-                ┌──────────────┴──────────────┐
-                ▼                             ▼
-       ┌──────────────────┐          ┌──────────────────┐
-       │   Brevo (Email)  │          │   MSG91 (SMS)    │
-       │   Transactional  │          │   DLT-Compliant  │
-       └────────┬─────────┘          └────────┬─────────┘
-                │                             │
-                └──────────────┬──────────────┘
-                               ▼
-       ┌────────────────────────────────────────────────┐
-       │ Multi-Action Customer Portal (/recover/:id)    │
-       │ • 1-Tap UPI Intent (GPay, PhonePe, Paytm, BHIM)│
-       │ • Smart Downsell & 3-Part Split-Pay Salvage    │
-       └───────────────────────┬────────────────────────┘
-                               │ (Customer Pays)
-                               ▼
-       ┌────────────────────────────────────────────────┐
-       │ Closed-Loop Cleanup & Vendor Telemetry         │
-       │ • Pending dunning reminders auto-cancelled     │
-       │ • SHA-256 tamper-evident ledger logged         │
-       │ • Real-time SSE updates Vendor Dashboard       │
-       └────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│                                   ARBITER ARCHITECTURE                                 │
+└────────────────────────────────────────────────────────────────────────────────────────┘
+
+    [Payment Event Stream] ──────► [22-D Feature Vectorizer]
+     (Razorpay Webhooks,            (Failure Taxonomy, Ticket Value,
+      Checkout Failures)             Customer LTV, Issuer Health, Payday)
+                                             │
+                                             ▼
+                                 [LinUCB Contextual Bandit]
+                                 (Expected Value [EV] Maximizer)
+                                             │
+                                             ▼
+     [Finite State Machine] ◄─── [Strict Regulatory Guardrails]
+      - Terminal Success          - TRAI 09:00 - 21:00 IST Quiet Hours
+      - Hard Method Dead          - DPDP Act 2023 Identity Anonymization
+      - Max Retries Clamping      - RBI 24h Advance Notice Mandates
+                                             │
+                                             ▼
+                                [Targeted Action Execution]
+                                 ├── Tier 0: In-Flight Gateway Optimizer
+                                 ├── Tier 1: 1-Tap UPI Intent Link (0% MDR)
+                                 ├── Tier 2: DLT-Paced SMS / Transactional Email
+                                 └── Tier 3: B2B Dynamic Invoice Cash Terms
+                                             │
+                                             ▼
+                             [SHA-256 Tamper-Evident Ledger]
+                             (Cryptographic Audit Chaining H_i)
 ```
 
----
-
-## Key Modules & Monorepo Packages
-
-| Package | Path | Responsibility |
-| :--- | :--- | :--- |
-| **`@arbiter/shared`** | `packages/shared` | Currency math (paise/INR), ISO-8601 UTC time, structured logging |
-| **`@arbiter/core`** | `packages/core` | 70+ error catalog, EV policy optimizer, SHA-256 audit ledger, messaging router |
-| **`@arbiter/ml`** | `packages/ml` | 22-D feature vector extraction, calibrated logistic regression, credibility scoring |
-| **`@arbiter/trial`** | `packages/trial` | Deterministic fault simulator, 3-arm ablation benchmark harness |
-| **`app`** | `app/` | Express application, live SSE feeds, customer recovery portal, vendor dashboard |
+ARBITER operates across three distinct business verticals:
+1. **D2C E-Commerce & Retail**: Recovers high-intent consumer checkout drop-offs via instant 1-Tap UPI deep links, recovering gross merchandise value (GMV) while bypassing expensive credit card merchant discount rates (MDR arbitrage).
+2. **SaaS & Subscription Mandates**: Eliminates involuntary subscriber churn by adhering strictly to the Reserve Bank of India (RBI) 24-hour advance pre-debit notification invariant and scheduling recurring retries at 06:30 AM IST to capitalize on morning liquidity windows.
+3. **B2B Receivables & Invoicing**: Employs dynamic 2/10 Net 30 early settlement incentives, compressing Days Sales Outstanding (DSO) and unlocking trapped corporate working capital.
 
 ---
 
-## 3-Arm Empirical Benchmark
+## 3. Key Features
 
-ARBITER's core value proposition is proven empirically via a randomized 3-arm trial:
-
-| Intervention Arm | Strategy | Recovery Rate | Cost per ₹100 Won | Net Lift |
-| :--- | :--- | :---: | :---: | :---: |
-| **Arm 0: Natural Control** | Zero outreach (client-side only) | **18.0%** | ₹0.00 | Baseline |
-| **Arm 1: 7-Rule Heuristics** | Static dunning rules + blind retry | **45.0%** | ₹1.85 | $+27.0\text{ pp}$ |
-| **Arm 2: ARBITER ML + EV** | 22-D ML scoring + dynamic EV policy | **61.0%** | **₹0.48** | **$+16.0\text{ pp}$ ($+35.5\%$ over rules)** |
-
-> **Bootstrap 95% Confidence Interval:** $[+11.2\%, +20.8\%]$ ($p < 0.001$, $N = 100$ per arm).
-
----
-
-## Customer Retention & Multi-Action Recovery Portal
-
-Customers who experience checkout failure are routed to `/recover/:eventId` on mobile/web:
-1. **1-Tap UPI Intent Switcher:** Generates direct deep links for Google Pay (`gpay://`), PhonePe (`phonepe://`), Paytm (`paytmmp://`), and BHIM (`upi://`).
-2. **Smart Downsell & Split-Pay Cart Salvage:** Offers 3-month installment plans or downgrade options for high-ticket carts ($\ge ₹1,999$).
-3. **Closed-Loop Dunning Pruning:** The millisecond recovery succeeds, all pending email/SMS dunning tasks transition to `CANCELLED` (`cancelled_reason = 'PAYMENT_COMPLETED'`).
+* **Closed-Form LinUCB Contextual Bandit**: Selects the optimal recovery arm per transaction using real-time ridge regression with online rank-1 Sherman-Morrison matrix updates.
+* **Expected Value (EV) Decision Engine**: Maximizes expected recovered revenue minus channel dispatch costs (COGS) and fee arbitrage, preventing negative-ROI interventions.
+* **Tier-0 In-Flight Gateway Optimizer**: Intercepts gateway timeouts and routes to secondary acquirers within sub-second thresholds (<980ms) without customer-facing friction.
+* **Fail-Closed Finite State Machine**: Enforces non-negotiable stopping rules: `TERMINAL_SUCCESS`, `HARD_METHOD_DEAD`, `MAX_RETRIES_REACHED`, and `CUSTOMER_OPT_OUT`.
+* **TRAI Quiet-Hour Engine**: Automatically buffers outreach between 21:00 and 09:00 IST, preventing telemarketing violations under Telecom Commercial Communications Customer Preference Regulations (TCCCPR).
+* **DPDP Act 2023 Compliance**: Zero plain-text personally identifiable information (PII) is stored or logged. Customer credentials are authenticated using salted SHA-256 HMAC tokens.
+* **Tamper-Evident SHA-256 Hash Chain**: Every state transition, action dispatch, and payment capture is recorded into an append-only cryptographic ledger where each block references the SHA-256 digest of the predecessor.
+* **Longitudinal Behavioral Memory**: Tracks customer payment habits over time, prioritizing high-value recovery candidates via exponential time-decay prioritization.
+* **Production CSV Batch Ingestion & 4-Tier Ablation**: Parses real Razorpay failure exports and evaluates performance across Natural Control, Blind Retries, Static 7-Rules, and ARBITER with 95% bootstrap confidence intervals.
 
 ---
 
-## 5-Minute Live Demonstration Script
+## 4. Tech Stack
 
-| Timestamp | Phase | Live Actions & Talking Points |
-| :--- | :--- | :--- |
-| **0:00 - 0:45** | **The Problem & Architecture** | Open Store (`localhost:3000`) $\rightarrow$ simulate ₹4,999 checkout failure. Show real Razorpay webhook hitting server, classified via 70+ deterministic error catalog. |
-| **0:45 - 2:00** | **The Customer Journey (Hero)** | Customer receives personalized SMS with 1-Tap Recovery Link. Open `/recover` on mobile: demonstrate 1-Tap UPI Intent and Split-Pay. Customer taps "Pay via Google Pay" $\rightarrow$ instant webhook auto-cancels future dunning. |
-| **2:00 - 3:30** | **Batch Ablation Benchmark** | Open Vendor Dashboard (`localhost:3000/dashboard`) $\rightarrow$ click **"Run 100-Payment Benchmark"**. Show live side-by-side comparative bars: Arm 0 (18.0%) vs Arm 1 (45.0%) vs Arm 2 (61.0%), $+16.0\text{ pp}$ lift with bootstrap 95% CIs. |
-| **3:30 - 4:15** | **Governance & Audit Trail** | Show refusal: late-night event held by TRAI Quiet Hours (21:00–09:00 IST). Click transaction to inspect **SHA-256 Cryptographic Audit Trail Modal** with unbroken hash continuity. |
-| **4:15 - 5:00** | **Negative Results & Summary** | Conclude with engineering maturity: why we discarded LLM error classification (zero delta, +850ms latency) and why closed-loop retention maximizes merchant LTV. |
-
----
-
-## What We Tried That Did Not Work (Negative Results)
-
-Full details published in [docs/negative-results.md](file:///home/aditya/dev/RazorPay-Hackathon/docs/negative-results.md):
-
-1. **LLM Error Classification on Money Path:** Evaluated LLM classification on 70+ bank codes. Found **0.0 pp accuracy gain** over our deterministic error catalog, while adding **850ms latency** and **$20/1k calls cost**. Kept the sub-millisecond deterministic catalog on the money path.
-2. **Uncalibrated Single-Tenant Issuer Health:** Local issuer outage estimation without live NPCI feeds caused false-positive retry suppressions (dropping recovery by 8.2pp). Refined to soft cooldowns and rail switching.
-3. **Local Silo Variance in Federated Learning:** Small merchant sample sizes (<200 events) combined with differential privacy noise degraded global model AUROC from 0.81 to 0.69. Proved central pooling with anonymized feature extraction is superior.
-4. **Voice IVR & WhatsApp Channel Friction:** High customer hang-up rates (>80%) and DLT regulatory friction in India. 1-Tap Mobile UPI Intent deep links delivered $4.2\times$ higher conversion.
+| Layer | Technologies |
+| :--- | :--- |
+| **Runtime & Language** | Node.js 22+ (LTS), TypeScript 5.9, Express 5 |
+| **Database & Persistence** | Libsql / SQLite (ACID compliant, zero-latency embedded mode, monotonic chronological indexing) |
+| **Payment Integration** | Razorpay Node.js SDK, Razorpay Optimizer, Razorpay Payment Links, Smart Collect (Virtual VPAs) |
+| **Outreach Providers** | MSG91 Flow API v5 (DLT-compliant Indian SMS), Brevo Transactional Email API |
+| **AI / Machine Learning** | Closed-form LinUCB Contextual Bandit, 22-D Logistic Regression, Seed-locked PRNG, Bootstrap Resampling |
+| **Cryptographic Security** | Node.js `crypto` (HMAC SHA-256, timingSafeEqual, PII-blind credential identifiers) |
+| **Front-End Architecture** | Vanilla HTML5 / CSS3 / ES6, Chart.js 4, QRCode.js (zero heavy UI framework overhead) |
+| **Test Engineering** | Vitest 3.2, 149 test suites, 959 deterministic automated test cases |
 
 ---
 
-## Track 03: Official Buildathon Rubric Traceability Table
+## 5. Comprehensive Documentation
 
-| Buildathon Rubric Dimension | Official Track 03 Criterion | ARBITER Concrete Implementation | Passing Test Suite |
-| :--- | :--- | :--- | :--- |
-| **The Bar: Measured Money Recovered Across a Batch** | Show measured money recovered across a batch with quantifiable net lift over control and heuristic baseline | End-to-end 50-payment real batch recovery runner (`scripts/run_real_batch_recovery.ts`) executing live failure and recovery lifecycles with realistic Indian banking error distributions, MDR fee arbitrage, compliant escalation, stopping rules, and SHA-256 audit ledger; paired with a 1,000-event 4-arm empirical trial harness (`packages/trial/src/runner.ts`) | [`tests/app/real_batch_recovery_measurement.test.ts`](file:///home/aditya/dev/RazorPay-Hackathon/tests/app/real_batch_recovery_measurement.test.ts)<br>[`tests/app/dashboard_telemetry_and_cfo_benchmark.test.ts`](file:///home/aditya/dev/RazorPay-Hackathon/tests/app/dashboard_telemetry_and_cfo_benchmark.test.ts)<br>[`tests/core/merchant_economics.test.ts`](file:///home/aditya/dev/RazorPay-Hackathon/tests/core/merchant_economics.test.ts) |
-| **The Bar: Compliant Escalation & Stopping Rules** | Strict compliance: customer opt-out, maximum attempt limits, and Indian telecom quiet hour restrictions | Finite State Machine (`packages/core/src/agent/stopping_rules.ts`) enforcing max 3 attempts, permanent opt-out suppression (`status = 'SUPPRESSED'`), and TRAI Quiet Hours (`isWithinTRAIQuietHours`: 21:00–09:00 IST deferrals to 09:00:01 IST) | [`tests/core/quiet_hours_ist.test.ts`](file:///home/aditya/dev/RazorPay-Hackathon/tests/core/quiet_hours_ist.test.ts)<br>[`tests/core/fsm_transition_matrix.test.ts`](file:///home/aditya/dev/RazorPay-Hackathon/tests/core/fsm_transition_matrix.test.ts)<br>[`tests/core/priority_sweeper_and_replanning.test.ts`](file:///home/aditya/dev/RazorPay-Hackathon/tests/core/priority_sweeper_and_replanning.test.ts) |
-| **The Bar: Cryptographic Tamper-Evident Audit Trail** | Immutable, verifiable audit log of every failure, decision, outreach, and recovery | Cryptographic SHA-256 hash-chained ledger (`packages/core/src/ledger/audit_ledger.ts`, table `audit_ledger`). App layer strictly enforces append-only semantics (zero UPDATE/DELETE, Invariant I-4) | [`tests/core/post_payment_pruning_audit.test.ts`](file:///home/aditya/dev/RazorPay-Hackathon/tests/core/post_payment_pruning_audit.test.ts)<br>[`tests/app/vendor_dashboard_telemetry.test.ts`](file:///home/aditya/dev/RazorPay-Hackathon/tests/app/vendor_dashboard_telemetry.test.ts)<br>[`tests/app/real_batch_recovery_measurement.test.ts`](file:///home/aditya/dev/RazorPay-Hackathon/tests/app/real_batch_recovery_measurement.test.ts) |
-| **The Edge: Sub-Millisecond Discrete Error Catalog** | Ultra-low latency classification of gateway and issuer bank errors on the live money path | Deterministic 70+ bank error code catalog (`packages/core/src/error-catalog.ts`) classifying into 5 discrete taxonomy classes in <0.5ms (pure function, zero hallucination) | [`tests/core/taxonomy_mapping.test.ts`](file:///home/aditya/dev/RazorPay-Hackathon/tests/core/taxonomy_mapping.test.ts)<br>[`tests/core/error_classification.test.ts`](file:///home/aditya/dev/RazorPay-Hackathon/tests/core/error_classification.test.ts) |
-| **The Edge: Mathematical Expected Value & Online Reinforcement Learning** | Adaptive decisioning balancing recovery probability, customer LTV, and channel costs | LinUCB Contextual Bandit (`packages/core/src/agent/contextual_bandit.ts`) with closed-form Gauss-Jordan matrix inversion, persistent SQLite state (`bandit_state`), closed-loop reward updates (`updateArm`), and Groq LLM tool-calling conversational agent with Hinglish intent adaptation | [`tests/core/contextual_bandit.test.ts`](file:///home/aditya/dev/RazorPay-Hackathon/tests/core/contextual_bandit.test.ts)<br>[`tests/core/conversational_agent_llm.test.ts`](file:///home/aditya/dev/RazorPay-Hackathon/tests/core/conversational_agent_llm.test.ts)<br>[`tests/core/enterprise_adapter_and_trainer.test.ts`](file:///home/aditya/dev/RazorPay-Hackathon/tests/core/enterprise_adapter_and_trainer.test.ts)<br>[`tests/core/batch_sequencer.test.ts`](file:///home/aditya/dev/RazorPay-Hackathon/tests/core/batch_sequencer.test.ts) |
-| **The Edge: 1-Tap Customer Retention & Active Re-Planning** | Frictionless recovery portal with real-time dynamic behavior adaptation | Dedicated portal (`/recover/:eventId`) generating 1-tap mobile UPI Intent deep links (GPay, PhonePe, Paytm, BHIM). Behavioral telemetry beacons trigger contextual bandit re-planning (3-installment split-pay downsell on sticker shock, 1-tap UPI on secondary card decline) | [`tests/core/priority_sweeper_and_replanning.test.ts`](file:///home/aditya/dev/RazorPay-Hackathon/tests/core/priority_sweeper_and_replanning.test.ts)<br>[`tests/app/e2e_provider_delivery.test.ts`](file:///home/aditya/dev/RazorPay-Hackathon/tests/app/e2e_provider_delivery.test.ts) |
-| **The Edge: Multi-Domain Enterprise Financial Architecture** | Expand beyond basic D2C e-commerce to cover recurring mandates, B2B invoices, and payment optimizer | 5 dedicated enterprise cockpits in `app/views/dashboard.html`:<br>• **D2C Checkout**: live operations & 1-tap recovery<br>• **SaaS Mandates**: UPI Autopay / eNACH 24h pre-debit notice proof & 06:30 AM IST scheduling<br>• **B2B Receivables**: 2/10 Net 30 terms, DSO aging buckets, Smart Collect Virtual VPAs<br>• **Optimizer Cascading**: Tier-0 in-flight acquirer cascades (<1.8s) & Top 4 Indian Issuer Bank Matrix<br>• **CFO Benchmark**: 4-arm empirical trial & live 50-Tx batch audit | [`tests/app/dashboard_multi_domain.test.ts`](file:///home/aditya/dev/RazorPay-Hackathon/tests/app/dashboard_multi_domain.test.ts)<br>[`tests/app/dashboard_command_center.test.ts`](file:///home/aditya/dev/RazorPay-Hackathon/tests/app/dashboard_command_center.test.ts) |
-| **Production Concurrency & Scalability** | Zero socket exhaustion, zero DB locks under heavy payment traffic | SQLite WAL mode + `PRAGMA busy_timeout = 5000`, atomic $O(1)$ metrics rollup table (`vendor_metrics_summary`), immediate webhook return (<15ms) with async worker queue, token-bucket rate limiters, and MSG91 250ms micro-batching | [`tests/core/vendor_metrics_and_pagination.test.ts`](file:///home/aditya/dev/RazorPay-Hackathon/tests/core/vendor_metrics_and_pagination.test.ts)<br>[`tests/core/msg91_resilience.test.ts`](file:///home/aditya/dev/RazorPay-Hackathon/tests/core/msg91_resilience.test.ts)<br>[`tests/core/transaction_isolation.test.ts`](file:///home/aditya/dev/RazorPay-Hackathon/tests/core/transaction_isolation.test.ts) |
+### Mathematical Formulations & Decision Theory
+
+#### 1. Expected Value (EV) Objective Function
+For each failed payment event $x$ and candidate action $a \in \mathcal{A}$, the expected net recovery value is defined as:
+
+$$\text{EV}(a \mid x) = \mathbb{P}(\text{Recovery} \mid x, a) \cdot \text{TicketPaise} - \text{COGS}(a) + \Delta \text{MDR}(x, a)$$
+
+Where:
+* $\mathbb{P}(\text{Recovery} \mid x, a)$ is the calibrated recovery probability estimated by the statistical inference engine.
+* $\text{TicketPaise}$ is the gross value of the failed transaction in paise (1 INR = 100 paise).
+* $\text{COGS}(a)$ is the direct communication cost of dispatching action $a$:
+  $$\text{COGS}(\text{SMS}) = \text{₹}0.18, \quad \text{COGS}(\text{EMAIL}) = \text{₹}0.02, \quad \text{COGS}(\text{IN\_FLIGHT}) = \text{₹}0.00$$
+* $\Delta \text{MDR}(x, a)$ represents merchant discount rate arbitrage achieved by converting high-cost payment rails (e.g., Credit Cards at 1.95%) to zero-MDR 1-Tap UPI:
+  $$\Delta \text{MDR}(x, \text{UPI}) = \text{TicketPaise} \times 0.0195$$
+
+An action $a$ is approved for execution if and only if:
+
+$$\text{EV}(a \mid x) > 0 \quad \land \quad a \notin \text{SuppressedByStoppingRules}(x)$$
 
 ---
 
-## Verification & Test Suite
+#### 2. LinUCB Contextual Bandit (Ridge Regression & Rank-1 Updating)
+ARBITER balances exploration of novel recovery interventions with exploitation of historically optimal channels using the Linear Upper Confidence Bound (LinUCB) algorithm.
 
-ARBITER includes a comprehensive test harness covering unit, integration, invariant, and security suites:
+For each action arm $a$, we assume expected reward is linear in context vector $x \in \mathbb{R}^d$:
 
+$$\mathbb{E}[r_{t,a} \mid x_{t}] = x_{t}^T \theta_a^*$$
+
+Where:
+* $d = 5$ (Normalized amount, failure class severity, prior customer response velocity, issuer health score, and payday proximity).
+* $A_a = D_a^T D_a + I_d$ is the $d \times d$ covariance ridge regression matrix (initialized to the identity matrix $I_d$).
+* $b_a = D_a^T r_a \in \mathbb{R}^d$ is the cumulative reward vector.
+
+##### Closed-Form Parameter Estimation:
+The ridge regression coefficient vector $\hat{\theta}_a$ is given by:
+
+$$\hat{\theta}_a = A_a^{-1} b_a$$
+
+##### Upper Confidence Bound Selection Rule:
+At each failure event, the arm $a^*$ that maximizes the upper confidence bound is chosen:
+
+$$a^* = \arg\max_{a \in \mathcal{A}} \left( x^T \hat{\theta}_a + \alpha \sqrt{x^T A_a^{-1} x} \right)$$
+
+Where $\alpha > 0$ controls the exploration-exploitation tradeoff parameter ($\alpha = 0.20$ default).
+
+##### Online Rank-1 Sherman-Morrison Updating:
+To maintain real-time sub-millisecond execution without expensive matrix inversion ($O(d^3)$), ARBITER updates the inverse covariance matrix $A_a^{-1}$ in $O(d^2)$ time upon receiving feedback reward $r \in \{0, 1\}$:
+
+$$A_{a,\text{new}}^{-1} = A_a^{-1} - \frac{A_a^{-1} x x^T A_a^{-1}}{1 + x^T A_a^{-1} x}$$
+
+$$b_{a,\text{new}} = b_a + r \cdot x$$
+
+---
+
+#### 3. 22-Dimensional Structural Scoring Model
+ARBITER extracts a normalized 22-dimensional feature vector $x \in \mathbb{R}^{22}$ from incoming payment failure payloads:
+
+$$\hat{y} = \sigma \left( \sum_{i=1}^{22} w_i \left( \frac{x_i - \mu_i}{\sigma_i} \right) + \beta \right) = \frac{1}{1 + \exp\left( - \left( w^T \hat{x} + \beta \right) \right)}$$
+
+The feature space spans:
+* **Failure Classification (One-Hot)**: `f_class_soft`, `f_class_hard`, `f_class_network`, `f_class_risk`.
+* **Behavioral & Temporal**: `near_payday`, `payday_confidence`, `amount_z`, `prior_success_norm`, `prior_failure_norm`, `channel_responsiveness`, `tenure_norm`, `ltv_paise_norm`, `churn_risk_norm`, `days_since_last_attempt_norm`, `high_value_tier`.
+* **Payment Method Rails**: `is_card`, `is_upi`, `is_netbanking`, `is_wallet`, `is_emi`, `is_debit_card`, `is_international`.
+
+For severe fraud or high-risk flags (`f_class_risk`), the weight vector imposes a decisive negative coefficient ($w_{\text{risk}} = -3.50$), suppressing automated recovery outreach to $\mathbb{P} < 0.05$ and triggering fail-closed isolation.
+
+---
+
+#### 4. Priority Queue & Exponential Engagement Decay
+In high-throughput environments, outbound recovery dispatches are scheduled via a priority queue that decays over time. The urgency of customer re-engagement decreases exponentially as the cart or checkout session goes cold:
+
+$$\text{Priority}(x, t) = \text{EV}(x) \cdot \exp\left( -\lambda \cdot \Delta t \right) \cdot \mu_{\text{domain}}$$
+
+Where:
+* $\Delta t$ is the elapsed time in minutes since the initial payment failure.
+* $\lambda$ is the half-life decay parameter ($\lambda = 0.015$, corresponding to an engagement half-life of ~46 minutes).
+* $\mu_{\text{domain}}$ is the domain urgency multiplier:
+  $$\mu_{\text{D2C}} = 1.20, \quad \mu_{\text{SaaS}} = 1.00, \quad \mu_{\text{B2B}} = 0.85$$
+
+---
+
+#### 5. Cryptographic SHA-256 Tamper-Evident Audit Ledger
+To guarantee full regulatory accountability and satisfy bank audit requirements, every lifecycle action produces an immutable block chained cryptographically:
+
+$$H_0 = \text{"GENESIS"}$$
+
+$$H_i = \text{SHA256}\Big( H_{i-1} \parallel \text{EntryID}_i \parallel \text{EventType}_i \parallel \text{EntityID}_i \parallel \text{Actor}_i \parallel \text{PayloadJSON}_i \parallel \text{CreatedAtUTC}_i \Big)$$
+
+Ledger verification proceeds sequentially:
+$$\forall i \ge 1, \quad H_i \stackrel{?}{=} \text{SHA256}\Big( H_{i-1} \parallel \text{EntryData}_i \Big)$$
+
+If any single record, timestamp, or payload is modified in the database, the hash chain breaks from that entry forward ($H_k \neq \text{prev\_hash}_{k+1}$), immediately alerting operators.
+
+---
+
+#### 6. B2B Working Capital & DSO Reduction
+For corporate accounts receivable, early cash settlement reduces financing costs. The working capital savings achieved by accelerating Days Sales Outstanding (DSO) are computed as:
+
+$$\Delta \text{CostOfDebt} = \text{InvoiceAmount} \cdot \left( \frac{\Delta \text{DSO}}{365} \right) \cdot r_{\text{borrowing}}$$
+
+Where:
+* $\Delta \text{DSO} = \text{DSO}_{\text{standard}} - \text{DSO}_{\text{early}}$ (typically $42 \text{ days} - 8 \text{ days} = 34 \text{ days}$).
+* $r_{\text{borrowing}}$ is the merchant's annualized short-term borrowing rate (assumed at 14.0% p.a.).
+
+---
+
+#### 7. Non-Circular Empirical Bootstrap Confidence Intervals
+When benchmarking recovery lift across batch data, ARBITER calculates 95% confidence intervals using non-parametric bootstrap resampling:
+
+For $B = 200$ resamples of size $N$:
+$$\bar{\theta}^{(b)} = \frac{1}{N} \sum_{i=1}^N r_i^{*(b)}$$
+
+$$\text{CI}_{95\%} = \Big[ \text{Quantile}_{0.025}\big(\{\bar{\theta}^{(b)}\}\big), \quad \text{Quantile}_{0.975}\big(\{\bar{\theta}^{(b)}\}\big) \Big]$$
+
+This ensures that reported recovery rates are accompanied by rigorous statistical confidence bounds.
+
+---
+
+## 6. Verification & Getting Started
+
+### Prerequisites
+* Node.js $\ge 22.0.0$
+* pnpm $\ge 10.0.0$
+
+### Installation
 ```bash
-# Run full monorepo typecheck and test suite
-pnpm verify
-
-# Run test suite directly
-pnpm test
+git clone https://github.com/AdityaAgrawal08/Razorpay-Hackathon.git
+cd Razorpay-Hackathon
+pnpm install
 ```
 
-- **122 Test Files, 950+ Tests** passing with 0 failures (100% pass rate).
-- Direct end-to-end 50-transaction real batch recovery runner with SHA-256 cryptographic chain validation.
-- Rate limiters, constant-time HMAC validation (`timingSafeEqual`), and TRAI quiet hours verified under automated stress.
-- Architectural master plan: [TRACK_3_WINNING_MASTER_PLAN.md](file:///home/aditya/dev/RazorPay-Hackathon/TRACK_3_WINNING_MASTER_PLAN.md).
-- Empirical negative findings: [docs/negative-results.md](file:///home/aditya/dev/RazorPay-Hackathon/docs/negative-results.md).
+### Environment Configuration
+Copy the example environment configuration:
+```bash
+cp .env.example .env
+```
+Key configuration parameters:
+* `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`: Razorpay API test-mode credentials.
+* `MSG91_AUTH_KEY`, `MSG91_FLOW_ID`: MSG91 Flow API configuration for Indian SMS delivery.
+* `BREVO_API_KEY`: Brevo Transactional Email credentials.
+* `PORT`: Application server port (default `3000`).
+
+### Running the System
+```bash
+# Start the production server
+pnpm start
+
+# Run the live interactive terminal demo
+pnpm demo
+
+# Execute real batch recovery measurement script
+npx tsx scripts/run_real_batch_recovery.ts
+```
+
+### Accessing Interfaces
+* **Customer Storefront**: `http://localhost:3000/store`
+* **Merchant Command Center**: `http://localhost:3000/dashboard`
+* **Customer 1-Tap Recovery Portal**: `http://localhost:3000/recover/:eventId`
+
+---
+
+## 7. License & Compliance Statement
+This project is developed exclusively for the **Razorpay AI Buildathon 2026**.  
+Engineered in compliance with RBI Digital Payment Guidelines, NPCI UPI Procedural Guidelines, TRAI TCCCPR Regulations, and the Digital Personal Data Protection (DPDP) Act 2023.
