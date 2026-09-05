@@ -414,9 +414,8 @@ export async function processFailedPayment(
   }
 
   // FIRST ATTEMPT / NEW RETRY ORDER: Insert new row
-  try {
-    await client.execute({
-      sql: `INSERT INTO live_payment_events
+  await client.execute({
+    sql: `INSERT INTO live_payment_events
         (id, razorpay_payment_id, razorpay_order_id, customer_profile_id, product_name, amount_paise,
          status, failure_code, failure_description, failure_step, failure_source, failure_reason,
          failure_class, ml_probability, ml_action, bandit_action, bandit_context_json, bandit_ucb_score,
