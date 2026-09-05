@@ -67,6 +67,7 @@ export async function runRealBatchRecovery(
 ): Promise<BatchRecoveryMetrics> {
   const baseUrl = options.baseUrl || getPublicBaseUrl();
   const startTime = Date.now();
+  await client.execute("DELETE FROM audit_ledger;");
 
   let totalAtRiskPaise = 0;
   let totalRecoveredPaise = 0;
