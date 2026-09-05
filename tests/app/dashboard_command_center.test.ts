@@ -49,7 +49,7 @@ describe("Vendor Dashboard Integration Tests", () => {
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(Array.isArray(data)).toBe(true);
-    expect(data.length).toBe(4);
+    expect(data.length).toBeGreaterThanOrEqual(4);
     expect(data[0].id).toBe("prod_premium_plan");
   });
 

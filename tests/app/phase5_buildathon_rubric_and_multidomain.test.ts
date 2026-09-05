@@ -104,9 +104,9 @@ describe("Phase 5: Buildathon Rubric Alignment & Multi-Domain UI Integration", (
       const res = await fetch(`${baseUrl}/dashboard`);
       const html = await res.text();
 
-      expect(html).toContain("Razorpay Optimizer Tier-0 In-Flight Gateway & Bank Health Matrix");
-      expect(html).toContain("Top 4 Indian Issuer Bank Switch Real-Time Telemetry");
-      expect(html).toContain("Evaluate Inter-Bank Circuit Breaker");
+      expect(html).toContain("Razorpay Optimizer Tier-0 In-Flight Gateway Routing Matrix");
+      expect(html).toContain("Platform Checkout Rail & Failure Analytics");
+      expect(html).toContain("Evaluate Rail Fallback & Triage");
     });
 
     it("verifies Behavioral Memory & Priority Queue proofs", async () => {

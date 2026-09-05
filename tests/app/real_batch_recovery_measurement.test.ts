@@ -1,15 +1,13 @@
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { createClient, type Client } from "@libsql/client";
 import { runMigrations } from "../../packages/core/src/db/migrate.js";
 import { runRealBatchRecovery } from "../../scripts/run_real_batch_recovery.js";
 
-const TEST_DB_URL = "file:./data/arbiter_test.sqlite";
-
 describe("FIX-021: Real Batch Recovery Measurement & Cryptographic Audit Verification", () => {
   let client: Client;
 
-  beforeAll(async () => {
-    client = createClient({ url: TEST_DB_URL });
+  beforeEach(async () => {
+    client = createClient({ url: ":memory:" });
     await runMigrations(client);
   });
 

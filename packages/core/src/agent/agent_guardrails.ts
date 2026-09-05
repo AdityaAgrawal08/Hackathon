@@ -35,6 +35,8 @@ const DND_KEYWORDS = [
   "BLOCK",
   "REMOVE ME",
   "LEAVE ME ALONE",
+  "BAND KARO",
+  "MAT BHEJO",
 ];
 
 export function checkDndOptOut(text: string): boolean {

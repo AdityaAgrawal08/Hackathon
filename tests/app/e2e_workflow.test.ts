@@ -32,6 +32,7 @@ beforeAll(async () => {
     status TEXT, failure_code TEXT, failure_description TEXT,
     failure_step TEXT, failure_source TEXT, failure_reason TEXT,
     failure_class TEXT, ml_probability REAL, ml_action TEXT,
+    bandit_action TEXT, bandit_context_json TEXT, bandit_ucb_score REAL,
     outreach_dispatched INTEGER DEFAULT 0, vendor_notified INTEGER DEFAULT 0,
     vendor_decision TEXT, retry_count INTEGER DEFAULT 0,
     created_at_utc TEXT,

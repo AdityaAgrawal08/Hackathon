@@ -174,11 +174,38 @@ export interface ProcessResult {
 
 export async function processFailedPayment(
   client: Client,
-  input: FailedPaymentInput,
-  outreachRouter: OutreachRouter,
+  rawInput: FailedPaymentInput | any,
+  outreachRouter?: OutreachRouter | any,
 ): Promise<ProcessResult> {
-  const nowMs = input.nowMs;
+  const router: OutreachRouter = (outreachRouter && typeof outreachRouter.dispatchWithCascade === "function")
+    ? outreachRouter
+    : new OutreachRouter();
+
+  const optNowMs = typeof (outreachRouter as any)?.nowMs === "number" ? (outreachRouter as any).nowMs : undefined;
+  const nowMs = rawInput.nowMs ?? optNowMs ?? Date.now();
   const nowUtc = isoUtc(nowMs);
+
+  const phone = rawInput.customerPhone || rawInput.razorpayContact;
+  const email = rawInput.customerEmail || rawInput.razorpayEmail;
+  const derivedProfileId = rawInput.customerProfileId || (phone ? `cust_${createHash("sha256").update(phone).digest("hex").slice(0, 12)}` : (email ? `cust_${createHash("sha256").update(email).digest("hex").slice(0, 12)}` : `cust_${nowMs}`));
+
+  const input: FailedPaymentInput = {
+    ...rawInput,
+    nowMs,
+    razorpayPaymentId: rawInput.razorpayPaymentId || rawInput.paymentId || `pay_${nowMs}_${Math.random().toString(36).slice(2, 7)}`,
+    razorpayOrderId: rawInput.razorpayOrderId || rawInput.orderId || `order_${nowMs}_${Math.random().toString(36).slice(2, 7)}`,
+    customerProfileId: derivedProfileId,
+    productName: rawInput.productName || "Standard Plan",
+    failureCode: rawInput.failureCode || "PAYMENT_FAILED",
+    failureDescription: rawInput.failureDescription || "Payment failed",
+    failureStep: rawInput.failureStep || "payment_authorization",
+    failureSource: rawInput.failureSource || "gateway",
+    failureReason: rawInput.failureReason || rawInput.failureCode || "payment_failed",
+    amountPaise: Number(rawInput.amountPaise) || 0,
+    customerName: rawInput.customerName,
+    customerPhone: phone,
+    customerEmail: email,
+  };
 
   // 1. Classify failure using Razorpay's error envelope (not hardcoded)
   const failureClass = classifyByCode(input.failureCode, {
@@ -233,23 +260,37 @@ export async function processFailedPayment(
     ],
   });
 
-  // 2. Fetch customer profile for ML context
-  const custResult = await client.execute({
-    sql: `SELECT * FROM customer_profiles WHERE id = ?`,
-    args: [input.customerProfileId],
-  });
-  const customer = custResult.rows[0] as any;
-
-  // 3. Compute ML features using customer history
+  // 2. Ensure customer profile exists & fetch for ML context
+  let customer: any = null;
   const priorAmounts: number[] = [];
-  if (customer) {
-    const priorEvents = await client.execute({
-      sql: `SELECT amount_paise FROM live_payment_events WHERE customer_profile_id = ? AND status = 'failed' ORDER BY created_at_utc ASC`,
-      args: [input.customerProfileId],
-    });
-    for (const row of priorEvents.rows) {
-      priorAmounts.push(Number(row.amount_paise));
-    }
+  if (input.customerProfileId) {
+    try {
+      await client.execute({
+        sql: `INSERT OR IGNORE INTO customer_profiles (id, name, phone, email, created_at_utc)
+              VALUES (?, ?, ?, ?, ?)`,
+        args: [
+          input.customerProfileId,
+          input.customerName || "Customer",
+          input.customerPhone || null,
+          input.customerEmail || null,
+          nowUtc,
+        ],
+      });
+      const custResult = await client.execute({
+        sql: `SELECT * FROM customer_profiles WHERE id = ?`,
+        args: [input.customerProfileId],
+      });
+      customer = custResult.rows[0] as any;
+      if (customer) {
+        const priorEvents = await client.execute({
+          sql: `SELECT amount_paise FROM live_payment_events WHERE customer_profile_id = ? AND status = 'failed' ORDER BY created_at_utc ASC`,
+          args: [input.customerProfileId],
+        });
+        for (const row of priorEvents.rows) {
+          priorAmounts.push(Number(row.amount_paise));
+        }
+      }
+    } catch {}
   }
 
   const features = computeFeatures({
@@ -682,7 +723,7 @@ export async function processFailedPayment(
     // 1. Execute Primary Bandit Action
     if (isSmsPrimary && hasPhone) {
       try {
-        const smsResult = await outreachRouter.dispatchWithCascade("SMS", outreachPayload, nowMs);
+        const smsResult = await router.dispatchWithCascade("SMS", outreachPayload, nowMs);
         dispatchResults.push(smsResult);
         logger.info({ msg: `BANDIT PRIMARY DISPATCH SMS → ${smsResult.status} via ${smsResult.providerName}`, channel: smsResult.channel, status: smsResult.status, provider: smsResult.providerName, banditAction: chosenAction });
 
@@ -707,7 +748,7 @@ export async function processFailedPayment(
       }
     } else if (isEmailPrimary && hasEmail) {
       try {
-        const emailResult = await outreachRouter.dispatch("EMAIL", outreachPayload, nowMs);
+        const emailResult = await router.dispatch("EMAIL", outreachPayload, nowMs);
         dispatchResults.push(emailResult);
         logger.info({ msg: `BANDIT PRIMARY DISPATCH EMAIL → ${emailResult.status} via ${emailResult.providerName}`, channel: 'EMAIL', status: emailResult.status, provider: emailResult.providerName, banditAction: chosenAction });
 
@@ -735,7 +776,7 @@ export async function processFailedPayment(
     // If Email was not dispatched as primary but is available on profile, dispatch Email confirmation
     if (hasEmail && !dispatchResults.some(r => r.channel === "EMAIL")) {
       try {
-        const emailResult = await outreachRouter.dispatch("EMAIL", outreachPayload, nowMs);
+        const emailResult = await router.dispatch("EMAIL", outreachPayload, nowMs);
         dispatchResults.push(emailResult);
         logger.info({ msg: `EMAIL NOTIFICATION → ${emailResult.status} via ${emailResult.providerName}`, channel: 'EMAIL', status: emailResult.status, provider: emailResult.providerName });
 
@@ -762,7 +803,7 @@ export async function processFailedPayment(
     // If SMS was not dispatched as primary but phone is available and email is missing, dispatch SMS
     if (hasPhone && dispatchResults.length === 0) {
       try {
-        const smsResult = await outreachRouter.dispatchWithCascade("SMS", outreachPayload, nowMs);
+        const smsResult = await router.dispatchWithCascade("SMS", outreachPayload, nowMs);
         dispatchResults.push(smsResult);
         const isSmsSimulated = !!smsResult.errorMessage?.startsWith("SIMULATED:");
         const smsDeliveryStatus = isSmsSimulated ? "SENT_SIMULATED" : (smsResult.status.includes("SENT") ? "SENT" : (smsResult.status.includes("SUPPRESSED") ? "SUPPRESSED" : "FAILED"));
@@ -843,7 +884,7 @@ export async function processFailedPayment(
     eventId,
     failureClass,
     probability,
-    action: decideOutput.chosen.action,
+    action: banditSelection?.action || decideOutput.chosen.action,
     isSuspicious,
     suspicionReasons,
     credibilityScore: credResult.score,
@@ -857,13 +898,15 @@ export async function processFailedPayment(
 
 export async function recordSuccessfulPayment(
   client: Client,
-  params: {
-    razorpayPaymentId: string;
-    razorpayOrderId: string;
-    customerProfileId: string;
-    amountPaise: number;
-    productName: string;
-    nowMs: number;
+  rawParams: {
+    razorpayPaymentId?: string;
+    razorpayOrderId?: string;
+    paymentId?: string;
+    orderId?: string;
+    customerProfileId?: string;
+    amountPaise?: number;
+    productName?: string;
+    nowMs?: number;
     paymentMethod?: string;
     cardLast4?: string;
     cardNetwork?: string;
@@ -871,10 +914,38 @@ export async function recordSuccessfulPayment(
     cardType?: string;
     vpa?: string;
     bankCode?: string;
+    eventId?: string;
+    recoveredVia?: string;
   },
 ): Promise<string> {
-  const nowUtc = isoUtc(params.nowMs);
-  const eventId = `evt_${params.nowMs}_${createHash("sha256").update(`${params.razorpayPaymentId}${params.nowMs}`).digest("hex").slice(0, 8)}`;
+  const nowMs = rawParams.nowMs ?? Date.now();
+  const nowUtc = isoUtc(nowMs);
+  const razorpayPaymentId = rawParams.razorpayPaymentId || rawParams.paymentId || `pay_succ_${nowMs}`;
+  const razorpayOrderId = rawParams.razorpayOrderId || rawParams.orderId || `order_succ_${nowMs}`;
+  const customerProfileId = rawParams.customerProfileId || `cust_${nowMs}`;
+  const amountPaise = Number(rawParams.amountPaise) || 0;
+  const productName = rawParams.productName || "Standard Plan";
+
+  const params = {
+    ...rawParams,
+    nowMs,
+    nowUtc,
+    razorpayPaymentId,
+    razorpayOrderId,
+    customerProfileId,
+    amountPaise,
+    productName,
+  };
+
+  const eventId = `evt_${nowMs}_${createHash("sha256").update(`${razorpayPaymentId}${nowMs}`).digest("hex").slice(0, 8)}`;
+
+  // Ensure customer profile exists to satisfy foreign key constraints
+  try {
+    await client.execute({
+      sql: `INSERT OR IGNORE INTO customer_profiles (id, name, created_at_utc) VALUES (?, 'Customer', ?)`,
+      args: [params.customerProfileId, nowUtc],
+    });
+  } catch {}
 
   // Fetch customer profile for snapshot
   const custResult = await client.execute({
@@ -883,28 +954,40 @@ export async function recordSuccessfulPayment(
   });
   const customer = custResult.rows[0] as any;
 
-  let existingFailed;
-  try {
-    existingFailed = await client.execute({
-      sql: `SELECT id, bandit_action, bandit_context_json FROM live_payment_events
-            WHERE (customer_profile_id = ? OR razorpay_order_id = ?) AND status = 'failed'
-            ORDER BY created_at_utc DESC LIMIT 1`,
-      args: [params.customerProfileId, params.razorpayOrderId],
-    });
-  } catch (err: any) {
-    if (err?.message?.includes("bandit_action")) {
+  let existingFailed: any;
+  if (params.eventId) {
+    try {
       existingFailed = await client.execute({
-        sql: `SELECT id FROM live_payment_events
+        sql: `SELECT id, bandit_action, bandit_context_json FROM live_payment_events
+              WHERE id = ? AND status = 'failed' LIMIT 1`,
+        args: [params.eventId],
+      });
+    } catch {}
+  }
+
+  if (!existingFailed || existingFailed.rows.length === 0) {
+    try {
+      existingFailed = await client.execute({
+        sql: `SELECT id, bandit_action, bandit_context_json FROM live_payment_events
               WHERE (customer_profile_id = ? OR razorpay_order_id = ?) AND status = 'failed'
               ORDER BY created_at_utc DESC LIMIT 1`,
         args: [params.customerProfileId, params.razorpayOrderId],
       });
-    } else {
-      throw err;
+    } catch (err: any) {
+      if (err?.message?.includes("bandit_action")) {
+        existingFailed = await client.execute({
+          sql: `SELECT id FROM live_payment_events
+                WHERE (customer_profile_id = ? OR razorpay_order_id = ?) AND status = 'failed'
+                ORDER BY created_at_utc DESC LIMIT 1`,
+          args: [params.customerProfileId, params.razorpayOrderId],
+        });
+      } else {
+        throw err;
+      }
     }
   }
 
-  if (existingFailed.rows.length > 0) {
+  if (existingFailed && existingFailed.rows.length > 0) {
     const existingId = String(existingFailed.rows[0].id);
     const banditAction = existingFailed.rows[0].bandit_action ? String(existingFailed.rows[0].bandit_action) : null;
     const banditContextJson = existingFailed.rows[0].bandit_context_json ? String(existingFailed.rows[0].bandit_context_json) : null;

@@ -56,14 +56,10 @@ describe("Phase 4 / Task 7.4 (UI-19): Multi-Domain Executive Command Cockpit", (
       expect(html).toContain("0–15 Days (Current)");
       expect(html).toContain("60+ Days (Critical)");
 
-      // Optimizer & Bank Matrix proofs
-      expect(html).toContain("Razorpay Optimizer Tier-0 In-Flight Gateway & Bank Health Matrix");
-      expect(html).toContain("Top 4 Indian Issuer Bank Switch Real-Time Telemetry");
-      expect(html).toContain("Evaluate Inter-Bank Circuit Breaker");
-
-      // Interactive WhatsApp Simulator proofs (Task 7.5 / WHA-20)
-      expect(html).toContain("Meta WhatsApp 2-Way Quick-Reply Simulator");
-      expect(html).toContain("simulateWhatsAppClick");
+      // Optimizer & Platform Failure Analytics proofs
+      expect(html).toContain("Razorpay Optimizer Tier-0 In-Flight Gateway Routing Matrix");
+      expect(html).toContain("Platform Checkout Rail & Failure Analytics");
+      expect(html).toContain("Evaluate Rail Fallback & Triage");
     });
   });
 

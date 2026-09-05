@@ -66,16 +66,16 @@ export function detectHinglish(text: string): boolean {
   if (!text) return false;
   const upper = text.toUpperCase();
   const markers = [
-    "PAISE", "KAT", "GAYE", "BHAI", "BHAIYA", "KYA", "HUA", "KAREIN", "HAI", "NAHI", "MERI",
-    "MERA", "KAL", "PAY", "KARUNGA", "DEKH", "BATAIYE", "KAB", "HO", "DISCOUNT",
+    "PAISA", "PAISE", "KAT", "GAYA", "GAYI", "GAYE", "BHAI", "BHAIYA", "KYA", "HUA", "KAREIN", "HAI", "NAHI", "MERI",
+    "MERA", "MERE", "KAL", "PAY", "KARUNGA", "DUNGA", "DENGE", "AAYEGI", "AAYEGA", "DEKH", "BATAIYE", "KAB", "HO", "DISCOUNT",
     "MILEGA", "KITNA", "CHAHIYE", "YAAR", "KUCH", "KAM", "KARO", "ROK", "DO", "SHIKAYAT",
-    "DOKHA", "MEHNGA", "AGLE", "HAFTE"
+    "DOKHA", "MEHNGA", "AGLE", "HAFTE", "PARSO", "TAB"
   ];
   let matches = 0;
   for (const m of markers) {
     if (upper.includes(m)) matches++;
   }
-  return matches >= 2 || (matches >= 1 && (upper.includes("BHAI") || upper.includes("PAISE") || upper.includes("KYA")));
+  return matches >= 2 || (matches >= 1 && (upper.includes("BHAI") || upper.includes("PAISE") || upper.includes("PAISA") || upper.includes("KYA")));
 }
 
 export function classifyConversationalIntent(text: string, nowMs: number = Date.now()): IntentClassificationResult {
@@ -98,10 +98,13 @@ export function classifyConversationalIntent(text: string, nowMs: number = Date.
     upper.includes("LEGAL") ||
     upper.includes("COMPLAINT") ||
     upper.includes("TALK TO HUMAN") ||
+    upper.includes("HUMAN") ||
     upper.includes("AGENT") ||
     upper.includes("SHIKAYAT") ||
     upper.includes("DOKHA") ||
-    upper.includes("FROD")
+    upper.includes("FROD") ||
+    upper.includes("BAAT KARAO") ||
+    upper.includes("BAAT KARWAO")
   ) {
     return { intent: "HUMAN_DISPUTE", confidence: 0.95 };
   }
@@ -141,6 +144,8 @@ export function classifyConversationalIntent(text: string, nowMs: number = Date.
     upper.includes("AFTER 5TH") ||
     upper.includes("NEXT MONTH") ||
     upper.includes("KAL PAY") ||
+    upper.includes("KAL PAYMENT") ||
+    upper.includes("KAL SALARY") ||
     upper.includes("PARSO") ||
     upper.includes("AGLE HAFTE") ||
     upper.includes("BAAD ME")
@@ -163,6 +168,11 @@ export function classifyConversationalIntent(text: string, nowMs: number = Date.
     upper.includes("ISSUE") ||
     upper.includes("WHY") ||
     upper.includes("PAISE KAT") ||
+    upper.includes("PAISA KAT") ||
+    upper.includes("PAISA CUT") ||
+    upper.includes("BALANCE CUT") ||
+    upper.includes("KAT GAYA") ||
+    upper.includes("CUT HO GAYA") ||
     upper.includes("KYA HUA") ||
     upper.includes("KYU FAIL")
   ) {
@@ -186,10 +196,11 @@ export function classifyConversationalIntent(text: string, nowMs: number = Date.
 }
 
 export async function callGroqAgentLoop(
-  userText: string,
-  context: ToolExecutionContext,
-  recentEvent: any,
-  options: { apiKey?: string; timeoutMs?: number; nowMs?: number; baseUrl?: string } = {},
+  userTextOrProfileId: string,
+  contextOrEventId: any,
+  recentEventOrUserText?: any,
+  optionsOrClient?: any,
+  optionalNowMs?: number,
 ): Promise<{
   replyText: string;
   intent: ConversationalIntent;
@@ -200,6 +211,33 @@ export async function callGroqAgentLoop(
   discountOfferedPercent?: number;
   recoveryUrl?: string;
 } | null> {
+  let userText: string;
+  let context: ToolExecutionContext;
+  let recentEvent: any;
+  let options: { apiKey?: string; timeoutMs?: number; nowMs?: number; baseUrl?: string } = {};
+
+  if (typeof recentEventOrUserText === "string") {
+    // Invoked as (customerProfileId, eventId, userText, client, nowMs)
+    const customerProfileId = userTextOrProfileId;
+    const eventId = contextOrEventId;
+    userText = recentEventOrUserText;
+    const client = optionsOrClient;
+    const nowMs = optionalNowMs ?? Date.now();
+    context = {
+      client,
+      eventId,
+      customerProfileId,
+      originalAmountPaise: 250000,
+      nowMs,
+    };
+    recentEvent = null;
+    options = { nowMs };
+  } else {
+    userText = userTextOrProfileId;
+    context = contextOrEventId;
+    recentEvent = recentEventOrUserText;
+    options = optionsOrClient ?? {};
+  }
   const apiKey = options.apiKey ?? process.env.GROQ_API_KEY;
   if (!apiKey) return null;
 
@@ -371,12 +409,21 @@ export async function callGroqAgentLoop(
 }
 
 export async function processInboundCustomerMessage(
-  client: Client,
-  message: InboundMessage,
+  clientOrMessage: any,
+  messageOrClient: any,
   options: { baseUrl?: string; nowMs?: number } = {},
 ): Promise<ConversationalAgentReply> {
-  const nowMs = options.nowMs ?? Date.now();
-  const from = message.from.trim();
+  let client: Client;
+  let message: InboundMessage;
+  if (clientOrMessage && typeof clientOrMessage.execute === "function") {
+    client = clientOrMessage;
+    message = messageOrClient;
+  } else {
+    message = clientOrMessage;
+    client = messageOrClient;
+  }
+  const nowMs = (message as any)?.nowMs ?? options.nowMs ?? Date.now();
+  const from = (message?.from || "").trim();
   const isPhone = !from.includes("@");
   const phone = isPhone ? from : undefined;
   const email = !isPhone ? from : undefined;

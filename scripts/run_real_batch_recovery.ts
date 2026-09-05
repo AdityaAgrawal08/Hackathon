@@ -77,7 +77,12 @@ export async function runRealBatchRecovery(
 
   const transactionsSummary: BatchRecoveryMetrics["transactionsSummary"] = [];
 
+  let currentSimTime = startTime;
+
   for (let i = 1; i <= batchSize; i++) {
+    currentSimTime += 5000;
+    const txFailTime = currentSimTime;
+
     const scenario = FAILURE_SCENARIOS[(i - 1) % FAILURE_SCENARIOS.length]!;
     const bank = INDIAN_BANKS[(i - 1) % INDIAN_BANKS.length]!;
     const amountPaise = 50_000 + ((i * 37) % 450) * 10_000; // ₹500 to ₹5,000
@@ -107,7 +112,7 @@ export async function runRealBatchRecovery(
         customerEmail,
         productName: `Premium Subscription Pack #${(i % 4) + 1}`,
       },
-      { baseUrl, nowMs: startTime + i * 1000 },
+      { baseUrl, nowMs: txFailTime },
     );
 
     // 2. Determine recovery outcome based on action and recovery propensity
@@ -129,9 +134,11 @@ export async function runRealBatchRecovery(
       // Calculate latency (typically 45s to 300s under 1-Tap UPI and quick alerts)
       const latency = 45 + ((i * 17) % 240);
       totalLatencySeconds += latency;
+      currentSimTime += latency * 1000;
+      const txRecoverTime = currentSimTime;
 
       // Calculate MDR Arbitrage (e.g. Card 1.9% -> UPI 0.0% saves 1.9% of GMV)
-      if (scenario.method === "card" && processResult.action.includes("UPI")) {
+      if (scenario.method === "card" && (processResult.action.includes("UPI") || String(processResult.banditSelection?.action || "").includes("UPI"))) {
         mdrArbitrageSavingsPaise += Math.round(amountPaise * 0.019);
       }
 
@@ -146,6 +153,7 @@ export async function runRealBatchRecovery(
         recoveredVia: processResult.action,
         customerProfileId: `prof_cust_${customerPhone}`,
         eventId: processResult.eventId,
+        nowMs: txRecoverTime,
       });
     }
 
@@ -185,7 +193,7 @@ export async function runRealBatchRecovery(
     workingCapitalFormatted: formatINR(paise(workingCapitalSavedPaise)),
     avgRecoveryLatencySeconds,
     auditChainValid: chainAudit.valid,
-    auditEntriesCount: chainAudit.count,
+    auditEntriesCount: (chainAudit as any).totalEntries ?? (chainAudit as any).count ?? 0,
     completedAtUtc: new Date().toISOString(),
     transactionsSummary,
   };

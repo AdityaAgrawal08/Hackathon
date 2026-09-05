@@ -150,27 +150,32 @@ describe("Aggressive Full System Checkup: Web & Security Validation", () => {
     });
 
     it("persists and verifies SHA-256 cryptographic audit ledger chain", async () => {
+      const { createClient } = await import("@libsql/client");
+      const { runMigrations } = await import("../../packages/core/src/db/migrate.js");
+      const testClient = createClient({ url: ":memory:" });
+      await runMigrations(testClient);
+
       const entityId = `entity_checkup_${Date.now()}`;
       const { appendAuditLedger, verifyAuditLedgerChain } = await import(
         "../../packages/core/src/ledger/audit_ledger.js"
       );
 
       // Append two entries
-      await appendAuditLedger(dbClient, {
+      await appendAuditLedger(testClient, {
         entityId,
         eventType: "DISPATCH_PACED",
         actor: "RECOVERY_AGENT",
         payload: { channel: "WHATSAPP", template: "smart_collect" },
       });
 
-      await appendAuditLedger(dbClient, {
+      await appendAuditLedger(testClient, {
         entityId,
         eventType: "PAYMENT_COMPLETED",
         actor: "CUSTOMER_PORTAL",
         payload: { paymentMethod: "UPI_INTENT", rzpPaymentId: "pay_checkup_123" },
       });
 
-      const verification = await verifyAuditLedgerChain(dbClient);
+      const verification = await verifyAuditLedgerChain(testClient);
       expect(verification.valid).toBe(true);
       expect(verification.totalEntries).toBeGreaterThanOrEqual(2);
     });

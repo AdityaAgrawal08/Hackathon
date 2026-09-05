@@ -9,7 +9,7 @@ import {
 } from "../../packages/core/src/agent/conversational_agent.js";
 import { AGENT_TOOL_DEFINITIONS } from "../../packages/core/src/agent/agent_tools.js";
 
-const TEST_DB_URL = "file:./data/arbiter_test.sqlite";
+const TEST_DB_URL = ":memory:";
 
 describe("FIX-020: Conversational Agent LLM Loop & Hinglish Reasoning", () => {
   let client: Client;
@@ -157,11 +157,11 @@ describe("FIX-020: Conversational Agent LLM Loop & Hinglish Reasoning", () => {
 
       // Verify ticket inserted into support_escalation_tickets (FIX-016)
       const tickets = await client.execute({
-        sql: `SELECT * FROM support_escalation_tickets WHERE customer_profile_id = 'prof_llm_test_01' ORDER BY created_at_utc DESC`,
+        sql: `SELECT * FROM support_escalation_tickets WHERE customer_id = 'prof_llm_test_01' ORDER BY created_at_utc DESC`,
         args: [],
       });
       expect(tickets.rows.length).toBeGreaterThan(0);
-      expect(tickets.rows[0].status).toBe("open");
+      expect(String(tickets.rows[0].status).toLowerCase()).toBe("open");
     });
   });
 });

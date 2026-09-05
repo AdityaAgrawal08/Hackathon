@@ -318,15 +318,6 @@
       <!-- Method row -->
       <div class="method-row" id="method-row"></div>
 
-      <!-- Alert banner -->
-      <div class="alert-banner" id="alert-banner">
-        <div class="alert-text" id="alert-text"></div>
-        <div class="alert-actions">
-          <button class="alert-btn btn-view" onclick="showAlerts()">Review Now</button>
-          <button class="alert-btn btn-dismiss" onclick="dismissAlert()">Dismiss</button>
-        </div>
-      </div>
-
       <!-- Customer details popup -->
       <div id="customer-details" style="display:none;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
@@ -348,12 +339,6 @@
         <div style="display: flex; gap: 8px;">
           <button class="analysis-btn" style="background: #2563eb; font-size: 12px;" onclick="switchTab('behavioral-memory')">📊 View Behavioral Memory & Priority Queue</button>
         </div>
-      </div>
-
-      <!-- Meta WhatsApp 2-Way Quick-Reply Simulator (Legacy Compatibility Proof / WHA-20) -->
-      <div style="display:none !important;" id="legacy-whatsapp-sim">
-        <strong>Meta WhatsApp 2-Way Quick-Reply Simulator:</strong>
-        <button onclick="simulateWhatsAppClick('BTN_1_TAP_UPI')">1-Tap UPI</button>
       </div>
 
       <!-- Failed Payments Table -->
@@ -385,8 +370,8 @@
                 <th>Method</th>
                 <th>Diagnosis & What Happened</th>
                 <th>Informed</th>
-                <th>AI Action (Autonomous)</th>
-                <th>Actions</th>
+                <th>Autonomous Recovery Status</th>
+                <th>Audit Ledger Proof</th>
               </tr>
             </thead>
             <tbody id="failed-body"></tbody>
@@ -647,11 +632,11 @@
       </div>
     </div>
 
-    <!-- Razorpay Optimizer & Bank Switch Matrix -->
+    <!-- Razorpay Optimizer & Routing Analytics Matrix -->
     <div class="tab-panel" id="panel-bank-matrix">
       <div class="hero-banner" style="border-left: 4px solid #c084fc;">
         <div class="hero-left">
-          <h2>Razorpay Optimizer Tier-0 In-Flight Gateway & Bank Health Matrix</h2>
+          <h2>Razorpay Optimizer Tier-0 In-Flight Gateway Routing Matrix</h2>
           <div class="hero-number" id="opt-cogs-saved">₹0.00</div>
           <div class="hero-sub">Merchant Channel COGS Saved via Zero-Touch In-Flight Acquirer Auto-Cascades</div>
         </div>
@@ -672,9 +657,9 @@
       </div>
 
       <div style="margin-bottom:12px;">
-        <h3 style="font-size:15px;font-weight:700;margin-bottom:4px;color:#f1f5f9;">Top 4 Indian Issuer Bank Switch Real-Time Telemetry</h3>
-        <p style="font-size:11px;color:#94a3b8;line-height:1.4;">
-          <span style="color:#38bdf8;font-weight:600;">ℹ️ Platform-Inferred Telemetry:</span> Aggregated from 5-minute rolling checkout telemetry across platform traffic. (Indian banks do not provide external switch uptime APIs; health is inferred from live checkout cohorts).
+        <h3 style="font-size:15px;font-weight:700;margin-bottom:4px;color:#f1f5f9;">Platform Checkout Rail & Failure Analytics</h3>
+        <p style="font-size:12px;color:#94a3b8;line-height:1.4;">
+          Aggregated checkout performance & failure distribution across payment methods based on platform transaction events.
         </p>
       </div>
       <div class="bank-cards-grid" id="bank-cards-container">
@@ -683,17 +668,17 @@
 
       <div class="sim-bar">
         <div style="display:flex;align-items:center;gap:10px;">
-          <strong style="font-size:13px;color:#f8fafc;">Test Bank Switch Steering:</strong>
-          <input type="text" id="vpa-test-input" class="sim-input" placeholder="e.g. arjun@okhdfcbank or SBIN0001234" value="arjun@okhdfcbank">
+          <strong style="font-size:13px;color:#f8fafc;">Analyze Checkout Rail Triage:</strong>
+          <input type="text" id="vpa-test-input" class="sim-input" placeholder="e.g. customer@okhdfcbank or SBIN0001234" value="customer@okhdfcbank">
         </div>
-        <button class="analysis-btn" onclick="evaluateVpaSteering()">Evaluate Inter-Bank Circuit Breaker</button>
+        <button class="analysis-btn" onclick="evaluateVpaSteering()">Evaluate Rail Fallback & Triage</button>
       </div>
       <div id="vpa-steering-result" style="display:none;margin-bottom:20px;padding:14px;border-radius:8px;background:#1e293b;border:1px solid #334155;"></div>
 
       <div class="table-card">
         <div class="table-card-header">
-          <div class="table-title">National Payment Rails Composite Health (NPCI Feed)</div>
-          <div style="font-size:12px;color:#64748b;">Simulated peak-hour rail stress models calibrated to NPCI benchmarks</div>
+          <div class="table-title">Payment Failure Root Cause Distribution</div>
+          <div style="font-size:12px;color:#64748b;">Aggregated checkout failure breakdown across technical, liquidity, and bank decline categories</div>
         </div>
         <table class="rails-table">
           <thead>
@@ -805,12 +790,12 @@
       </div>
     </div>
 
-    <!-- 2-Way Conversational Recovery Simulator Panel (FIX-020, FIX-021) -->
+    <!-- Customer Recovery Dialogue Stream & Regulatory Audit (FIX-020, FIX-021) -->
     <div class="tab-panel" id="panel-conversational">
       <div style="margin-bottom:16px;">
-        <h2 style="font-size:18px;font-weight:600;color:#f8fafc;">Customer Recovery Dialogue & Agent Compliance Audit</h2>
+        <h2 style="font-size:18px;font-weight:600;color:#f8fafc;">Customer Recovery Dialogue Stream & Regulatory Audit</h2>
         <p style="font-size:12px;color:#94a3b8;margin-top:4px;">
-          Live audit log of active customer recovery interactions across Web Recovery Assistant, WhatsApp, and SMS channels. Includes a merchant diagnostic webhook emulator to verify agent decision bounds and safety guardrails.
+          Real-time audit stream of automated customer recovery dialogues across Web Recovery Assistant and SMS/Email messaging. Includes diagnostic webhook emulator for merchant compliance auditing.
         </p>
       </div>
 
@@ -860,7 +845,7 @@
         <div style="background:#0f172a;border:1px solid #1e293b;border-radius:12px;padding:20px;display:flex;flex-direction:column;">
           <div style="margin-bottom:14px;">
             <h3 style="font-size:14px;color:#34d399;margin-bottom:4px;">💬 Live Agent Dialogue & Compliance Proofs</h3>
-            <p style="font-size:11px;color:#94a3b8;">Real-time feed of customer dialogues from Web Recovery Assistant, SMS, and WhatsApp.</p>
+            <p style="font-size:11px;color:#94a3b8;">Real-time feed of customer dialogues from Web Recovery Assistant and SMS/Email messaging.</p>
           </div>
 
           <div id="conv-chat-stream" style="flex:1;min-height:260px;max-height:360px;overflow-y:auto;background:#020617;border:1px solid #1e293b;border-radius:8px;padding:14px;display:flex;flex-direction:column;gap:12px;margin-bottom:14px;">
@@ -1137,16 +1122,6 @@
     </div>
   </div>
 
-  <!-- Alerts Modal -->
-  <div class="modal-overlay" id="alerts-modal">
-    <div class="modal">
-      <div class="modal-header">
-        <h2>Suspicious Activity Queue</h2>
-        <button class="modal-close" onclick="closeAlerts()">✕</button>
-      </div>
-      <div class="modal-body" id="alerts-body"></div>
-    </div>
-  </div>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
   <script>
@@ -1261,10 +1236,7 @@
           <td>${informed}</td>
           <td>${action}</td>
           <td>
-            <button onclick="copyCustomerRecoveryLink('${safeId}')" class="audit-link" style="background:#1e293b;border:1px solid #334155;color:#60a5fa;margin-right:6px;cursor:pointer;padding:2px 8px;border-radius:4px;font-size:11px;">📋 Copy Link</button>
-            <a href="/recover/${safeId}?preview=vendor" target="_blank" class="audit-link" style="color:#94a3b8;text-decoration:none;margin-right:6px;font-size:11px;">👁️ Customer View</a>
-            <span class="audit-link" onclick="openConvSimulatorForCustomer('${safeId}', '${safeContact}', '${safeName}')" style="color:#34d399;margin-right:6px;cursor:pointer;">💬 Audit Chat</span>
-            <span class="audit-link" onclick="openAuditModal('${safeId}')">🛡️ Audit</span>
+            <span class="audit-link" onclick="openAuditModal('${safeId}')" style="font-family:monospace;font-size:11px;color:#94a3b8;cursor:pointer;">🛡️ ${safeId ? safeId.slice(0, 16) + '...' : 'Verified Ledger'}</span>
           </td>
         </tr>`;
       }).join('');
@@ -1389,61 +1361,7 @@
     }
 
     async function loadAlerts() {
-      try {
-        const res = await fetch('/api/vendor/alerts');
-        const data = await res.json();
-        const banner = document.getElementById('alert-banner');
-        const text = document.getElementById('alert-text');
-
-        if (data.length > 0) {
-          banner.classList.add('show');
-          text.innerHTML = `<strong>${data.length}</strong> suspicious transaction${data.length > 1 ? 's' : ''} require${data.length === 1 ? 's' : ''} your review`;
-          window._alerts = data;
-        } else {
-          banner.classList.remove('show');
-        }
-      } catch (e) {}
-    }
-
-    function showAlerts() {
-      const data = window._alerts || [];
-      const body = document.getElementById('alerts-body');
-      if (data.length === 0) { body.innerHTML = '<p style="color:#64748b">No suspicious transactions</p>'; }
-      else {
-        body.innerHTML = data.map(p => `
-          <div class="analysis-item" style="border-color:#7f1d1d;">
-            <div class="analysis-reason">Suspicious Transaction — ${escapeHtml(p.customer_name || 'Customer')}</div>
-            <div class="analysis-code">${escapeHtml(p.failure_code || 'RISK_FLAGGED')}</div>
-            <div class="analysis-meta">
-              <span class="amount">${formatINR(p.amount_paise)}</span>
-              <span class="pct">${formatTime(p.created_at_utc)}</span>
-            </div>
-            <div style="display:flex;gap:8px;margin-top:12px;">
-              <button class="alert-btn btn-view" style="background:#14532d;color:#86efac" onclick="decide('${escapeHtml(p.id)}','approved')">✓ Approve & Dispatch Outreach</button>
-              <button class="alert-btn btn-dismiss" style="border:1px solid #7f1d1d;color:#fca5a5" onclick="decide('${escapeHtml(p.id)}','rejected')">✕ Reject Fraud</button>
-            </div>
-          </div>
-        `).join('');
-      }
-      document.getElementById('alerts-modal').classList.add('show');
-    }
-
-    function closeAlerts() { document.getElementById('alerts-modal').classList.remove('show'); }
-    function dismissAlert() { document.getElementById('alert-banner').classList.remove('show'); }
-
-    async function decide(eventId, decision) {
-      try {
-        await fetch('/api/vendor/decision', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ eventId, decision }),
-        });
-        showToast(decision === 'approved' ? '✓ Transaction approved' : '✕ Transaction rejected', decision === 'approved' ? 'success' : 'error');
-        closeAlerts();
-        refreshAll();
-      } catch (e) {
-        showToast('Decision failed', 'error');
-      }
+      // Risk evaluation is fully autonomous via ARBITER STOPPING_RULES (RISK_STOP).
     }
 
     async function showAnalysis() {
@@ -2563,28 +2481,6 @@
       if (resultsDiv) resultsDiv.style.display = 'block';
     }
 
-    function openConvSimulatorForCustomer(eventId, contact, name) {
-      switchTab('conversational');
-      const fromInput = document.getElementById('conv-from-input');
-      const textInput = document.getElementById('conv-text-input');
-      if (fromInput) fromInput.value = (contact && contact !== '—') ? contact : '+919876500001';
-      if (textInput) textInput.value = `Hi, I was trying to purchase for ${name && name !== '—' ? name : 'my account'} and the payment failed. Can you help me complete it?`;
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-      showToast('Customer persona loaded into conversational simulator', 'info');
-    }
-
-    function copyCustomerRecoveryLink(eventId) {
-      const url = window.location.origin + '/recover/' + eventId;
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(url).then(() => {
-          showToast('✓ Customer 1-Tap recovery link copied to clipboard!', 'success');
-        }).catch(() => {
-          prompt('Customer recovery link for outreach:', url);
-        });
-      } else {
-        prompt('Customer recovery link for outreach:', url);
-      }
-    }
 
     function appendDialogueToDashboardStream(data) {
       const stream = document.getElementById('conv-chat-stream');

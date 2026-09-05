@@ -505,33 +505,33 @@
           <span>🛒</span> D2C Consumer E-Commerce
         </button>
         <button class="d-tab" id="tab-saas" onclick="switchDomain('saas')">
-          <span>⚡</span> SaaS Mandates (RBI 24h & 06:30 AM)
+          <span>⚡</span> SaaS Subscriptions (Autopay)
         </button>
         <button class="d-tab" id="tab-b2b" onclick="switchDomain('b2b')">
-          <span>🏢</span> B2B Receivables (2/10 Net 30 Terms)
+          <span>🏢</span> B2B Invoicing (Net 30)
         </button>
       </div>
       <div class="domain-desc" id="domain-desc">
-        Simulates consumer checkout drop-offs, abandoned carts, and 1-tap UPI intent recovery via Brevo Email and MSG91 SMS.
+        Fast, secure checkout with 1-tap UPI, cards, netbanking, and verified merchant protection.
       </div>
     </div>
   </div>
 
   <!-- Main Store Content -->
   <main class="container">
-    <h2 class="page-title" id="catalog-title">Select a Plan (D2C Consumer Checkout)</h2>
-    <p class="page-sub" id="catalog-sub">Choose any product below to simulate production checkout interception, fault recovery, and zero-drop economics.</p>
+    <h2 class="page-title" id="catalog-title">Select a Plan (Consumer Checkout)</h2>
+    <p class="page-sub" id="catalog-sub">Choose any product or plan below to proceed with secure checkout.</p>
 
     <!-- Products Grid -->
     <div class="products-grid" id="products-grid"></div>
 
-    <!-- Dual-Pane Checkout & Vendor Telemetry Console -->
+    <!-- Dual-Pane Checkout & Order Summary -->
     <div class="dual-pane" id="checkout-pane" style="display: none;">
       
       <!-- Left Column: Customer Form -->
       <div>
         <div class="pane-title">
-          <span>💳</span> Customer Checkout Configuration
+          <span>💳</span> Customer Checkout Details
         </div>
 
         <div id="selected-summary" style="background:#0a0f1d;border:1px solid #1e293b;border-radius:10px;padding:14px;margin-bottom:18px;"></div>
@@ -570,59 +570,51 @@
           <div style="display:flex; align-items:flex-start; gap:12px; margin-bottom:12px;">
             <span style="font-size:26px;">⚡</span>
             <div>
-              <div id="rec-title" style="font-weight:700; color:#f8fafc; font-size:15px;">Autonomous Recovery Intercepted</div>
-              <div id="rec-desc" style="font-size:13px; color:#94a3b8; margin-top:4px; line-height:1.4;">Payment was declined. A personalized recovery link has been dispatched to your email.</div>
+              <div id="rec-title" style="font-weight:700; color:#f8fafc; font-size:15px;">Payment Could Not Be Completed</div>
+              <div id="rec-desc" style="font-size:13px; color:#94a3b8; margin-top:4px; line-height:1.4;">Your payment was declined by your bank. Don't worry, your order is reserved.</div>
             </div>
           </div>
           <div style="display:flex; flex-wrap:wrap; gap:10px; margin-top:12px;">
             <a id="rec-link-btn" href="#" target="_blank" style="display:inline-flex; align-items:center; gap:6px; padding:10px 18px; background:#2563eb; color:#fff; border-radius:8px; font-weight:700; text-decoration:none; font-size:13px;">
-              💬 Chat with Recovery Assistant & Pay via 1-Tap UPI &rarr;
+              💬 View Recovery Options & Chat with Support &rarr;
             </a>
           </div>
         </div>
       </div>
 
-      <!-- Right Column: Vendor Intelligence & Real-Time Telemetry -->
+      <!-- Right Column: Customer Order Summary & Trust Guarantees -->
       <div class="telemetry-pane">
         <div>
           <div class="telemetry-header">
-            <span>🛡️</span> ARBITER Vendor Telemetry & Decision Engine
+            <span>🛍️</span> Order Summary & Guarantees
           </div>
 
           <div class="telemetry-item">
-            <div class="telemetry-label">Active Autonomous Agent</div>
-            <div class="telemetry-val blue" id="tel-agent">LinUCB Contextual Bandit (5×5 Ridge Inversion)</div>
+            <div class="telemetry-label">Selected Item</div>
+            <div class="telemetry-val blue" id="summary-product-name">Premium Annual Plan</div>
           </div>
 
           <div class="telemetry-item">
-            <div class="telemetry-label">Interception Latency</div>
-            <div class="telemetry-val green">&lt; 0.05 ms (Pure Deterministic Math)</div>
+            <div class="telemetry-label">Total Payable</div>
+            <div class="telemetry-val green" id="summary-total-price" style="font-size:20px;font-weight:700;">₹4,999.00</div>
+            <div style="color:#64748b;font-size:11px;margin-top:2px;">Inclusive of all applicable taxes</div>
           </div>
 
           <div class="telemetry-item">
-            <div class="telemetry-label">MDR Fee Arbitrage (UPI vs CC)</div>
-            <div class="telemetry-val green" id="tel-mdr">₹89.98 Preserved (1.8% Card vs 0% UPI)</div>
-          </div>
-
-          <div class="telemetry-item">
-            <div class="telemetry-label">Cryptographic Invariant</div>
-            <div class="telemetry-val" style="font-family:monospace;font-size:12px;color:#cbd5e1;" id="tel-audit">
-              SHA-256 Chained Hash Ledger
+            <div class="telemetry-label">Security & Rails</div>
+            <div class="telemetry-val" style="font-size:13px;color:#cbd5e1;display:flex;align-items:center;gap:6px;margin-top:4px;">
+              <span>🔒</span> 256-bit SSL Encrypted Checkout
             </div>
           </div>
 
-          <div class="telemetry-item">
-            <div class="telemetry-label">Regulatory Safeguards</div>
-            <div class="telemetry-val amber">
-              TRAI Quiet Hours (21:00-09:00 IST) + RBI 24h Advance Notice
+          <div class="telemetry-item" style="border-bottom:none;">
+            <div class="telemetry-label">Trust Badges</div>
+            <div style="display:flex;flex-direction:column;gap:6px;margin-top:6px;font-size:12px;color:#94a3b8;">
+              <div>✓ Verified Razorpay Gateway Rail</div>
+              <div>✓ Instant License & Account Provisioning</div>
+              <div>✓ 100% Secure Transaction Guarantee</div>
             </div>
           </div>
-        </div>
-
-        <div class="vendor-shortcut">
-          <a href="/dashboard" target="_blank">
-            <span>📊 Open Merchant Console in Side Tab</span> &rarr;
-          </a>
         </div>
       </div>
 
@@ -634,29 +626,29 @@
   <script>
     const DOMAIN_DATA = {
       d2c: {
-        title: "Select a Plan (D2C Consumer Checkout)",
-        sub: "Simulates consumer checkout drop-offs, abandoned carts, and 1-tap UPI intent recovery via Brevo Email and MSG91 SMS.",
-        badge: "Simulates consumer checkout drop-offs, abandoned carts & 1-tap recovery",
+        title: "Select a Plan (Consumer Checkout)",
+        sub: "Instant checkout activation with cards, UPI, netbanking, and split payment options.",
+        badge: "Official Razorpay Secure Rails",
         products: [
           {
             id: "prod_premium_plan",
             name: "Premium Annual Plan",
-            description: "Full suite access with priority processing and instant recovery guarantee.",
+            description: "Full platform access with priority processing and dedicated assistance.",
             pricePaise: 499900,
             icon: "💎",
             tag: "Best Value",
             badgeClass: "badge-blue",
-            features: ["Instant 1-Tap UPI Recovery", "0% Interest 3x Split EMI", "Brevo Email + MSG91 SMS Dispatch", "Zero Involuntary Drop-off"]
+            features: ["Priority Processing", "Full Platform Access", "24/7 Priority Support", "Instant Setup"]
           },
           {
             id: "prod_monthly_basic",
             name: "Monthly Basic",
-            description: "Essential features, billed monthly for developer workflows.",
+            description: "Essential features billed monthly for individual users and creators.",
             pricePaise: 99900,
             icon: "🚀",
             tag: "Starter",
             badgeClass: "badge-green",
-            features: ["Core In-Flight Routing", "Email + SMS Dunning", "Standard Bank Switch Fallback"]
+            features: ["Essential Features", "Billed Monthly", "Cancel Anytime", "Community Support"]
           },
           {
             id: "prod_team_license",
@@ -666,91 +658,91 @@
             icon: "👥",
             tag: "Popular",
             badgeClass: "badge-amber",
-            features: ["5 Teammate Seats", "Multi-Acquirer Cascading", "MDR Arbitrage Optimization"]
+            features: ["5 Teammate Seats", "Collaborative Workspace", "Priority Onboarding", "Shared Invoicing"]
           },
           {
             id: "prod_enterprise",
             name: "Enterprise (Custom)",
-            description: "High-volume custom gateway configuration with zero-downtime SLA.",
+            description: "High-volume configuration with dedicated SLA and custom enterprise controls.",
             pricePaise: 999900,
             icon: "🏢",
             tag: "Enterprise",
             badgeClass: "badge-blue",
-            features: ["Custom Acquirer Prioritization", "Dedicated Bank Circuit Tuning", "Unlimited Transactions"]
+            features: ["Dedicated Account Manager", "Custom SLA & Security", "Unlimited Transactions", "Custom Webhooks"]
           }
         ]
       },
       saas: {
-        title: "Select a Subscription (SaaS Mandate Auto-Debit)",
-        sub: "Simulates UPI Autopay / eNACH recurring debits with 06:30 AM IST liquidity retries and strict RBI 24h pre-debit notice.",
-        badge: "Simulates UPI Autopay / eNACH recurring debits with strict RBI 24h pre-debit notice",
+        title: "Select a Subscription (Recurring Billing)",
+        sub: "Flexible auto-pay recurring subscriptions with automated renewal receipts.",
+        badge: "Official Recurring Mandate Rails",
         products: [
           {
             id: "mandate_cloud_pro",
             name: "Cloud Infrastructure Pro",
-            description: "Monthly recurring UPI Autopay subscription for production cloud infrastructure.",
+            description: "Monthly recurring subscription for production cloud infrastructure.",
             pricePaise: 299900,
             icon: "⚡",
             tag: "UPI Autopay",
             badgeClass: "badge-blue",
-            features: ["06:30 AM Morning Liquidity Scheduler", "RBI 24-Hour Advance Notice SMS", "Zero Involuntary ARR Churn"]
+            features: ["Automated Renewal", "Advance Payment Notices", "Zero Service Interruptions", "Usage Dashboard"]
           },
           {
             id: "mandate_saas_annual",
             name: "SaaS Enterprise Mandate",
-            description: "Annual eNACH recurring mandate with multi-attempt grace period soft-lock.",
+            description: "Annual recurring mandate with priority SLA and enterprise compliance.",
             pricePaise: 1299900,
             icon: "🛡️",
             tag: "Annual eNACH",
             badgeClass: "badge-green",
-            features: ["Annual Autopay Agreement", "Automatic Retry Cascade", "Grace Period Retention Lock"]
+            features: ["Annual Autopay Agreement", "Priority Enterprise Access", "Dedicated Support", "Official GST Invoice"]
           },
           {
             id: "mandate_starter",
             name: "Micro-SaaS Starter Mandate",
-            description: "Fixed monthly subscription mandate with automated bank switch routing.",
+            description: "Fixed monthly subscription mandate with automated payment receipts.",
             pricePaise: 49900,
             icon: "✨",
             tag: "Micro-SaaS",
             badgeClass: "badge-amber",
-            features: ["Sub-₹1,000 Zero Surcharge", "Instant Autopay Registration", "Bank Switch Health Check"]
+            features: ["Flexible Monthly Billing", "Instant Setup", "Standard Support", "Automated Receipts"]
           }
         ]
       },
       b2b: {
-        title: "Select B2B Receivables (2/10 Net 30 Terms)",
-        sub: "Simulates corporate accounts receivable invoices, 2% early cash discounts, and automated DSO reduction.",
-        badge: "Simulates B2B corporate invoices, automated early settlement discounts & DSO chasers",
+        title: "Select B2B Receivables (Corporate Invoicing)",
+        sub: "Corporate accounts receivable invoices with instant digital settlement terms.",
+        badge: "Official Corporate Billing",
         products: [
           {
             id: "inv_software_retainer",
             name: "Enterprise Software Retainer",
-            description: "Net 30 invoice offering ₹3,000 instant cash discount if paid in 10 days.",
+            description: "Commercial invoice with early settlement terms and tax receipts.",
             pricePaise: 15000000,
             icon: "📜",
             tag: "2/10 Net 30",
             badgeClass: "badge-blue",
-            features: ["₹3,000 Early Settlement Discount", "DSO Reduced from 42d to 22d", "Automated SMS/Email AP Chaser"]
+            features: ["Early Settlement Terms", "Direct RTGS / NEFT / UPI", "Automated GST Receipts", "Commercial PO Matching"]
           },
           {
             id: "inv_infra_sla",
             name: "Dedicated Cloud SLA Invoice",
-            description: "High-ticket corporate invoice saving ₹8,500 on early settlement terms.",
+            description: "High-ticket corporate invoice with enterprise payment terms.",
             pricePaise: 42500000,
             icon: "🏛️",
             tag: "High Ticket",
             badgeClass: "badge-amber",
-            features: ["₹8,500 Early Cash Discount", "14% Working Capital Interest Saved", "Direct RTGS / NEFT Links"]
+            features: ["Dedicated Cloud SLA", "Enterprise Payment Rails", "Official Tax Invoicing", "Dedicated AP Support"]
           },
           {
             id: "inv_api_usage",
             name: "Monthly API Volume Invoicing",
-            description: "Corporate receivable with automated SMS/Email finance chaser.",
+            description: "Corporate receivable statement with automated invoice receipts.",
             pricePaise: 8500000,
             icon: "📈",
             tag: "Usage Billing",
             badgeClass: "badge-green",
-            features: ["Automated Statement of Account", "Interactive 1-Tap Settlement", "Multi-Contact AP Alerts"]
+            features: ["Itemized Usage Statement", "Corporate Payment Terms", "Audit-Ready Receipts", "Multi-Contact Billing"]
           }
         ]
       }
@@ -833,7 +825,7 @@
               ${p.features.map(f => `<li>${f}</li>`).join('')}
             </ul>
           </div>
-          <button class="card-btn">Select & Test Checkout</button>
+          <button class="card-btn">Select Plan</button>
         </div>
       `).join('');
     }
@@ -868,10 +860,11 @@
         btnText.textContent = `Proceed with Payment (${formatINR(selectedProduct.pricePaise)})`;
       }
 
-      // Update Vendor Telemetry Preview
-      const mdrSavings = Math.round(selectedProduct.pricePaise * 0.018);
-      document.getElementById('tel-mdr').textContent = `${formatINR(mdrSavings)} Preserved on UPI vs Credit Card`;
-      document.getElementById('tel-audit').textContent = `SHA-256 Ledger: #` + Math.random().toString(16).slice(2, 10).toUpperCase();
+      // Update Customer Order Summary
+      const summaryName = document.getElementById('summary-product-name');
+      const summaryPrice = document.getElementById('summary-total-price');
+      if (summaryName) summaryName.textContent = selectedProduct.name;
+      if (summaryPrice) summaryPrice.textContent = formatINR(selectedProduct.pricePaise);
 
       pane.scrollIntoView({ behavior: 'smooth' });
     }
@@ -1010,8 +1003,8 @@
             if (recUrl) {
               displayRecoveryBanner(
                 recUrl,
-                '⚡ Autonomous Recovery Intercepted (' + (resp.error?.code || 'DECLINED') + ')',
-                (failData.failureDescription || resp.error?.description || 'Payment was declined by the bank.') + ' Chat with our 24/7 AI recovery assistant to resolve issues, get discounts, or complete in 1-Tap via UPI:'
+                'Payment Could Not Be Completed',
+                (failData.failureDescription || resp.error?.description || 'Your payment was declined by your bank.') + ' Don\'t worry, your order is reserved. View recovery options or chat with support to complete:'
               );
             }
           } catch (fErr) {

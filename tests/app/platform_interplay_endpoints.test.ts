@@ -95,12 +95,14 @@ describe("TASK-007 & TASK-008: Platform Interplay Server Endpoints", () => {
   });
 
   describe("SaaS Recurring Subscription Mandates (UPI Autopay) Sequencer", () => {
+    const testSubId = `sub_test_${Date.now()}`;
+
     it("POST /api/subscriptions/fail schedules RBI 24h pre-debit notice for 06:30 AM IST", async () => {
       const res = await fetch(`${baseUrl}/api/subscriptions/fail`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          subscriptionId: "sub_test_001",
+          subscriptionId: testSubId,
           customerName: "Acme Analytics",
           customerPhone: "+919876500001",
           customerEmail: "billing@acme.com",
@@ -120,11 +122,11 @@ describe("TASK-007 & TASK-008: Platform Interplay Server Endpoints", () => {
       const listRes = await fetch(`${baseUrl}/api/subscriptions/mandates`);
       expect(listRes.status).toBe(200);
       const listData = (await listRes.json()) as any;
-      expect(listData.mandates.some((m: any) => m.id === "sub_test_001")).toBe(true);
+      expect(listData.mandates.some((m: any) => m.id === testSubId)).toBe(true);
     });
 
     it("POST /api/subscriptions/retry-now/:id marks mandate as recovered", async () => {
-      const res = await fetch(`${baseUrl}/api/subscriptions/retry-now/sub_test_001`, {
+      const res = await fetch(`${baseUrl}/api/subscriptions/retry-now/${testSubId}`, {
         method: "POST",
       });
 
